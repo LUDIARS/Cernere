@@ -257,27 +257,27 @@ async fn handle_client_message(
             action,
             payload,
         } => {
-            // モジュールデータのステート確認 → レスポンス
-            let module_state = state
-                .redis
-                .get_module_state(user_id, &module)
-                .await
-                .ok()
-                .flatten();
+            // コマンドハンドラにディスパッチ
+            let result =
+                crate::commands::dispatch(state, user_id, &module, &action, payload).await;
 
-            let response_payload = serde_json::json!({
-                "module": module,
-                "action": action,
-                "data_state": module_state,
-                "request_payload": payload,
-            });
-
-            let response = ServerMessage::ModuleResponse {
-                module,
-                action,
-                payload: response_payload,
-            };
-            send_message(sender, &response).await;
+            match result {
+                Ok(response_payload) => {
+                    let response = ServerMessage::ModuleResponse {
+                        module,
+                        action,
+                        payload: response_payload,
+                    };
+                    send_message(sender, &response).await;
+                }
+                Err(e) => {
+                    let err = ServerMessage::Error {
+                        code: "command_error".into(),
+                        message: e.to_string(),
+                    };
+                    send_message(sender, &err).await;
+                }
+            }
         }
 
         ClientMessage::Relay { target, payload } => {

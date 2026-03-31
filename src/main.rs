@@ -5,6 +5,7 @@ use tracing_subscriber::EnvFilter;
 
 mod app_state;
 mod auth;
+mod commands;
 mod config;
 mod db;
 mod env_auth;
