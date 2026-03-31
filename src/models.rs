@@ -105,6 +105,143 @@ impl From<User> for UserResponse {
     }
 }
 
+// ── 組織 (Organization) ────────────────────────────
+
+/// 組織
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct Organization {
+    pub id: Uuid,
+    pub name: String,
+    pub slug: String,
+    pub description: String,
+    pub created_by: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// 組織メンバー
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct OrganizationMember {
+    pub organization_id: Uuid,
+    pub user_id: Uuid,
+    pub role: String, // owner / admin / member
+    pub joined_at: DateTime<Utc>,
+}
+
+/// 組織メンバー（ユーザー情報付き）
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct OrganizationMemberWithUser {
+    pub organization_id: Uuid,
+    pub user_id: Uuid,
+    pub role: String,
+    pub joined_at: DateTime<Utc>,
+    pub login: String,
+    pub display_name: String,
+    pub avatar_url: String,
+    pub email: Option<String>,
+    pub last_login_at: Option<DateTime<Utc>>,
+}
+
+/// 組織レスポンス
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationResponse {
+    pub id: String,
+    pub name: String,
+    pub slug: String,
+    pub description: String,
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<Organization> for OrganizationResponse {
+    fn from(o: Organization) -> Self {
+        Self {
+            id: o.id.to_string(),
+            name: o.name,
+            slug: o.slug,
+            description: o.description,
+            created_by: o.created_by.to_string(),
+            created_at: o.created_at.to_rfc3339(),
+            updated_at: o.updated_at.to_rfc3339(),
+        }
+    }
+}
+
+/// メンバーレスポンス
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberResponse {
+    pub user_id: String,
+    pub role: String,
+    pub joined_at: String,
+    pub login: String,
+    pub display_name: String,
+    pub avatar_url: String,
+    pub email: Option<String>,
+    pub last_login_at: Option<String>,
+}
+
+impl From<OrganizationMemberWithUser> for MemberResponse {
+    fn from(m: OrganizationMemberWithUser) -> Self {
+        Self {
+            user_id: m.user_id.to_string(),
+            role: m.role,
+            joined_at: m.joined_at.to_rfc3339(),
+            login: m.login,
+            display_name: m.display_name,
+            avatar_url: m.avatar_url,
+            email: m.email,
+            last_login_at: m.last_login_at.map(|t| t.to_rfc3339()),
+        }
+    }
+}
+
+// ── プロジェクト定義 ───────────────────────────────
+
+/// プロジェクト定義 (Ars, Schedula などのプロジェクトタイプ)
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ProjectDefinition {
+    pub id: Uuid,
+    pub code: String,
+    pub name: String,
+    pub data_schema: serde_json::Value,
+    pub commands: serde_json::Value,
+    pub plugin_repository: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// プロジェクト定義レスポンス
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDefinitionResponse {
+    pub id: String,
+    pub code: String,
+    pub name: String,
+    pub data_schema: serde_json::Value,
+    pub commands: serde_json::Value,
+    pub plugin_repository: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<ProjectDefinition> for ProjectDefinitionResponse {
+    fn from(p: ProjectDefinition) -> Self {
+        Self {
+            id: p.id.to_string(),
+            code: p.code,
+            name: p.name,
+            data_schema: p.data_schema,
+            commands: p.commands,
+            plugin_repository: p.plugin_repository,
+            created_at: p.created_at.to_rfc3339(),
+            updated_at: p.updated_at.to_rfc3339(),
+        }
+    }
+}
+
 /// JWT クレーム
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JwtClaims {
