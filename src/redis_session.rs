@@ -13,6 +13,13 @@ pub struct RedisClient {
 }
 
 impl RedisClient {
+    /// 内部 ConnectionManager へのアクセス（session_state 等から利用）
+    pub fn conn(&self) -> &ConnectionManager {
+        &self.conn
+    }
+}
+
+impl RedisClient {
     pub async fn new(redis_url: &str) -> std::result::Result<Self, String> {
         let client = redis::Client::open(redis_url)
             .map_err(|e| format!("Redis client creation failed: {}", e))?;
