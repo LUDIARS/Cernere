@@ -57,57 +57,63 @@ Layer 4: リソース所有権・ロールチェック (403)
 │   ├── error.rs           # エラー型
 │   ├── redis_session.rs   # Redis クライアント
 │   └── env_auth.rs        # 認証設定ビルダー
+├── packages/
+│   └── env-cli/           # Infisical シークレット管理 CLI
 ├── frontend/              # React フロントエンド
 ├── migrations/            # SQL マイグレーション
 ├── docs/                  # 設計ドキュメント
 ├── spec/                  # セキュリティ仕様
+├── env-cli.config.ts      # env-cli プロジェクト設定
 └── docker-compose.yaml    # PostgreSQL + Redis
 ```
 
 ## セットアップ
 
-### 1. 環境変数
+環境変数は [Infisical](https://infisical.com) で管理しています。初期セットアップには `env-cli` を使用します。
+
+### 1. 依存インストール
 
 ```bash
-cp .env.example .env
+npm install
 ```
 
-`.env` を編集し、必要な認証情報を設定してください。
+### 2. Infisical 設定（初回のみ）
 
 ```bash
-DATABASE_URL=postgres://cernere:cernere@localhost:5432/cernere
-REDIS_URL=redis://127.0.0.1:6379
-LISTEN_ADDR=0.0.0.0:8080
-FRONTEND_URL=http://localhost:5173
-
-# JWT (本番環境では必ず変更)
-JWT_SECRET=cernere-dev-secret-change-in-production
-
-# GitHub OAuth (optional)
-GITHUB_CLIENT_ID=
-GITHUB_CLIENT_SECRET=
-GITHUB_REDIRECT_URI=http://localhost:8080/auth/github/callback
-
-# Google OAuth (optional)
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-GOOGLE_REDIRECT_URI=http://localhost:8080/auth/google/callback
-
-# AWS MFA (optional)
-AWS_REGION=ap-northeast-1
-AWS_SNS_ENABLED=false
-AWS_SES_ENABLED=false
-AWS_SES_FROM_EMAIL=noreply@example.com
-APP_NAME=Cernere
+npm run env:setup
 ```
 
-### 2. PostgreSQL・Redis の起動
+対話形式で Infisical の認証情報（Project ID / Client ID / Client Secret）を入力します。
+設定は `.env.secrets` に保存されます（gitignore 済み）。
+
+### 3. 環境変数の生成
+
+```bash
+npm run env:gen
+```
+
+Infisical からシークレットを取得し、Docker Compose / アプリケーション用の `.env` を自動生成します。
+
+> **Infisical を使わない場合**: `cp .env.example .env` で手動設定も可能です。
+
+#### env-cli コマンド一覧
+
+| コマンド | 説明 |
+|---|---|
+| `npm run env:setup` | 対話形式で Infisical を設定 |
+| `npm run env:test` | 接続テスト |
+| `npm run env:gen` | Infisical → `.env` 生成 |
+| `npm run env:list` | シークレット一覧 |
+| `npm run env:get -- <KEY>` | シークレット取得 |
+| `npm run env:set -- <KEY> <VALUE>` | シークレット作成/更新 |
+
+### 4. PostgreSQL・Redis の起動
 
 ```bash
 docker compose up -d
 ```
 
-### 3. ビルド・実行
+### 5. ビルド・実行
 
 ```bash
 cargo run
@@ -115,7 +121,7 @@ cargo run
 
 データベースのマイグレーションは起動時に自動で実行されます。
 
-### 4. フロントエンド (開発)
+### 6. フロントエンド (開発)
 
 ```bash
 cd frontend
