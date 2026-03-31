@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::app_state::AppState;
 use crate::error::{AppError, Result};
-use crate::models::{JwtClaims, Session, TokenResponse, User, UserResponse};
+use crate::models::{JwtClaims, MfaChallengeResponse, Session, TokenResponse, User, UserResponse};
 use crate::{db, SESSION_TTL_SECS};
 
 const SESSION_COOKIE: &str = "ars_session";
@@ -39,6 +39,11 @@ fn generate_tokens(user: &User, secret: &str) -> Result<(String, String)> {
     let access_token = generate_access_token(user, secret)?;
     let refresh_token = Uuid::new_v4().to_string();
     Ok((access_token, refresh_token))
+}
+
+/// アクセストークン生成 (MFA モジュールからも利用)
+pub fn generate_access_token_pub(user: &User, secret: &str) -> Result<String> {
+    generate_access_token(user, secret)
 }
 
 /// JWT 検証 (WebSocket 認証でも利用)
@@ -135,6 +140,12 @@ pub async fn register(
         google_refresh_token: None,
         google_token_expires_at: None,
         google_scopes: None,
+        totp_secret: None,
+        totp_enabled: false,
+        phone_number: None,
+        phone_verified: false,
+        mfa_enabled: false,
+        mfa_methods: serde_json::json!([]),
         last_login_at: Some(now),
         created_at: now,
         updated_at: now,
@@ -159,7 +170,7 @@ pub async fn register(
 pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
-) -> Result<Json<TokenResponse>> {
+) -> Result<Json<serde_json::Value>> {
     let user = db::get_user_by_email(&state.db, &req.email)
         .await?
         .ok_or_else(|| AppError::Unauthorized("Invalid email or password".into()))?;
@@ -175,6 +186,14 @@ pub async fn login(
         return Err(AppError::Unauthorized("Invalid email or password".into()));
     }
 
+    // MFA が有効な場合、チャレンジを返す
+    if user.mfa_enabled {
+        let mfa_methods: Vec<String> = serde_json::from_value(user.mfa_methods.clone())
+            .unwrap_or_default();
+        let challenge = crate::mfa::create_mfa_challenge(&state, &user.id, &mfa_methods).await?;
+        return Ok(Json(serde_json::to_value(challenge).unwrap()));
+    }
+
     let now = Utc::now();
     let (access_token, refresh_token) = generate_tokens(&user, &state.config.jwt_secret)?;
     let expires_at = now + Duration::days(REFRESH_TOKEN_DAYS);
@@ -186,11 +205,11 @@ pub async fn login(
     updated.updated_at = now;
     db::upsert_user(&state.db, &updated).await?;
 
-    Ok(Json(TokenResponse {
+    Ok(Json(serde_json::to_value(TokenResponse {
         user: UserResponse::from(user),
         access_token,
         refresh_token,
-    }))
+    }).unwrap()))
 }
 
 /// POST /api/auth/refresh
@@ -245,6 +264,7 @@ pub async fn get_me_jwt(
 pub struct GoogleCallbackQuery {
     pub code: Option<String>,
     pub error: Option<String>,
+    pub state: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -353,6 +373,40 @@ pub async fn google_callback(
         .map(|s| s.split(' ').map(String::from).collect())
         .unwrap_or_default();
 
+    // フェデレーション: link: プレフィックスならアカウントリンク
+    if let Some(ref state_val) = query.state {
+        if state_val.starts_with("link:") {
+            let parts: Vec<&str> = state_val.splitn(3, ':').collect();
+            if parts.len() >= 2 {
+                let link_user_id: Uuid = parts[1]
+                    .parse()
+                    .map_err(|_| AppError::BadRequest("Invalid link state".into()))?;
+
+                // 別のユーザーに既にリンク済みかチェック
+                if let Some(existing) = db::get_user_by_google_id(&state.db, &user_info.id).await? {
+                    if existing.id != link_user_id {
+                        let url = format!("{}?authError={}", frontend, urlencoding::encode("This Google account is already linked to another user"));
+                        return Ok(Redirect::temporary(&url));
+                    }
+                }
+
+                db::link_google_to_user(
+                    &state.db,
+                    link_user_id,
+                    &user_info.id,
+                    &token_data.access_token,
+                    token_data.refresh_token.as_deref(),
+                    token_expires_at,
+                    &serde_json::to_value(&scopes).unwrap(),
+                )
+                .await?;
+
+                let url = format!("{}?linked=google", frontend);
+                return Ok(Redirect::temporary(&url));
+            }
+        }
+    }
+
     // Find or create user
     let mut user = db::get_user_by_google_id(&state.db, &user_info.id).await?;
     if user.is_none() {
@@ -392,6 +446,12 @@ pub async fn google_callback(
                 google_refresh_token: token_data.refresh_token,
                 google_token_expires_at: Some(token_expires_at),
                 google_scopes: Some(serde_json::to_value(&scopes).unwrap()),
+                totp_secret: None,
+                totp_enabled: false,
+                phone_number: None,
+                phone_verified: false,
+                mfa_enabled: false,
+                mfa_methods: serde_json::json!([]),
                 last_login_at: Some(now),
                 created_at: now,
                 updated_at: now,
@@ -514,6 +574,36 @@ pub async fn github_callback(
         .map_err(|e| AppError::External(format!("Failed to parse user: {}", e)))?;
 
     let now = Utc::now();
+    let frontend = &state.config.frontend_url;
+
+    // フェデレーション: link: プレフィックスならアカウントリンク
+    if actual_state.starts_with("link:") {
+        let parts: Vec<&str> = actual_state.splitn(3, ':').collect();
+        if parts.len() >= 2 {
+            let link_user_id: Uuid = parts[1]
+                .parse()
+                .map_err(|_| AppError::BadRequest("Invalid link state".into()))?;
+
+            // 別のユーザーに既にリンク済みかチェック
+            if let Some(existing) = db::get_user_by_github_id(&state.db, gh_user.id).await? {
+                if existing.id != link_user_id {
+                    let url = format!("{}?authError={}", frontend, urlencoding::encode("This GitHub account is already linked to another user"));
+                    let clear_csrf = Cookie::build((CSRF_STATE_COOKIE, ""))
+                        .path("/")
+                        .max_age(time::Duration::seconds(0));
+                    return Ok((jar.remove(clear_csrf), Redirect::temporary(&url)));
+                }
+            }
+
+            db::link_github_to_user(&state.db, link_user_id, gh_user.id).await?;
+
+            let url = format!("{}?linked=github", frontend);
+            let clear_csrf = Cookie::build((CSRF_STATE_COOKIE, ""))
+                .path("/")
+                .max_age(time::Duration::seconds(0));
+            return Ok((jar.remove(clear_csrf), Redirect::temporary(&url)));
+        }
+    }
 
     let user = match db::get_user_by_github_id(&state.db, gh_user.id).await? {
         Some(mut existing) => {
@@ -543,6 +633,12 @@ pub async fn github_callback(
                 google_refresh_token: None,
                 google_token_expires_at: None,
                 google_scopes: None,
+                totp_secret: None,
+                totp_enabled: false,
+                phone_number: None,
+                phone_verified: false,
+                mfa_enabled: false,
+                mfa_methods: serde_json::json!([]),
                 last_login_at: Some(now),
                 created_at: now,
                 updated_at: now,
@@ -575,6 +671,134 @@ pub async fn github_callback(
         .max_age(time::Duration::seconds(0));
 
     Ok((jar.add(cookie).remove(clear_csrf), Redirect::temporary("/")))
+}
+
+// ── フェデレーション (アカウントリンク) ────────────
+
+/// GET /auth/link/github — ログイン済みユーザーに GitHub をリンク
+pub async fn link_github_login(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    headers: HeaderMap,
+) -> Result<(CookieJar, Redirect)> {
+    // JWT or Cookie で認証済みか確認
+    let user = match extract_user_from_jwt(&state, &headers).await {
+        Ok(u) => u,
+        Err(_) => extract_user(&state, &jar).await?,
+    };
+
+    if state.config.github_client_id.is_empty() {
+        return Err(AppError::BadRequest("GitHub OAuth is not configured".into()));
+    }
+
+    let csrf_state = format!("link:{}:{}", user.id, Uuid::new_v4());
+    let is_https = state.config.is_https();
+
+    let state_cookie = Cookie::build((CSRF_STATE_COOKIE, csrf_state.clone()))
+        .path("/")
+        .http_only(true)
+        .max_age(time::Duration::minutes(10))
+        .same_site(axum_extra::extract::cookie::SameSite::Lax)
+        .secure(is_https);
+
+    let url = format!(
+        "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&scope=read:user%20user:email%20repo&state={}",
+        state.config.github_client_id,
+        urlencoding::encode(&state.config.github_redirect_uri),
+        urlencoding::encode(&csrf_state),
+    );
+    Ok((jar.add(state_cookie), Redirect::temporary(&url)))
+}
+
+/// GET /auth/link/google — ログイン済みユーザーに Google をリンク
+pub async fn link_google_login(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    jar: CookieJar,
+) -> Result<(CookieJar, Redirect)> {
+    let user = match extract_user_from_jwt(&state, &headers).await {
+        Ok(u) => u,
+        Err(_) => extract_user(&state, &jar).await?,
+    };
+
+    if state.config.google_client_id.is_empty() {
+        return Err(AppError::BadRequest("Google OAuth is not configured".into()));
+    }
+
+    let csrf_state = format!("link:{}:{}", user.id, Uuid::new_v4());
+    let is_https = state.config.is_https();
+
+    let state_cookie = Cookie::build((CSRF_STATE_COOKIE, csrf_state.clone()))
+        .path("/")
+        .http_only(true)
+        .max_age(time::Duration::minutes(10))
+        .same_site(axum_extra::extract::cookie::SameSite::Lax)
+        .secure(is_https);
+
+    let scopes = [
+        "openid",
+        "email",
+        "profile",
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/calendar.events.readonly",
+        "https://www.googleapis.com/auth/calendar.events",
+    ]
+    .join(" ");
+
+    let params = format!(
+        "client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent&state={}",
+        urlencoding::encode(&state.config.google_client_id),
+        urlencoding::encode(&state.config.google_redirect_uri),
+        urlencoding::encode(&scopes),
+        urlencoding::encode(&csrf_state),
+    );
+
+    let url = format!("https://accounts.google.com/o/oauth2/v2/auth?{}", params);
+    Ok((jar.add(state_cookie), Redirect::temporary(&url)))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UnlinkRequest {
+    pub provider: String, // "github" or "google"
+}
+
+/// POST /api/auth/unlink — プロバイダーのリンク解除
+pub async fn unlink_provider(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<UnlinkRequest>,
+) -> Result<Json<serde_json::Value>> {
+    let user = extract_user_from_jwt(&state, &headers).await?;
+
+    // 少なくとも1つの認証方法が残ることを確認
+    let has_password = user.password_hash.is_some();
+    let has_github = user.github_id.is_some();
+    let has_google = user.google_id.is_some();
+    let auth_count = [has_password, has_github, has_google].iter().filter(|&&x| x).count();
+
+    if auth_count <= 1 {
+        return Err(AppError::BadRequest(
+            "Cannot unlink: at least one authentication method must remain".into(),
+        ));
+    }
+
+    match req.provider.as_str() {
+        "github" => {
+            if !has_github {
+                return Err(AppError::BadRequest("GitHub is not linked".into()));
+            }
+            db::unlink_github(&state.db, user.id).await?;
+        }
+        "google" => {
+            if !has_google {
+                return Err(AppError::BadRequest("Google is not linked".into()));
+            }
+            db::unlink_google(&state.db, user.id).await?;
+        }
+        _ => return Err(AppError::BadRequest("Invalid provider".into())),
+    }
+
+    Ok(Json(serde_json::json!({ "message": format!("{} unlinked", req.provider) })))
 }
 
 // ── Cookie ベース認証 (Ars BFF 用) ──────────────────

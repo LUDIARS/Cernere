@@ -43,3 +43,15 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Config
 dotenvy = "0.15"
+
+# AWS SDK (SNS for SMS, SES for email)
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-sdk-sns = "1"
+aws-sdk-sesv2 = "1"
+
+# TOTP (Google/Microsoft Authenticator)
+totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
+data-encoding = "2"
+
+# Random code generation
+rand = "0.8"

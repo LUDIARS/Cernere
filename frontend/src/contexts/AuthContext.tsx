@@ -8,20 +8,32 @@ interface User {
   role: string;
 }
 
+interface MfaChallenge {
+  mfaToken: string;
+  mfaMethods: string[];
+}
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  mfaChallenge: MfaChallenge | null;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  mfaSendCode: (method: string) => Promise<void>;
+  mfaVerify: (method: string, code: string) => Promise<void>;
+  mfaCancelChallenge: () => void;
   googleAuthUrl: string;
   githubAuthUrl: string;
+  linkGitHubUrl: string;
+  linkGoogleUrl: string;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(getStoredUser);
+  const [mfaChallenge, setMfaChallenge] = useState<MfaChallenge | null>(null);
   const [loading, setLoading] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     const stored = getStoredUser();
@@ -33,9 +45,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const accessToken = params.get("accessToken");
     const refreshToken = params.get("refreshToken");
     const authError = params.get("authError");
+    const linked = params.get("linked");
 
     if (authError) {
       console.error("[AuthContext] OAuth error:", authError);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
+    if (linked) {
+      console.info("[AuthContext] Account linked:", linked);
       window.history.replaceState({}, "", window.location.pathname);
     }
 
@@ -58,7 +76,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const data = await authApi.login({ email, password });
+    const result = await authApi.login({ email, password });
+
+    if (authApi.isMfaChallenge(result)) {
+      setMfaChallenge({ mfaToken: result.mfaToken, mfaMethods: result.mfaMethods });
+      return;
+    }
+
+    const data = result;
     setUser({ id: data.user.id, name: data.user.displayName, email: data.user.email || "", role: data.user.role });
   }, []);
 
@@ -70,6 +95,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     await authApi.logout();
     setUser(null);
+    setMfaChallenge(null);
+  }, []);
+
+  const mfaSendCode = useCallback(async (method: string) => {
+    if (!mfaChallenge) throw new Error("No MFA challenge active");
+    await authApi.mfaSendCode(mfaChallenge.mfaToken, method);
+  }, [mfaChallenge]);
+
+  const mfaVerify = useCallback(async (method: string, code: string) => {
+    if (!mfaChallenge) throw new Error("No MFA challenge active");
+    const data = await authApi.mfaVerify(mfaChallenge.mfaToken, method, code);
+    setMfaChallenge(null);
+    setUser({ id: data.user.id, name: data.user.displayName, email: data.user.email || "", role: data.user.role });
+  }, [mfaChallenge]);
+
+  const mfaCancelChallenge = useCallback(() => {
+    setMfaChallenge(null);
   }, []);
 
   return (
@@ -77,11 +119,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         loading,
+        mfaChallenge,
         login,
         register,
         logout,
+        mfaSendCode,
+        mfaVerify,
+        mfaCancelChallenge,
         googleAuthUrl: authApi.getGoogleAuthUrl(),
         githubAuthUrl: authApi.getGitHubAuthUrl(),
+        linkGitHubUrl: authApi.getLinkGitHubUrl(),
+        linkGoogleUrl: authApi.getLinkGoogleUrl(),
       }}
     >
       {children}

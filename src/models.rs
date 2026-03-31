@@ -18,6 +18,12 @@ pub struct User {
     pub google_refresh_token: Option<String>,
     pub google_token_expires_at: Option<i64>,
     pub google_scopes: Option<serde_json::Value>,
+    pub totp_secret: Option<String>,
+    pub totp_enabled: bool,
+    pub phone_number: Option<String>,
+    pub phone_verified: bool,
+    pub mfa_enabled: bool,
+    pub mfa_methods: serde_json::Value,
     pub last_login_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -83,12 +89,18 @@ pub struct UserResponse {
     pub role: String,
     pub has_google_auth: bool,
     pub has_password: bool,
+    pub mfa_enabled: bool,
+    pub mfa_methods: Vec<String>,
+    pub has_phone: bool,
+    pub phone_verified: bool,
     pub created_at: String,
     pub updated_at: String,
 }
 
 impl From<User> for UserResponse {
     fn from(u: User) -> Self {
+        let mfa_methods: Vec<String> = serde_json::from_value(u.mfa_methods.clone())
+            .unwrap_or_default();
         Self {
             id: u.id.to_string(),
             github_id: u.github_id,
@@ -99,10 +111,26 @@ impl From<User> for UserResponse {
             role: u.role,
             has_google_auth: u.google_id.is_some(),
             has_password: u.password_hash.is_some(),
+            mfa_enabled: u.mfa_enabled,
+            mfa_methods,
+            has_phone: u.phone_number.is_some(),
+            phone_verified: u.phone_verified,
             created_at: u.created_at.to_rfc3339(),
             updated_at: u.updated_at.to_rfc3339(),
         }
     }
+}
+
+/// 検証コード (SMS / メール OTP)
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct VerificationCode {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub code: String,
+    pub method: String,
+    pub expires_at: DateTime<Utc>,
+    pub used: bool,
+    pub created_at: DateTime<Utc>,
 }
 
 /// JWT クレーム
@@ -121,4 +149,22 @@ pub struct TokenResponse {
     pub user: UserResponse,
     pub access_token: String,
     pub refresh_token: String,
+}
+
+/// MFA チャレンジレスポンス (ログイン時に MFA が必要な場合)
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MfaChallengeResponse {
+    pub mfa_required: bool,
+    pub mfa_token: String,
+    pub mfa_methods: Vec<String>,
+}
+
+/// MFA クレーム (一時トークン)
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MfaClaims {
+    pub sub: String,       // user_id
+    pub purpose: String,   // "mfa_challenge"
+    pub exp: usize,
+    pub iat: usize,
 }
