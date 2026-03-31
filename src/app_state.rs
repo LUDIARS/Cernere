@@ -11,4 +11,6 @@ pub struct AppState {
     pub redis: RedisClient,
     pub config: Config,
     pub sessions: Arc<SessionRegistry>,
+    pub sns_client: Option<aws_sdk_sns::Client>,
+    pub ses_client: Option<aws_sdk_sesv2::Client>,
 }

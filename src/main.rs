@@ -10,6 +10,7 @@ mod config;
 mod db;
 mod env_auth;
 mod error;
+mod mfa;
 mod models;
 mod redis_session;
 mod relay;
@@ -54,11 +55,36 @@ async fn main() {
 
     let listen_addr = config.listen_addr.clone();
 
+    // AWS SDK 初期化 (SNS / SES)
+    let (sns_client, ses_client) = if config.aws_sns_enabled || config.aws_ses_enabled {
+        let aws_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .region(aws_config::Region::new(config.aws_region.clone()))
+            .load()
+            .await;
+        let sns = if config.aws_sns_enabled {
+            tracing::info!("AWS SNS enabled for SMS MFA");
+            Some(aws_sdk_sns::Client::new(&aws_config))
+        } else {
+            None
+        };
+        let ses = if config.aws_ses_enabled {
+            tracing::info!("AWS SES enabled for email MFA");
+            Some(aws_sdk_sesv2::Client::new(&aws_config))
+        } else {
+            None
+        };
+        (sns, ses)
+    } else {
+        (None, None)
+    };
+
     let state = AppState {
         db,
         redis,
         config,
         sessions: Arc::new(SessionRegistry::new()),
+        sns_client,
+        ses_client,
     };
 
     let cors = CorsLayer::new()

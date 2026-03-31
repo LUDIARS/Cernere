@@ -12,6 +12,7 @@ use crate::auth;
 use crate::db;
 use crate::env_auth;
 use crate::error::{AppError, Result};
+use crate::mfa;
 use crate::models::{ProjectSummary, UserResponse};
 use crate::session_state::{UserFullState, UserState};
 use crate::ws;
@@ -257,6 +258,23 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/github/callback", get(auth::github_callback))
         .route("/auth/me", get(auth::get_me))
         .route("/auth/logout", post(auth::logout))
+        // MFA
+        .route("/api/auth/mfa/status", get(mfa::mfa_status))
+        .route("/api/auth/mfa/totp/setup", post(mfa::totp_setup))
+        .route("/api/auth/mfa/totp/enable", post(mfa::totp_enable))
+        .route("/api/auth/mfa/totp/disable", post(mfa::totp_disable))
+        .route("/api/auth/mfa/sms/setup", post(mfa::sms_setup))
+        .route("/api/auth/mfa/sms/verify-phone", post(mfa::sms_verify_phone))
+        .route("/api/auth/mfa/sms/enable", post(mfa::sms_enable))
+        .route("/api/auth/mfa/sms/disable", post(mfa::sms_disable))
+        .route("/api/auth/mfa/email/enable", post(mfa::email_mfa_enable))
+        .route("/api/auth/mfa/email/disable", post(mfa::email_mfa_disable))
+        .route("/api/auth/mfa/send-code", post(mfa::mfa_send_code))
+        .route("/api/auth/mfa/verify", post(mfa::mfa_verify))
+        // フェデレーション (アカウントリンク)
+        .route("/auth/link/github", get(auth::link_github_login))
+        .route("/auth/link/google", get(auth::link_google_login))
+        .route("/api/auth/unlink", post(auth::unlink_provider))
         // WebSocket セッション接続
         // 組織・プロジェクト定義・ユーザー情報の操作は全て WS セッション経由
         .route("/ws", get(ws::ws_upgrade))

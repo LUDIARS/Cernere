@@ -19,6 +19,13 @@ pub struct Config {
 
     // JWT
     pub jwt_secret: String,
+
+    // AWS (MFA: SNS for SMS, SES for email)
+    pub aws_region: String,
+    pub aws_sns_enabled: bool,
+    pub aws_ses_enabled: bool,
+    pub aws_ses_from_email: String,
+    pub app_name: String,
 }
 
 impl Config {
@@ -45,6 +52,17 @@ impl Config {
 
             jwt_secret: env::var("JWT_SECRET")
                 .unwrap_or_else(|_| "cernere-dev-secret-change-in-production".into()),
+
+            aws_region: env::var("AWS_REGION").unwrap_or_else(|_| "ap-northeast-1".into()),
+            aws_sns_enabled: env::var("AWS_SNS_ENABLED")
+                .map(|v| v == "true" || v == "1")
+                .unwrap_or(false),
+            aws_ses_enabled: env::var("AWS_SES_ENABLED")
+                .map(|v| v == "true" || v == "1")
+                .unwrap_or(false),
+            aws_ses_from_email: env::var("AWS_SES_FROM_EMAIL")
+                .unwrap_or_else(|_| "noreply@example.com".into()),
+            app_name: env::var("APP_NAME").unwrap_or_else(|_| "Cernere".into()),
         }
     }
 

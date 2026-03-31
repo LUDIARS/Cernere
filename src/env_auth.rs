@@ -38,6 +38,18 @@ pub enum TransportMode {
     WebSocket { endpoint: String },
 }
 
+/// MFA の利用可能な方式
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MfaConfig {
+    /// TOTP (Authenticator アプリ) が利用可能
+    pub totp_available: bool,
+    /// SMS MFA が利用可能 (AWS SNS)
+    pub sms_available: bool,
+    /// Email MFA が利用可能 (AWS SES)
+    pub email_available: bool,
+}
+
 /// 環境ごとの認証設定
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,6 +64,8 @@ pub struct EnvironmentAuthConfig {
     pub session_ttl_secs: i64,
     /// ping 間隔 (秒)
     pub ping_interval_secs: u64,
+    /// MFA 設定
+    pub mfa: MfaConfig,
 }
 
 /// 現在の環境設定から認証コンフィグを生成
@@ -84,11 +98,18 @@ pub fn build_auth_config(state: &AppState) -> EnvironmentAuthConfig {
         },
     ];
 
+    let mfa = MfaConfig {
+        totp_available: true, // TOTP は常に利用可能 (サーバー側のみで完結)
+        sms_available: state.config.aws_sns_enabled,
+        email_available: state.config.aws_ses_enabled,
+    };
+
     EnvironmentAuthConfig {
         auth_methods,
         transports,
         recommended_transport: "websocket".into(),
         session_ttl_secs: crate::SESSION_TTL_SECS,
         ping_interval_secs: 30,
+        mfa,
     }
 }
