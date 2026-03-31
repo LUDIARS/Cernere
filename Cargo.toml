@@ -1,12 +1,12 @@
 [package]
 name = "cernere"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "Ars authentication & data server — user management, project storage, session handling"
+description = "Cernere — stateful authentication, session management, and relay server"
 
 [dependencies]
 # Web framework
-axum = { version = "0.7", features = ["macros"] }
+axum = { version = "0.7", features = ["macros", "ws"] }
 axum-extra = { version = "0.9", features = ["cookie"] }
 tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.5", features = ["cors", "trace"] }
@@ -29,6 +29,10 @@ bcrypt = "0.17"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Async utilities
+futures = "0.3"
+dashmap = "6"
 
 # Error handling
 thiserror = "2"

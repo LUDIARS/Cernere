@@ -10,8 +10,11 @@ use uuid::Uuid;
 use crate::app_state::AppState;
 use crate::auth;
 use crate::db;
+use crate::env_auth;
 use crate::error::{AppError, Result};
 use crate::models::{ProjectSummary, UserResponse};
+use crate::session_state::{UserFullState, UserState};
+use crate::ws;
 
 // ── Request / Query types ───────────────────────────
 
@@ -48,6 +51,88 @@ struct SettingQuery {
 #[serde(rename_all = "camelCase")]
 struct SettingsQuery {
     project_id: Uuid,
+}
+
+// ── 統合 /auth エンドポイント ───────────────────────
+
+/// GET /auth — 環境の認証設定と現在のセッション状態を返す
+///
+/// セッション情報がない場合 → ログイン/サインアップ画面遷移用情報
+/// セッションがある場合 → ユーザのステートを確認して返す
+async fn auth_negotiate(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>> {
+    let config = env_auth::build_auth_config(&state);
+
+    // セッション確認: Cookie ベース
+    if let Ok(session) = auth::extract_session(&state, &jar).await {
+        let user_state = state.redis.get_user_state(&session.user_id).await?;
+        let user = db::get_user(&state.db, session.user_id).await?;
+
+        return Ok(Json(serde_json::json!({
+            "authenticated": true,
+            "sessionId": session.id,
+            "user": user.map(UserResponse::from),
+            "userState": user_state.as_ref().map(|s| &s.state),
+            "config": config,
+        })));
+    }
+
+    // セッション確認: JWT Bearer
+    if let Ok(user) = auth::extract_user_from_jwt(&state, &headers).await {
+        let user_state = state.redis.get_user_state(&user.id).await?;
+
+        return Ok(Json(serde_json::json!({
+            "authenticated": true,
+            "user": UserResponse::from(user),
+            "userState": user_state.as_ref().map(|s| &s.state),
+            "config": config,
+        })));
+    }
+
+    // 認証なし → ログイン/サインアップ情報を返す
+    Ok(Json(serde_json::json!({
+        "authenticated": false,
+        "config": config,
+    })))
+}
+
+/// GET /auth/state — ユーザステートの詳細取得
+async fn auth_state(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>> {
+    // Cookie or JWT で認証
+    let user_id = if let Ok(session) = auth::extract_session(&state, &jar).await {
+        session.user_id
+    } else if let Ok(user) = auth::extract_user_from_jwt(&state, &headers).await {
+        user.id
+    } else {
+        return Ok(Json(serde_json::json!({
+            "state": UserState::None,
+        })));
+    };
+
+    let user_state = state
+        .redis
+        .get_user_state(&user_id)
+        .await?
+        .unwrap_or(UserFullState {
+            user_id,
+            session_id: String::new(),
+            state: UserState::None,
+            modules: Vec::new(),
+            last_ping_at: 0,
+        });
+
+    Ok(Json(serde_json::json!({
+        "state": user_state.state,
+        "modules": user_state.modules,
+        "lastPingAt": user_state.last_ping_at,
+    })))
 }
 
 // ── User routes ─────────────────────────────────────
@@ -167,6 +252,9 @@ async fn api_delete_setting(
 
 pub fn router(state: AppState) -> Router {
     Router::new()
+        // 統合認証エンドポイント (共通 /auth)
+        .route("/auth", get(auth_negotiate))
+        .route("/auth/state", get(auth_state))
         // JWT Auth (password / Google OAuth)
         .route("/api/auth/register", post(auth::register))
         .route("/api/auth/login", post(auth::login))
@@ -181,6 +269,8 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/github/callback", get(auth::github_callback))
         .route("/auth/me", get(auth::get_me))
         .route("/auth/logout", post(auth::logout))
+        // WebSocket セッション接続
+        .route("/ws", get(ws::ws_upgrade))
         // User
         .route("/api/users/{user_id}", get(api_get_user))
         // Projects

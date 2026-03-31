@@ -1,4 +1,5 @@
 use sqlx::postgres::PgPoolOptions;
+use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::EnvFilter;
 
@@ -6,17 +7,22 @@ mod app_state;
 mod auth;
 mod config;
 mod db;
+mod env_auth;
 mod error;
 mod models;
 mod redis_session;
+mod relay;
 mod routes;
+mod session_state;
+mod ws;
 
 use app_state::AppState;
 use config::Config;
 use redis_session::RedisClient;
+use relay::SessionRegistry;
 
 /// セッション TTL（7日間）
-const SESSION_TTL_SECS: i64 = 7 * 24 * 60 * 60;
+pub const SESSION_TTL_SECS: i64 = 7 * 24 * 60 * 60;
 
 #[tokio::main]
 async fn main() {
@@ -46,7 +52,12 @@ async fn main() {
 
     let listen_addr = config.listen_addr.clone();
 
-    let state = AppState { db, redis, config };
+    let state = AppState {
+        db,
+        redis,
+        config,
+        sessions: Arc::new(SessionRegistry::new()),
+    };
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
