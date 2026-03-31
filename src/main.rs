@@ -5,6 +5,7 @@ use tracing_subscriber::EnvFilter;
 
 mod app_state;
 mod auth;
+mod commands;
 mod config;
 mod db;
 mod env_auth;
@@ -14,6 +15,7 @@ mod models;
 mod redis_session;
 mod relay;
 mod routes;
+mod service;
 mod session_state;
 mod ws;
 

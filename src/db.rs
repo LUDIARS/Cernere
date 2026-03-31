@@ -3,7 +3,10 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::{AppError, Result};
-use crate::models::{Project, ProjectSetting, ProjectSummary, RefreshSession, User, VerificationCode};
+use crate::models::{
+    Organization, OrganizationMember, OrganizationMemberWithUser, Project, ProjectDefinition,
+    ProjectSetting, ProjectSummary, RefreshSession, User, VerificationCode,
+};
 
 // ── User ────────────────────────────────────────────
 
@@ -471,4 +474,324 @@ pub async fn delete_setting(
         .execute(pool)
         .await?;
     Ok(())
+}
+
+// ── Organization ───────────────────────────────────
+
+pub async fn create_organization(
+    pool: &PgPool,
+    id: Uuid,
+    name: &str,
+    slug: &str,
+    description: &str,
+    created_by: Uuid,
+) -> Result<Organization> {
+    let now = Utc::now();
+    let org = sqlx::query_as::<_, Organization>(
+        "INSERT INTO organizations (id, name, slug, description, created_by, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING *",
+    )
+    .bind(id)
+    .bind(name)
+    .bind(slug)
+    .bind(description)
+    .bind(created_by)
+    .bind(now)
+    .bind(now)
+    .fetch_one(pool)
+    .await?;
+    Ok(org)
+}
+
+pub async fn get_organization(pool: &PgPool, org_id: Uuid) -> Result<Option<Organization>> {
+    let org = sqlx::query_as::<_, Organization>("SELECT * FROM organizations WHERE id = $1")
+        .bind(org_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(org)
+}
+
+pub async fn get_organization_by_slug(pool: &PgPool, slug: &str) -> Result<Option<Organization>> {
+    let org = sqlx::query_as::<_, Organization>("SELECT * FROM organizations WHERE slug = $1")
+        .bind(slug)
+        .fetch_optional(pool)
+        .await?;
+    Ok(org)
+}
+
+pub async fn update_organization(
+    pool: &PgPool,
+    org_id: Uuid,
+    name: &str,
+    description: &str,
+) -> Result<()> {
+    let now = Utc::now();
+    let result = sqlx::query(
+        "UPDATE organizations SET name = $1, description = $2, updated_at = $3 WHERE id = $4",
+    )
+    .bind(name)
+    .bind(description)
+    .bind(now)
+    .bind(org_id)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound("Organization not found".into()));
+    }
+    Ok(())
+}
+
+pub async fn delete_organization(pool: &PgPool, org_id: Uuid) -> Result<()> {
+    let result = sqlx::query("DELETE FROM organizations WHERE id = $1")
+        .bind(org_id)
+        .execute(pool)
+        .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound("Organization not found".into()));
+    }
+    Ok(())
+}
+
+/// ユーザーが所属する組織一覧を取得
+pub async fn list_user_organizations(pool: &PgPool, user_id: Uuid) -> Result<Vec<Organization>> {
+    let orgs = sqlx::query_as::<_, Organization>(
+        "SELECT o.* FROM organizations o
+         INNER JOIN organization_members om ON o.id = om.organization_id
+         WHERE om.user_id = $1
+         ORDER BY o.name",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(orgs)
+}
+
+// ── Organization Members ───────────────────────────
+
+pub async fn add_organization_member(
+    pool: &PgPool,
+    org_id: Uuid,
+    user_id: Uuid,
+    role: &str,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO organization_members (organization_id, user_id, role)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (organization_id, user_id) DO UPDATE SET role = EXCLUDED.role",
+    )
+    .bind(org_id)
+    .bind(user_id)
+    .bind(role)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn remove_organization_member(
+    pool: &PgPool,
+    org_id: Uuid,
+    user_id: Uuid,
+) -> Result<()> {
+    let result = sqlx::query(
+        "DELETE FROM organization_members WHERE organization_id = $1 AND user_id = $2",
+    )
+    .bind(org_id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound("Member not found".into()));
+    }
+    Ok(())
+}
+
+pub async fn get_organization_member(
+    pool: &PgPool,
+    org_id: Uuid,
+    user_id: Uuid,
+) -> Result<Option<OrganizationMember>> {
+    let member = sqlx::query_as::<_, OrganizationMember>(
+        "SELECT * FROM organization_members WHERE organization_id = $1 AND user_id = $2",
+    )
+    .bind(org_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(member)
+}
+
+/// 組織メンバー一覧（ユーザー情報付き）
+pub async fn list_organization_members(
+    pool: &PgPool,
+    org_id: Uuid,
+) -> Result<Vec<OrganizationMemberWithUser>> {
+    let members = sqlx::query_as::<_, OrganizationMemberWithUser>(
+        "SELECT om.organization_id, om.user_id, om.role, om.joined_at,
+                u.login, u.display_name, u.avatar_url, u.email, u.last_login_at
+         FROM organization_members om
+         INNER JOIN users u ON u.id = om.user_id
+         WHERE om.organization_id = $1
+         ORDER BY om.joined_at",
+    )
+    .bind(org_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(members)
+}
+
+// ── Project Definitions ────────────────────────────
+
+pub async fn create_project_definition(
+    pool: &PgPool,
+    id: Uuid,
+    code: &str,
+    name: &str,
+    data_schema: &serde_json::Value,
+    commands: &serde_json::Value,
+    plugin_repository: &str,
+) -> Result<ProjectDefinition> {
+    let now = Utc::now();
+    let pd = sqlx::query_as::<_, ProjectDefinition>(
+        "INSERT INTO project_definitions (id, code, name, data_schema, commands, plugin_repository, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING *",
+    )
+    .bind(id)
+    .bind(code)
+    .bind(name)
+    .bind(data_schema)
+    .bind(commands)
+    .bind(plugin_repository)
+    .bind(now)
+    .bind(now)
+    .fetch_one(pool)
+    .await?;
+    Ok(pd)
+}
+
+pub async fn get_project_definition(
+    pool: &PgPool,
+    pd_id: Uuid,
+) -> Result<Option<ProjectDefinition>> {
+    let pd = sqlx::query_as::<_, ProjectDefinition>(
+        "SELECT * FROM project_definitions WHERE id = $1",
+    )
+    .bind(pd_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(pd)
+}
+
+pub async fn get_project_definition_by_code(
+    pool: &PgPool,
+    code: &str,
+) -> Result<Option<ProjectDefinition>> {
+    let pd = sqlx::query_as::<_, ProjectDefinition>(
+        "SELECT * FROM project_definitions WHERE code = $1",
+    )
+    .bind(code)
+    .fetch_optional(pool)
+    .await?;
+    Ok(pd)
+}
+
+pub async fn update_project_definition(
+    pool: &PgPool,
+    pd_id: Uuid,
+    name: &str,
+    data_schema: &serde_json::Value,
+    commands: &serde_json::Value,
+    plugin_repository: &str,
+) -> Result<()> {
+    let now = Utc::now();
+    let result = sqlx::query(
+        "UPDATE project_definitions
+         SET name = $1, data_schema = $2, commands = $3, plugin_repository = $4, updated_at = $5
+         WHERE id = $6",
+    )
+    .bind(name)
+    .bind(data_schema)
+    .bind(commands)
+    .bind(plugin_repository)
+    .bind(now)
+    .bind(pd_id)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound("Project definition not found".into()));
+    }
+    Ok(())
+}
+
+pub async fn delete_project_definition(pool: &PgPool, pd_id: Uuid) -> Result<()> {
+    let result = sqlx::query("DELETE FROM project_definitions WHERE id = $1")
+        .bind(pd_id)
+        .execute(pool)
+        .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound("Project definition not found".into()));
+    }
+    Ok(())
+}
+
+pub async fn list_project_definitions(pool: &PgPool) -> Result<Vec<ProjectDefinition>> {
+    let pds = sqlx::query_as::<_, ProjectDefinition>(
+        "SELECT * FROM project_definitions ORDER BY code",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(pds)
+}
+
+// ── Organization Projects (組織のプロジェクト有効化) ─
+
+pub async fn enable_organization_project(
+    pool: &PgPool,
+    org_id: Uuid,
+    pd_id: Uuid,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO organization_projects (organization_id, project_definition_id)
+         VALUES ($1, $2)
+         ON CONFLICT (organization_id, project_definition_id) DO NOTHING",
+    )
+    .bind(org_id)
+    .bind(pd_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn disable_organization_project(
+    pool: &PgPool,
+    org_id: Uuid,
+    pd_id: Uuid,
+) -> Result<()> {
+    sqlx::query(
+        "DELETE FROM organization_projects
+         WHERE organization_id = $1 AND project_definition_id = $2",
+    )
+    .bind(org_id)
+    .bind(pd_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// 組織が有効にしているプロジェクト定義一覧
+pub async fn list_organization_projects(
+    pool: &PgPool,
+    org_id: Uuid,
+) -> Result<Vec<ProjectDefinition>> {
+    let pds = sqlx::query_as::<_, ProjectDefinition>(
+        "SELECT pd.* FROM project_definitions pd
+         INNER JOIN organization_projects op ON pd.id = op.project_definition_id
+         WHERE op.organization_id = $1
+         ORDER BY pd.code",
+    )
+    .bind(org_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(pds)
 }

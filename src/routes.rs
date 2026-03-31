@@ -136,18 +136,6 @@ async fn auth_state(
     })))
 }
 
-// ── User routes ─────────────────────────────────────
-
-async fn api_get_user(
-    State(state): State<AppState>,
-    Path(user_id): Path<Uuid>,
-) -> Result<Json<UserResponse>> {
-    let user = db::get_user(&state.db, user_id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("User not found".into()))?;
-    Ok(Json(UserResponse::from(user)))
-}
-
 // ── Project routes ──────────────────────────────────
 
 async fn api_save_project(
@@ -288,13 +276,12 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/link/google", get(auth::link_google_login))
         .route("/api/auth/unlink", post(auth::unlink_provider))
         // WebSocket セッション接続
+        // 組織・プロジェクト定義・ユーザー情報の操作は全て WS セッション経由
         .route("/ws", get(ws::ws_upgrade))
-        // User
-        .route("/api/users/{user_id}", get(api_get_user))
-        // Projects
+        // Projects (Ars BFF 用、Cookie ベース)
         .route("/api/projects", get(api_list_projects).post(api_save_project))
         .route("/api/projects/{project_id}", get(api_load_project).delete(api_delete_project))
-        // Settings
+        // Settings (Ars BFF 用、Cookie ベース)
         .route("/api/settings", get(api_get_setting).post(api_put_setting).delete(api_delete_setting))
         .route("/api/settings/all", get(api_get_all_settings))
         .with_state(state)
