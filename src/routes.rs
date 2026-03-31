@@ -113,7 +113,6 @@ async fn api_put_setting(
     Json(req): Json<SettingRequest>,
 ) -> Result<Json<()>> {
     let user = auth::extract_user(&state, &jar).await?;
-    // Verify project ownership
     db::load_project(&state.db, user.id, req.project_id)
         .await?
         .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
@@ -168,7 +167,16 @@ async fn api_delete_setting(
 
 pub fn router(state: AppState) -> Router {
     Router::new()
-        // Auth
+        // JWT Auth (password / Google OAuth)
+        .route("/api/auth/register", post(auth::register))
+        .route("/api/auth/login", post(auth::login))
+        .route("/api/auth/refresh", post(auth::refresh))
+        .route("/api/auth/logout", post(auth::logout_jwt))
+        .route("/api/auth/me", get(auth::get_me_jwt))
+        // Google OAuth
+        .route("/auth/google/login", get(auth::google_login))
+        .route("/auth/google/callback", get(auth::google_callback))
+        // GitHub OAuth (Cookie-based, Ars BFF)
         .route("/auth/github/login", get(auth::github_login))
         .route("/auth/github/callback", get(auth::github_callback))
         .route("/auth/me", get(auth::get_me))
