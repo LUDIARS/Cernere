@@ -41,7 +41,8 @@ fn generate_tokens(user: &User, secret: &str) -> Result<(String, String)> {
     Ok((access_token, refresh_token))
 }
 
-fn verify_jwt(token: &str, secret: &str) -> Result<JwtClaims> {
+/// JWT 検証 (WebSocket 認証でも利用)
+pub fn verify_jwt_public(token: &str, secret: &str) -> Result<JwtClaims> {
     decode::<JwtClaims>(
         token,
         &DecodingKey::from_secret(secret.as_bytes()),
@@ -61,7 +62,7 @@ pub async fn extract_user_from_jwt(state: &AppState, headers: &HeaderMap) -> Res
         return Err(AppError::Unauthorized("Invalid auth header".into()));
     }
     let token = &auth_header[7..];
-    let claims = verify_jwt(token, &state.config.jwt_secret)?;
+    let claims = verify_jwt_public(token, &state.config.jwt_secret)?;
     let user_id: Uuid = claims
         .sub
         .parse()
