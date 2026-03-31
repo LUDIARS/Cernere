@@ -1,0 +1,17 @@
+{
+  "name": "cernere",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "env:setup": "npx tsx packages/env-cli/src/cli.ts setup",
+    "env:test": "npx tsx packages/env-cli/src/cli.ts test",
+    "env:gen": "npx tsx packages/env-cli/src/cli.ts env",
+    "env:list": "npx tsx packages/env-cli/src/cli.ts list",
+    "env:get": "npx tsx packages/env-cli/src/cli.ts get",
+    "env:set": "npx tsx packages/env-cli/src/cli.ts set"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "~5.9.3"
+  }
+}
