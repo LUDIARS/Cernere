@@ -1,4 +1,7 @@
 /target
 .env
+.env.secrets
+node_modules
+dist
 *.swp
 *.swo
