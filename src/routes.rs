@@ -139,10 +139,30 @@ async fn auth_state(
 
 // ── User routes ─────────────────────────────────────
 
+/// GET /api/users/:user_id — 同じ組織に属するユーザーの情報のみ取得可能
 async fn api_get_user(
     State(state): State<AppState>,
+    jar: CookieJar,
+    headers: axum::http::HeaderMap,
     Path(user_id): Path<Uuid>,
 ) -> Result<Json<UserResponse>> {
+    let caller = auth_user(&state, &jar, &headers).await?;
+
+    // 自分自身の場合は OK
+    if caller.id != user_id {
+        // 同じ組織に属しているかチェック
+        let caller_orgs = db::list_user_organizations(&state.db, caller.id).await?;
+        let target_orgs = db::list_user_organizations(&state.db, user_id).await?;
+        let caller_org_ids: std::collections::HashSet<Uuid> =
+            caller_orgs.iter().map(|o| o.id).collect();
+        let shares_org = target_orgs.iter().any(|o| caller_org_ids.contains(&o.id));
+        if !shares_org {
+            return Err(AppError::Forbidden(
+                "User is not in any of your organizations".into(),
+            ));
+        }
+    }
+
     let user = db::get_user(&state.db, user_id)
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".into()))?;
