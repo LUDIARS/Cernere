@@ -259,7 +259,7 @@ async fn handle_client_message(
         } => {
             // コマンドハンドラにディスパッチ
             let result =
-                crate::commands::dispatch(state, user_id, &module, &action, payload).await;
+                crate::commands::dispatch(state, user_id, session_id, &module, &action, payload).await;
 
             match result {
                 Ok(response_payload) => {

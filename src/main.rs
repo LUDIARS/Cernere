@@ -14,6 +14,7 @@ mod models;
 mod redis_session;
 mod relay;
 mod routes;
+mod service;
 mod session_state;
 mod ws;
 
