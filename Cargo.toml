@@ -23,6 +23,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 time = "0.3"
 urlencoding = "2"
+jsonwebtoken = "9"
+bcrypt = "0.17"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
