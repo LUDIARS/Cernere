@@ -25,10 +25,14 @@ export interface EnvInfOptions {
 
 /**
  * 環境変数パラメータの読み取りインタフェース
+ *
+ * IdSecretManager (id-service) と互換のため get / getOrDefault を含む。
  */
 export interface EnvReader {
   /** ストアからキーを取得 */
   get(key: string): string | undefined;
+  /** ストアからキーを取得。未定義ならデフォルト値を返す */
+  getOrDefault(key: string, defaultValue: string): string;
   /** ストアから全キーを取得 */
   getAll(): Readonly<Record<string, string>>;
   /** キーが存在するか */

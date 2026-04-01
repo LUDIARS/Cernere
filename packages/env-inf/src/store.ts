@@ -12,6 +12,10 @@ export class EnvStore implements EnvReader {
     return this.params.get(key);
   }
 
+  getOrDefault(key: string, defaultValue: string): string {
+    return this.params.get(key) ?? defaultValue;
+  }
+
   getAll(): Readonly<Record<string, string>> {
     return Object.fromEntries(this.params);
   }

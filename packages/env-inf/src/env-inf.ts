@@ -41,6 +41,10 @@ export class EnvInf implements EnvReader, EnvFetcher {
     return this.store.get(key);
   }
 
+  getOrDefault(key: string, defaultValue: string): string {
+    return this.store.getOrDefault(key, defaultValue);
+  }
+
   getAll(): Readonly<Record<string, string>> {
     return this.store.getAll();
   }
