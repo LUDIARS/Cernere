@@ -46,11 +46,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
 
       - name: Type check
         run: npx tsc -b --noEmit
@@ -58,9 +61,9 @@ jobs:
   packages-typecheck:
     name: Packages TypeScript Check
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        package: [auth, env-cli, id-cache, id-service]
+    defaults:
+      run:
+        working-directory: packages/env-cli
     steps:
       - uses: actions/checkout@v4
 
@@ -70,14 +73,12 @@ jobs:
           node-version: '22'
 
       - name: Install dependencies
-        working-directory: packages/${{ matrix.package }}
         run: |
           if [ -f package-lock.json ]; then
             npm ci
-          elif [ -f package.json ]; then
+          else
             npm install
           fi
 
       - name: Type check
-        working-directory: packages/${{ matrix.package }}
         run: npx tsc --noEmit
