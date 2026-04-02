@@ -5,7 +5,8 @@ use uuid::Uuid;
 use crate::error::{AppError, Result};
 use crate::models::{
     Organization, OrganizationMember, OrganizationMemberWithUser, Project, ProjectDefinition,
-    ProjectSetting, ProjectSummary, RefreshSession, User, VerificationCode,
+    ProjectSetting, ProjectSummary, RefreshSession, ToolClient, User, UserProfile,
+    VerificationCode,
 };
 
 // ── User ────────────────────────────────────────────
@@ -794,4 +795,151 @@ pub async fn list_organization_projects(
     .fetch_all(pool)
     .await?;
     Ok(pds)
+}
+
+// ── Tool Clients ──────────────────────────────────
+
+pub async fn create_tool_client(
+    pool: &PgPool,
+    id: Uuid,
+    name: &str,
+    client_id: &str,
+    client_secret_hash: &str,
+    owner_user_id: Uuid,
+    scopes: &serde_json::Value,
+) -> Result<ToolClient> {
+    let tc = sqlx::query_as::<_, ToolClient>(
+        "INSERT INTO tool_clients (id, name, client_id, client_secret_hash, owner_user_id, scopes)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING *",
+    )
+    .bind(id)
+    .bind(name)
+    .bind(client_id)
+    .bind(client_secret_hash)
+    .bind(owner_user_id)
+    .bind(scopes)
+    .fetch_one(pool)
+    .await?;
+    Ok(tc)
+}
+
+pub async fn get_tool_client_by_client_id(
+    pool: &PgPool,
+    client_id: &str,
+) -> Result<Option<ToolClient>> {
+    let tc = sqlx::query_as::<_, ToolClient>(
+        "SELECT * FROM tool_clients WHERE client_id = $1",
+    )
+    .bind(client_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(tc)
+}
+
+pub async fn list_tool_clients_by_owner(
+    pool: &PgPool,
+    owner_user_id: Uuid,
+) -> Result<Vec<ToolClient>> {
+    let clients = sqlx::query_as::<_, ToolClient>(
+        "SELECT * FROM tool_clients WHERE owner_user_id = $1 ORDER BY created_at DESC",
+    )
+    .bind(owner_user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(clients)
+}
+
+pub async fn delete_tool_client(
+    pool: &PgPool,
+    id: Uuid,
+    owner_user_id: Uuid,
+) -> Result<()> {
+    let result = sqlx::query(
+        "DELETE FROM tool_clients WHERE id = $1 AND owner_user_id = $2",
+    )
+    .bind(id)
+    .bind(owner_user_id)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound("Tool client not found".into()));
+    }
+    Ok(())
+}
+
+pub async fn update_tool_client_last_used(pool: &PgPool, id: Uuid) -> Result<()> {
+    let now = Utc::now();
+    sqlx::query("UPDATE tool_clients SET last_used_at = $2, updated_at = $2 WHERE id = $1")
+        .bind(id)
+        .bind(now)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+// ── User Profiles ─────────────────────────────────
+
+pub async fn upsert_user_profile(
+    pool: &PgPool,
+    user_id: Uuid,
+    role_title: &str,
+    bio: &str,
+    expertise: &serde_json::Value,
+    hobbies: &serde_json::Value,
+    extra: &serde_json::Value,
+    privacy: &serde_json::Value,
+) -> Result<UserProfile> {
+    let now = Utc::now();
+    let profile = sqlx::query_as::<_, UserProfile>(
+        "INSERT INTO user_profiles (user_id, role_title, bio, expertise, hobbies, extra, privacy, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+         ON CONFLICT (user_id) DO UPDATE SET
+             role_title = EXCLUDED.role_title,
+             bio = EXCLUDED.bio,
+             expertise = EXCLUDED.expertise,
+             hobbies = EXCLUDED.hobbies,
+             extra = EXCLUDED.extra,
+             privacy = EXCLUDED.privacy,
+             updated_at = EXCLUDED.updated_at
+         RETURNING *",
+    )
+    .bind(user_id)
+    .bind(role_title)
+    .bind(bio)
+    .bind(expertise)
+    .bind(hobbies)
+    .bind(extra)
+    .bind(privacy)
+    .bind(now)
+    .fetch_one(pool)
+    .await?;
+    Ok(profile)
+}
+
+pub async fn get_user_profile(pool: &PgPool, user_id: Uuid) -> Result<Option<UserProfile>> {
+    let profile = sqlx::query_as::<_, UserProfile>(
+        "SELECT * FROM user_profiles WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(profile)
+}
+
+pub async fn update_profile_privacy(
+    pool: &PgPool,
+    user_id: Uuid,
+    privacy: &serde_json::Value,
+) -> Result<()> {
+    let now = Utc::now();
+    sqlx::query(
+        "UPDATE user_profiles SET privacy = $2, updated_at = $3 WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .bind(privacy)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    Ok(())
 }

@@ -1,6 +1,6 @@
 use axum::extract::{Path, Query, State};
 use axum::response::Json;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post, put};
 use axum::Router;
 use axum_extra::extract::cookie::CookieJar;
 use serde::Deserialize;
@@ -275,6 +275,13 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/link/github", get(auth::link_github_login))
         .route("/auth/link/google", get(auth::link_google_login))
         .route("/api/auth/unlink", post(auth::unlink_provider))
+        // ツールクライアント管理
+        .route("/api/auth/tools", post(auth::create_tool_client).get(auth::list_tool_clients))
+        .route("/api/auth/tools/{tool_id}", delete(auth::delete_tool_client))
+        // ユーザープロファイル
+        .route("/api/profile", get(auth::get_my_profile).put(auth::update_my_profile))
+        .route("/api/profile/privacy", put(auth::update_profile_privacy))
+        .route("/api/users/{user_id}/profile", get(auth::get_public_profile))
         // WebSocket セッション接続
         // 組織・プロジェクト定義・ユーザー情報の操作は全て WS セッション経由
         .route("/ws", get(ws::ws_upgrade))
