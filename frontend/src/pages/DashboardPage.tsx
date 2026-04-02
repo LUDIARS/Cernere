@@ -34,9 +34,14 @@ export function DashboardPage() {
           </div>
         )}
 
-        <button onClick={logout} className="danger">
-          Logout
-        </button>
+        <div style={{ display: "flex", gap: "0.75rem" }}>
+          <a href="/profile">
+            <button className="primary">プロファイル設定</button>
+          </a>
+          <button onClick={logout} className="danger">
+            Logout
+          </button>
+        </div>
       </div>
     </div>
   );

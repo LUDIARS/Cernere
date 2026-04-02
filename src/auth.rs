@@ -1,4 +1,4 @@
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::response::{Json, Redirect};
 use axum_extra::extract::cookie::{Cookie, CookieJar};
@@ -9,7 +9,10 @@ use uuid::Uuid;
 
 use crate::app_state::AppState;
 use crate::error::{AppError, Result};
-use crate::models::{JwtClaims, MfaChallengeResponse, Session, TokenResponse, User, UserResponse};
+use crate::models::{
+    JwtClaims, MfaChallengeResponse, Session, TokenResponse, ToolClientResponse, ToolJwtClaims,
+    User, UserResponse,
+};
 use crate::{db, SESSION_TTL_SECS};
 
 const SESSION_COOKIE: &str = "ars_session";
@@ -88,9 +91,22 @@ pub struct RegisterRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
-    pub email: String,
-    pub password: String,
+    pub email: Option<String>,
+    pub password: Option<String>,
+    /// "password" (デフォルト) or "client_credentials" (ツール認証)
+    #[serde(default = "default_grant_type")]
+    pub grant_type: String,
+    /// ツール認証用 client_id
+    pub client_id: Option<String>,
+    /// ツール認証用 client_secret
+    pub client_secret: Option<String>,
 }
+
+fn default_grant_type() -> String {
+    "password".to_string()
+}
+
+const TOOL_ACCESS_TOKEN_MINUTES: i64 = 60;
 
 #[derive(Debug, Deserialize)]
 pub struct RefreshRequest {
@@ -167,11 +183,28 @@ pub async fn register(
 }
 
 /// POST /api/auth/login
+///
+/// 統合認証エンドポイント: grant_type で分岐
+/// - "password" (デフォルト): ユーザー認証 (email + password)
+/// - "client_credentials": ツール認証 (client_id + client_secret)
 pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<serde_json::Value>> {
-    let user = db::get_user_by_email(&state.db, &req.email)
+    match req.grant_type.as_str() {
+        "client_credentials" => login_tool(&state, &req).await,
+        "password" | _ => login_user(&state, &req).await,
+    }
+}
+
+/// ユーザー認証 (パスワード)
+async fn login_user(state: &AppState, req: &LoginRequest) -> Result<Json<serde_json::Value>> {
+    let email = req.email.as_ref()
+        .ok_or_else(|| AppError::BadRequest("email is required".into()))?;
+    let password = req.password.as_ref()
+        .ok_or_else(|| AppError::BadRequest("password is required".into()))?;
+
+    let user = db::get_user_by_email(&state.db, email)
         .await?
         .ok_or_else(|| AppError::Unauthorized("Invalid email or password".into()))?;
 
@@ -180,7 +213,7 @@ pub async fn login(
         .as_ref()
         .ok_or_else(|| AppError::Unauthorized("Invalid email or password".into()))?;
 
-    let valid = bcrypt::verify(&req.password, hash)
+    let valid = bcrypt::verify(password, hash)
         .map_err(|e| AppError::Internal(format!("Verify failed: {}", e)))?;
     if !valid {
         return Err(AppError::Unauthorized("Invalid email or password".into()));
@@ -210,6 +243,56 @@ pub async fn login(
         access_token,
         refresh_token,
     }).unwrap()))
+}
+
+/// ツール認証 (client_credentials)
+/// 認証サーバと取り決めたシークレットで認証し、ツール用 JWT を発行
+async fn login_tool(state: &AppState, req: &LoginRequest) -> Result<Json<serde_json::Value>> {
+    let client_id = req.client_id.as_ref()
+        .ok_or_else(|| AppError::BadRequest("client_id is required for client_credentials".into()))?;
+    let client_secret = req.client_secret.as_ref()
+        .ok_or_else(|| AppError::BadRequest("client_secret is required for client_credentials".into()))?;
+
+    let tool_client = db::get_tool_client_by_client_id(&state.db, client_id)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("Invalid client credentials".into()))?;
+
+    if !tool_client.is_active {
+        return Err(AppError::Unauthorized("Tool client is disabled".into()));
+    }
+
+    let valid = bcrypt::verify(client_secret, &tool_client.client_secret_hash)
+        .map_err(|e| AppError::Internal(format!("Verify failed: {}", e)))?;
+    if !valid {
+        return Err(AppError::Unauthorized("Invalid client credentials".into()));
+    }
+
+    // ツール用 JWT 発行
+    let now = Utc::now();
+    let scopes: Vec<String> = serde_json::from_value(tool_client.scopes.clone()).unwrap_or_default();
+    let claims = ToolJwtClaims {
+        sub: tool_client.id.to_string(),
+        owner: tool_client.owner_user_id.to_string(),
+        scopes: scopes.clone(),
+        iat: now.timestamp() as usize,
+        exp: (now + Duration::minutes(TOOL_ACCESS_TOKEN_MINUTES)).timestamp() as usize,
+    };
+    let access_token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(state.config.jwt_secret.as_bytes()),
+    )
+    .map_err(|e| AppError::Internal(format!("JWT encode failed: {}", e)))?;
+
+    // last_used_at 更新
+    let _ = db::update_tool_client_last_used(&state.db, tool_client.id).await;
+
+    Ok(Json(serde_json::json!({
+        "tokenType": "tool",
+        "accessToken": access_token,
+        "expiresIn": TOOL_ACCESS_TOKEN_MINUTES * 60,
+        "client": ToolClientResponse::from(tool_client),
+    })))
 }
 
 /// POST /api/auth/refresh
@@ -848,4 +931,213 @@ pub async fn extract_user(state: &AppState, jar: &CookieJar) -> Result<User> {
     db::get_user(&state.db, session.user_id)
         .await?
         .ok_or_else(|| AppError::Unauthorized("User not found".into()))
+}
+
+// ── ツールクライアント管理 ─────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct CreateToolClientRequest {
+    pub name: String,
+    pub scopes: Option<Vec<String>>,
+}
+
+/// POST /api/auth/tools — ツールクライアント作成
+/// レスポンスにのみ平文シークレットを含む (一度きり)
+pub async fn create_tool_client(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<CreateToolClientRequest>,
+) -> Result<(axum::http::StatusCode, Json<serde_json::Value>)> {
+    let user = extract_user_from_jwt(&state, &headers).await?;
+
+    let id = Uuid::new_v4();
+    let client_id = format!("tool_{}", Uuid::new_v4().to_string().replace('-', ""));
+    let raw_secret = Uuid::new_v4().to_string();
+    let secret_hash = bcrypt::hash(&raw_secret, 10)
+        .map_err(|e| AppError::Internal(format!("Hash failed: {}", e)))?;
+
+    let scopes = serde_json::to_value(req.scopes.unwrap_or_default()).unwrap();
+
+    let tc = db::create_tool_client(
+        &state.db, id, &req.name, &client_id, &secret_hash, user.id, &scopes,
+    )
+    .await?;
+
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(serde_json::json!({
+            "client": crate::models::ToolClientResponse::from(tc),
+            "clientSecret": raw_secret,
+        })),
+    ))
+}
+
+/// GET /api/auth/tools — ツールクライアント一覧
+pub async fn list_tool_clients(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<crate::models::ToolClientResponse>>> {
+    let user = extract_user_from_jwt(&state, &headers).await?;
+    let clients = db::list_tool_clients_by_owner(&state.db, user.id).await?;
+    Ok(Json(clients.into_iter().map(crate::models::ToolClientResponse::from).collect()))
+}
+
+/// DELETE /api/auth/tools/:id — ツールクライアント削除
+pub async fn delete_tool_client(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(tool_id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>> {
+    let user = extract_user_from_jwt(&state, &headers).await?;
+    db::delete_tool_client(&state.db, tool_id, user.id).await?;
+    Ok(Json(serde_json::json!({ "message": "Tool client deleted" })))
+}
+
+// ── ユーザープロファイル ───────────────────────────
+
+use crate::models::{
+    ProfilePrivacy, PublicProfileResponse, UserProfileResponse,
+};
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProfileRequest {
+    pub role_title: Option<String>,
+    pub bio: Option<String>,
+    pub expertise: Option<Vec<String>>,
+    pub hobbies: Option<Vec<String>>,
+    pub extra: Option<serde_json::Value>,
+    pub privacy: Option<ProfilePrivacy>,
+}
+
+/// GET /api/profile — 自分のプロファイル取得
+pub async fn get_my_profile(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<UserProfileResponse>> {
+    let user = extract_user_from_jwt(&state, &headers).await?;
+    let profile = db::get_user_profile(&state.db, user.id).await?;
+    match profile {
+        Some(p) => Ok(Json(UserProfileResponse::from(p))),
+        None => {
+            // 未作成の場合はデフォルトを返す
+            Ok(Json(UserProfileResponse {
+                user_id: user.id.to_string(),
+                role_title: String::new(),
+                bio: String::new(),
+                expertise: vec![],
+                hobbies: vec![],
+                extra: serde_json::json!({}),
+                privacy: ProfilePrivacy::default(),
+                created_at: user.created_at.to_rfc3339(),
+                updated_at: user.updated_at.to_rfc3339(),
+            }))
+        }
+    }
+}
+
+/// PUT /api/profile — 自分のプロファイル更新
+pub async fn update_my_profile(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<UpdateProfileRequest>,
+) -> Result<Json<UserProfileResponse>> {
+    let user = extract_user_from_jwt(&state, &headers).await?;
+
+    // 既存プロファイルを取得してマージ
+    let existing = db::get_user_profile(&state.db, user.id).await?;
+    let (cur_role, cur_bio, cur_expertise, cur_hobbies, cur_extra, cur_privacy) = match &existing {
+        Some(p) => (
+            p.role_title.clone(),
+            p.bio.clone(),
+            p.expertise.clone(),
+            p.hobbies.clone(),
+            p.extra.clone(),
+            p.privacy.clone(),
+        ),
+        None => (
+            String::new(),
+            String::new(),
+            serde_json::json!([]),
+            serde_json::json!([]),
+            serde_json::json!({}),
+            serde_json::to_value(ProfilePrivacy::default()).unwrap(),
+        ),
+    };
+
+    let role_title = req.role_title.unwrap_or(cur_role);
+    let bio = req.bio.unwrap_or(cur_bio);
+    let expertise = req.expertise
+        .map(|v| serde_json::to_value(v).unwrap())
+        .unwrap_or(cur_expertise);
+    let hobbies = req.hobbies
+        .map(|v| serde_json::to_value(v).unwrap())
+        .unwrap_or(cur_hobbies);
+    let extra = req.extra.unwrap_or(cur_extra);
+    let privacy = req.privacy
+        .map(|v| serde_json::to_value(v).unwrap())
+        .unwrap_or(cur_privacy);
+
+    let profile = db::upsert_user_profile(
+        &state.db, user.id, &role_title, &bio, &expertise, &hobbies, &extra, &privacy,
+    )
+    .await?;
+
+    Ok(Json(UserProfileResponse::from(profile)))
+}
+
+/// PUT /api/profile/privacy — プライバシー設定のみ更新
+pub async fn update_profile_privacy(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<ProfilePrivacy>,
+) -> Result<Json<serde_json::Value>> {
+    let user = extract_user_from_jwt(&state, &headers).await?;
+    let privacy_val = serde_json::to_value(&req).unwrap();
+    db::update_profile_privacy(&state.db, user.id, &privacy_val).await?;
+    Ok(Json(serde_json::json!({ "message": "Privacy settings updated", "privacy": req })))
+}
+
+/// GET /api/users/:id/profile — 他ユーザーの公開プロファイル取得
+/// プライバシー設定でオプトアウトされたフィールドは含まない
+pub async fn get_public_profile(
+    State(state): State<AppState>,
+    Path(user_id): Path<Uuid>,
+) -> Result<Json<PublicProfileResponse>> {
+    let user = db::get_user(&state.db, user_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".into()))?;
+
+    let profile = db::get_user_profile(&state.db, user_id).await?;
+
+    let (role_title, bio, expertise, hobbies) = match &profile {
+        Some(p) => {
+            let privacy: ProfilePrivacy =
+                serde_json::from_value(p.privacy.clone()).unwrap_or_default();
+            (
+                if privacy.role_title { Some(p.role_title.clone()) } else { None },
+                if privacy.bio { Some(p.bio.clone()) } else { None },
+                if privacy.expertise {
+                    Some(serde_json::from_value(p.expertise.clone()).unwrap_or_default())
+                } else {
+                    None
+                },
+                if privacy.hobbies {
+                    Some(serde_json::from_value(p.hobbies.clone()).unwrap_or_default())
+                } else {
+                    None
+                },
+            )
+        }
+        None => (None, None, None, None),
+    };
+
+    Ok(Json(PublicProfileResponse {
+        user_id: user.id.to_string(),
+        display_name: user.display_name,
+        role_title,
+        bio,
+        expertise,
+        hobbies,
+    }))
 }

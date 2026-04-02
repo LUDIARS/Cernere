@@ -270,6 +270,151 @@ impl From<ProjectDefinition> for ProjectDefinitionResponse {
     }
 }
 
+// ── ツールクライアント (Tool Authentication) ──────
+
+/// ツールクライアント
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ToolClient {
+    pub id: Uuid,
+    pub name: String,
+    pub client_id: String,
+    pub client_secret_hash: String,
+    pub owner_user_id: Uuid,
+    pub scopes: serde_json::Value,
+    pub is_active: bool,
+    pub last_used_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// ツールクライアントレスポンス (シークレットは含まない)
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolClientResponse {
+    pub id: String,
+    pub name: String,
+    pub client_id: String,
+    pub owner_user_id: String,
+    pub scopes: Vec<String>,
+    pub is_active: bool,
+    pub last_used_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<ToolClient> for ToolClientResponse {
+    fn from(tc: ToolClient) -> Self {
+        let scopes: Vec<String> = serde_json::from_value(tc.scopes).unwrap_or_default();
+        Self {
+            id: tc.id.to_string(),
+            name: tc.name,
+            client_id: tc.client_id,
+            owner_user_id: tc.owner_user_id.to_string(),
+            scopes,
+            is_active: tc.is_active,
+            last_used_at: tc.last_used_at.map(|t| t.to_rfc3339()),
+            created_at: tc.created_at.to_rfc3339(),
+            updated_at: tc.updated_at.to_rfc3339(),
+        }
+    }
+}
+
+/// ツール認証用 JWT クレーム
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ToolJwtClaims {
+    pub sub: String,          // tool_client.id
+    pub owner: String,        // owner_user_id
+    pub scopes: Vec<String>,
+    pub exp: usize,
+    pub iat: usize,
+}
+
+// ── ユーザープロファイル (パーソナリティデータ) ────
+
+/// ユーザープロファイル
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct UserProfile {
+    pub user_id: Uuid,
+    pub role_title: String,
+    pub bio: String,
+    pub expertise: serde_json::Value,
+    pub hobbies: serde_json::Value,
+    pub extra: serde_json::Value,
+    pub privacy: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// プロファイルプライバシー設定
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfilePrivacy {
+    #[serde(default = "default_true")]
+    pub bio: bool,
+    #[serde(default = "default_true")]
+    pub role_title: bool,
+    #[serde(default = "default_true")]
+    pub expertise: bool,
+    #[serde(default = "default_true")]
+    pub hobbies: bool,
+}
+
+fn default_true() -> bool { true }
+
+impl Default for ProfilePrivacy {
+    fn default() -> Self {
+        Self { bio: true, role_title: true, expertise: true, hobbies: true }
+    }
+}
+
+/// プロファイルレスポンス (自分用 — 全フィールド含む)
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserProfileResponse {
+    pub user_id: String,
+    pub role_title: String,
+    pub bio: String,
+    pub expertise: Vec<String>,
+    pub hobbies: Vec<String>,
+    pub extra: serde_json::Value,
+    pub privacy: ProfilePrivacy,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<UserProfile> for UserProfileResponse {
+    fn from(p: UserProfile) -> Self {
+        let privacy: ProfilePrivacy = serde_json::from_value(p.privacy).unwrap_or_default();
+        Self {
+            user_id: p.user_id.to_string(),
+            role_title: p.role_title,
+            bio: p.bio,
+            expertise: serde_json::from_value(p.expertise).unwrap_or_default(),
+            hobbies: serde_json::from_value(p.hobbies).unwrap_or_default(),
+            extra: p.extra,
+            privacy,
+            created_at: p.created_at.to_rfc3339(),
+            updated_at: p.updated_at.to_rfc3339(),
+        }
+    }
+}
+
+/// 公開プロファイルレスポンス (プライバシー設定に従いフィルタ済み)
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicProfileResponse {
+    pub user_id: String,
+    pub display_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bio: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expertise: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hobbies: Option<Vec<String>>,
+}
+
 /// JWT クレーム
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JwtClaims {

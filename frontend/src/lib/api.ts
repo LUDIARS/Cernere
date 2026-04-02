@@ -304,3 +304,102 @@ export const auth = {
     });
   },
 };
+
+// ── Profile API ──────────────────────────────────
+
+export interface ProfilePrivacy {
+  bio: boolean;
+  roleTitle: boolean;
+  expertise: boolean;
+  hobbies: boolean;
+}
+
+export interface UserProfileData {
+  userId: string;
+  roleTitle: string;
+  bio: string;
+  expertise: string[];
+  hobbies: string[];
+  extra: Record<string, unknown>;
+  privacy: ProfilePrivacy;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublicProfile {
+  userId: string;
+  displayName: string;
+  roleTitle?: string;
+  bio?: string;
+  expertise?: string[];
+  hobbies?: string[];
+}
+
+export interface UpdateProfileBody {
+  roleTitle?: string;
+  bio?: string;
+  expertise?: string[];
+  hobbies?: string[];
+  extra?: Record<string, unknown>;
+  privacy?: ProfilePrivacy;
+}
+
+export const profile = {
+  async getMyProfile(): Promise<UserProfileData> {
+    return request<UserProfileData>("/api/profile");
+  },
+
+  async updateMyProfile(body: UpdateProfileBody): Promise<UserProfileData> {
+    return request<UserProfileData>("/api/profile", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  async updatePrivacy(privacy: ProfilePrivacy): Promise<void> {
+    await request("/api/profile/privacy", {
+      method: "PUT",
+      body: JSON.stringify(privacy),
+    });
+  },
+
+  async getPublicProfile(userId: string): Promise<PublicProfile> {
+    return request<PublicProfile>(`/api/users/${userId}/profile`);
+  },
+};
+
+// ── Tool Client API ──────────────────────────────
+
+export interface ToolClientData {
+  id: string;
+  name: string;
+  clientId: string;
+  ownerUserId: string;
+  scopes: string[];
+  isActive: boolean;
+  lastUsedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateToolClientResponse {
+  client: ToolClientData;
+  clientSecret: string;
+}
+
+export const toolClients = {
+  async create(name: string, scopes?: string[]): Promise<CreateToolClientResponse> {
+    return request<CreateToolClientResponse>("/api/auth/tools", {
+      method: "POST",
+      body: JSON.stringify({ name, scopes }),
+    });
+  },
+
+  async list(): Promise<ToolClientData[]> {
+    return request<ToolClientData[]>("/api/auth/tools");
+  },
+
+  async remove(id: string): Promise<void> {
+    await request(`/api/auth/tools/${id}`, { method: "DELETE" });
+  },
+};
