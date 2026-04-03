@@ -1,6 +1,7 @@
+use axum::http::HeaderValue;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tracing_subscriber::EnvFilter;
 
 mod app_state;
@@ -87,12 +88,42 @@ async fn main() {
         ses_client,
     };
 
+    let allowed_origin = state.config.frontend_url.parse::<HeaderValue>()
+        .expect("FRONTEND_URL must be a valid header value");
     let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_origin(allowed_origin)
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::PUT,
+            axum::http::Method::DELETE,
+            axum::http::Method::OPTIONS,
+        ])
+        .allow_headers([
+            axum::http::header::AUTHORIZATION,
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::ACCEPT,
+        ])
+        .allow_credentials(true);
 
-    let app = routes::router(state).layer(cors);
+    let security_headers = tower_http::set_header::SetResponseHeaderLayer::overriding(
+        axum::http::header::HeaderName::from_static("x-frame-options"),
+        axum::http::HeaderValue::from_static("DENY"),
+    );
+    let content_type_options = tower_http::set_header::SetResponseHeaderLayer::overriding(
+        axum::http::header::HeaderName::from_static("x-content-type-options"),
+        axum::http::HeaderValue::from_static("nosniff"),
+    );
+    let referrer_policy = tower_http::set_header::SetResponseHeaderLayer::overriding(
+        axum::http::header::HeaderName::from_static("referrer-policy"),
+        axum::http::HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
+
+    let app = routes::router(state)
+        .layer(cors)
+        .layer(security_headers)
+        .layer(content_type_options)
+        .layer(referrer_policy);
 
     let listener = tokio::net::TcpListener::bind(&listen_addr)
         .await

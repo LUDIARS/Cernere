@@ -9,7 +9,7 @@ description = "Cernere — stateful authentication, session management, and rela
 axum = { version = "0.7", features = ["macros", "ws"] }
 axum-extra = { version = "0.9", features = ["cookie"] }
 tokio = { version = "1", features = ["full"] }
-tower-http = { version = "0.5", features = ["cors", "trace"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "set-header"] }
 
 # Database
 sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono"] }
