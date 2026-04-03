@@ -253,6 +253,8 @@ pub fn router(state: AppState) -> Router {
         // Google OAuth
         .route("/auth/google/login", get(auth::google_login))
         .route("/auth/google/callback", get(auth::google_callback))
+        // OAuth 認可コード交換
+        .route("/api/auth/exchange", post(auth::exchange_auth_code))
         // GitHub OAuth (Cookie-based, Ars BFF)
         .route("/auth/github/login", get(auth::github_login))
         .route("/auth/github/callback", get(auth::github_callback))

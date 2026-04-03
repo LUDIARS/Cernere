@@ -568,6 +568,22 @@ pub async fn list_user_organizations(pool: &PgPool, user_id: Uuid) -> Result<Vec
     Ok(orgs)
 }
 
+/// 2人のユーザーが同じ組織に所属しているか確認
+pub async fn share_organization(pool: &PgPool, user_a: Uuid, user_b: Uuid) -> Result<bool> {
+    let row = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(
+             SELECT 1 FROM organization_members a
+             INNER JOIN organization_members b ON a.organization_id = b.organization_id
+             WHERE a.user_id = $1 AND b.user_id = $2
+         )",
+    )
+    .bind(user_a)
+    .bind(user_b)
+    .fetch_one(pool)
+    .await?;
+    Ok(row)
+}
+
 // ── Organization Members ───────────────────────────
 
 pub async fn add_organization_member(

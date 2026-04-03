@@ -26,6 +26,8 @@ use crate::session_state::{UserFullState, UserState};
 const PING_INTERVAL_SECS: u64 = 30;
 /// pong タイムアウト（秒）— この期間内に pong がなければ切断
 const PONG_TIMEOUT_SECS: u64 = 10;
+/// WebSocket メッセージの最大サイズ (256 KB)
+const MAX_MESSAGE_SIZE: usize = 256 * 1024;
 
 // ── WebSocket メッセージプロトコル ───────────────────
 
@@ -90,7 +92,9 @@ pub async fn ws_upgrade(
     // 認証: トークンまたはセッション ID で検証
     let (user_id, session_id) = authenticate_ws(&state, &query).await?;
 
-    Ok(ws.on_upgrade(move |socket| handle_ws_session(state, socket, user_id, session_id)))
+    Ok(ws
+        .max_message_size(MAX_MESSAGE_SIZE)
+        .on_upgrade(move |socket| handle_ws_session(state, socket, user_id, session_id)))
 }
 
 /// WebSocket 認証
@@ -281,6 +285,36 @@ async fn handle_client_message(
         }
 
         ClientMessage::Relay { target, payload } => {
+            // リレー認可チェック: User ターゲットは同一組織メンバーのみ許可
+            let authorized = match &target {
+                RelayTarget::Broadcast => true, // 自分の他セッションのみ → 常に許可
+                RelayTarget::Session(_) => true, // セッション指定 → レジストリで存在確認される
+                RelayTarget::User(target_user_str) => {
+                    if let Ok(target_uid) = uuid::Uuid::parse_str(target_user_str) {
+                        if target_uid == *user_id {
+                            true
+                        } else {
+                            // 同一組織に所属しているか確認
+                            match crate::db::share_organization(&state.db, *user_id, target_uid).await {
+                                Ok(shared) => shared,
+                                Err(_) => false,
+                            }
+                        }
+                    } else {
+                        false
+                    }
+                }
+            };
+
+            if !authorized {
+                let err = ServerMessage::Error {
+                    code: "relay_forbidden".into(),
+                    message: "Not authorized to relay to this target".into(),
+                };
+                send_message(sender, &err).await;
+                return;
+            }
+
             let relay_msg = RelayMessage {
                 from_user_id: *user_id,
                 from_session_id: session_id.to_string(),
