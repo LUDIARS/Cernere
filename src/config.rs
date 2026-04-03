@@ -50,8 +50,13 @@ impl Config {
             google_redirect_uri: env::var("GOOGLE_REDIRECT_URI")
                 .unwrap_or_else(|_| "http://localhost:8080/auth/google/callback".into()),
 
-            jwt_secret: env::var("JWT_SECRET")
-                .unwrap_or_else(|_| "cernere-dev-secret-change-in-production".into()),
+            jwt_secret: env::var("JWT_SECRET").unwrap_or_else(|_| {
+                if Self::is_production() {
+                    panic!("JWT_SECRET must be set in production environment");
+                }
+                tracing::warn!("JWT_SECRET is not set — using insecure default (dev only)");
+                "cernere-dev-secret-change-in-production".into()
+            }),
 
             aws_region: env::var("AWS_REGION").unwrap_or_else(|_| "ap-northeast-1".into()),
             aws_sns_enabled: env::var("AWS_SNS_ENABLED")
@@ -68,5 +73,12 @@ impl Config {
 
     pub fn is_https(&self) -> bool {
         self.frontend_url.starts_with("https://")
+    }
+
+    fn is_production() -> bool {
+        env::var("CERNERE_ENV")
+            .or_else(|_| env::var("APP_ENV"))
+            .map(|v| v == "production" || v == "prod")
+            .unwrap_or(false)
     }
 }

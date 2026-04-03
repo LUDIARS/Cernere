@@ -125,6 +125,12 @@ pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
 ) -> Result<(axum::http::StatusCode, Json<TokenResponse>)> {
+    // レートリミット: 同一メールで 5回/10分
+    state.redis.check_rate_limit(
+        &format!("register:{}", req.email),
+        5, 600,
+    ).await?;
+
     if req.password.len() < 8 {
         return Err(AppError::BadRequest(
             "Password must be at least 8 characters".into(),
@@ -132,7 +138,7 @@ pub async fn register(
     }
 
     if db::get_user_by_email(&state.db, &req.email).await?.is_some() {
-        return Err(AppError::BadRequest("Email already registered".into()));
+        return Err(AppError::BadRequest("Registration failed. Please check your input and try again.".into()));
     }
 
     let password_hash = bcrypt::hash(&req.password, 12)
@@ -203,6 +209,12 @@ async fn login_user(state: &AppState, req: &LoginRequest) -> Result<Json<serde_j
         .ok_or_else(|| AppError::BadRequest("email is required".into()))?;
     let password = req.password.as_ref()
         .ok_or_else(|| AppError::BadRequest("password is required".into()))?;
+
+    // レートリミット: 同一メールで 10回/15分
+    state.redis.check_rate_limit(
+        &format!("login:{}", email),
+        10, 900,
+    ).await?;
 
     let user = db::get_user_by_email(&state.db, email)
         .await?
@@ -367,42 +379,73 @@ struct GoogleUserInfo {
 }
 
 /// GET /auth/google/login
-pub async fn google_login(State(state): State<AppState>) -> Result<Redirect> {
+pub async fn google_login(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<(CookieJar, Redirect)> {
     if state.config.google_client_id.is_empty() {
         return Err(AppError::BadRequest("Google OAuth is not configured".into()));
     }
+
+    let csrf_state = Uuid::new_v4().to_string();
+    let is_https = state.config.is_https();
+
+    let state_cookie = Cookie::build((CSRF_STATE_COOKIE, csrf_state.clone()))
+        .path("/")
+        .http_only(true)
+        .max_age(time::Duration::minutes(10))
+        .same_site(axum_extra::extract::cookie::SameSite::Lax)
+        .secure(is_https);
 
     let scopes = [
         "openid",
         "email",
         "profile",
-        "https://www.googleapis.com/auth/calendar.readonly",
-        "https://www.googleapis.com/auth/calendar.events.readonly",
-        "https://www.googleapis.com/auth/calendar.events",
     ]
     .join(" ");
 
     let params = format!(
-        "client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent",
+        "client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent&state={}",
         urlencoding::encode(&state.config.google_client_id),
         urlencoding::encode(&state.config.google_redirect_uri),
         urlencoding::encode(&scopes),
+        urlencoding::encode(&csrf_state),
     );
 
     let url = format!("https://accounts.google.com/o/oauth2/v2/auth?{}", params);
-    Ok(Redirect::temporary(&url))
+    Ok((jar.add(state_cookie), Redirect::temporary(&url)))
 }
 
 /// GET /auth/google/callback
 pub async fn google_callback(
     State(state): State<AppState>,
     Query(query): Query<GoogleCallbackQuery>,
-) -> Result<Redirect> {
+    jar: CookieJar,
+) -> Result<(CookieJar, Redirect)> {
     let frontend = &state.config.frontend_url;
+
+    let clear_csrf = Cookie::build((CSRF_STATE_COOKIE, ""))
+        .path("/")
+        .max_age(time::Duration::seconds(0));
 
     if let Some(error) = query.error {
         let url = format!("{}?authError={}", frontend, urlencoding::encode(&error));
-        return Ok(Redirect::temporary(&url));
+        return Ok((jar.remove(clear_csrf), Redirect::temporary(&url)));
+    }
+
+    // CSRF state 検証 (リンクフローの state は "link:" プレフィックス付き)
+    if let Some(ref state_val) = query.state {
+        if !state_val.starts_with("link:") {
+            let expected_state = jar
+                .get(CSRF_STATE_COOKIE)
+                .map(|c| c.value().to_string())
+                .ok_or_else(|| AppError::BadRequest("Missing OAuth state cookie".into()))?;
+            if &expected_state != state_val {
+                return Err(AppError::BadRequest("Invalid OAuth state".into()));
+            }
+        }
+    } else {
+        return Err(AppError::BadRequest("Missing state parameter".into()));
     }
 
     let code = query
@@ -430,7 +473,7 @@ pub async fn google_callback(
             frontend,
             urlencoding::encode("Failed to exchange authorization code")
         );
-        return Ok(Redirect::temporary(&url));
+        return Ok((jar.remove(clear_csrf), Redirect::temporary(&url)));
     }
 
     let token_data: GoogleTokenResponse = token_res
@@ -469,7 +512,7 @@ pub async fn google_callback(
                 if let Some(existing) = db::get_user_by_google_id(&state.db, &user_info.id).await? {
                     if existing.id != link_user_id {
                         let url = format!("{}?authError={}", frontend, urlencoding::encode("This Google account is already linked to another user"));
-                        return Ok(Redirect::temporary(&url));
+                        return Ok((jar.remove(clear_csrf), Redirect::temporary(&url)));
                     }
                 }
 
@@ -485,7 +528,7 @@ pub async fn google_callback(
                 .await?;
 
                 let url = format!("{}?linked=google", frontend);
-                return Ok(Redirect::temporary(&url));
+                return Ok((jar.remove(clear_csrf), Redirect::temporary(&url)));
             }
         }
     }
@@ -549,14 +592,21 @@ pub async fn google_callback(
     let expires_at = now + Duration::days(REFRESH_TOKEN_DAYS);
     db::create_refresh_session(&state.db, user.id, &refresh_token, expires_at).await?;
 
-    // Redirect to frontend with tokens
+    // 短命の認可コードを Redis に保存し、フロントエンドが /api/auth/exchange で交換する
+    let auth_code = Uuid::new_v4().to_string();
+    let code_data = serde_json::json!({
+        "accessToken": access_token,
+        "refreshToken": refresh_token,
+        "user": UserResponse::from(user),
+    });
+    state.redis.put_auth_code(&auth_code, &code_data.to_string()).await?;
+
     let url = format!(
-        "{}?accessToken={}&refreshToken={}",
+        "{}?authCode={}",
         frontend,
-        urlencoding::encode(&access_token),
-        urlencoding::encode(&refresh_token),
+        urlencoding::encode(&auth_code),
     );
-    Ok(Redirect::temporary(&url))
+    Ok((jar.remove(clear_csrf), Redirect::temporary(&url)))
 }
 
 // ── GitHub OAuth (Cookie ベース、Ars BFF 用) ─────────
@@ -822,9 +872,6 @@ pub async fn link_google_login(
         "openid",
         "email",
         "profile",
-        "https://www.googleapis.com/auth/calendar.readonly",
-        "https://www.googleapis.com/auth/calendar.events.readonly",
-        "https://www.googleapis.com/auth/calendar.events",
     ]
     .join(" ");
 
@@ -882,6 +929,27 @@ pub async fn unlink_provider(
     }
 
     Ok(Json(serde_json::json!({ "message": format!("{} unlinked", req.provider) })))
+}
+
+// ── 認可コード交換 ────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExchangeCodeRequest {
+    pub code: String,
+}
+
+/// POST /api/auth/exchange — OAuth 認可コードをトークンに交換
+/// Google/GitHub OAuth のコールバックで発行された短命コード (60秒) を1回限り使用可能
+pub async fn exchange_auth_code(
+    State(state): State<AppState>,
+    Json(req): Json<ExchangeCodeRequest>,
+) -> Result<Json<serde_json::Value>> {
+    let data = state.redis.take_auth_code(&req.code).await?
+        .ok_or_else(|| AppError::Unauthorized("Invalid or expired auth code".into()))?;
+    let value: serde_json::Value = serde_json::from_str(&data)
+        .map_err(|_| AppError::Internal("Failed to parse auth code data".into()))?;
+    Ok(Json(value))
 }
 
 // ── Cookie ベース認証 (Ars BFF 用) ──────────────────
@@ -953,7 +1021,7 @@ pub async fn create_tool_client(
     let id = Uuid::new_v4();
     let client_id = format!("tool_{}", Uuid::new_v4().to_string().replace('-', ""));
     let raw_secret = Uuid::new_v4().to_string();
-    let secret_hash = bcrypt::hash(&raw_secret, 10)
+    let secret_hash = bcrypt::hash(&raw_secret, 12)
         .map_err(|e| AppError::Internal(format!("Hash failed: {}", e)))?;
 
     let scopes = serde_json::to_value(req.scopes.unwrap_or_default()).unwrap();

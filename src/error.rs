@@ -15,6 +15,9 @@ pub enum AppError {
     #[error("Forbidden: {0}")]
     Forbidden(String),
 
+    #[error("Too many requests: {0}")]
+    TooManyRequests(String),
+
     #[error("Database error: {0}")]
     Db(#[from] sqlx::Error),
 
@@ -30,16 +33,34 @@ pub enum AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let status = match &self {
-            AppError::NotFound(_) => StatusCode::NOT_FOUND,
-            AppError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
-            AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
-            AppError::Forbidden(_) => StatusCode::FORBIDDEN,
-            AppError::Db(_) | AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            AppError::Redis(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            AppError::External(_) => StatusCode::BAD_GATEWAY,
+        let (status, message) = match &self {
+            AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
+            AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
+            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
+            AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
+            AppError::TooManyRequests(msg) => (StatusCode::TOO_MANY_REQUESTS, msg.clone()),
+            AppError::Db(e) => {
+                tracing::error!("Database error: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".into())
+            }
+            AppError::Internal(e) => {
+                tracing::error!("Internal error: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".into())
+            }
+            AppError::Redis(e) => {
+                tracing::error!("Redis error: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".into())
+            }
+            AppError::External(e) => {
+                tracing::error!("External service error: {}", e);
+                (StatusCode::BAD_GATEWAY, "External service error".into())
+            }
         };
-        (status, self.to_string()).into_response()
+        let body = serde_json::json!({
+            "error": status.canonical_reason().unwrap_or("Error"),
+            "message": message,
+        });
+        (status, axum::response::Json(body)).into_response()
     }
 }
 

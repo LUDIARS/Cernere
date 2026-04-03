@@ -521,6 +521,13 @@ pub async fn mfa_send_code(
     Json(req): Json<MfaSendCodeRequest>,
 ) -> Result<Json<serde_json::Value>> {
     let user_id = verify_mfa_token(&req.mfa_token, &state.config.jwt_secret)?;
+
+    // レートリミット: 同一ユーザーで 3回/5分
+    state.redis.check_rate_limit(
+        &format!("mfa_send:{}", user_id),
+        3, 300,
+    ).await?;
+
     let user = db::get_user(&state.db, user_id)
         .await?
         .ok_or_else(|| AppError::Unauthorized("User not found".into()))?;
@@ -570,6 +577,13 @@ pub async fn mfa_verify(
     Json(req): Json<MfaVerifyRequest>,
 ) -> Result<Json<TokenResponse>> {
     let user_id = verify_mfa_token(&req.mfa_token, &state.config.jwt_secret)?;
+
+    // レートリミット: 同一ユーザーで 5回/5分
+    state.redis.check_rate_limit(
+        &format!("mfa_verify:{}", user_id),
+        5, 300,
+    ).await?;
+
     let user = db::get_user(&state.db, user_id)
         .await?
         .ok_or_else(|| AppError::Unauthorized("User not found".into()))?;
