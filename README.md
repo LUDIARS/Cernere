@@ -58,6 +58,9 @@ Layer 4: リソース所有権・ロールチェック (403)
 │   ├── redis_session.rs   # Redis クライアント
 │   └── env_auth.rs        # 認証設定ビルダー
 ├── packages/
+│   ├── id-service/        # 汎用 Identity Service SDK
+│   ├── id-cache/          # Id Service 用キャッシュレイヤー
+│   ├── auth/              # id-service 互換レイヤー (旧パッケージ)
 │   └── env-cli/           # Infisical シークレット管理 CLI
 ├── frontend/              # React フロントエンド
 ├── migrations/            # SQL マイグレーション
@@ -241,6 +244,8 @@ GET /ws?session_id=<id>      # 再接続 (セッション ID)
 ## ドキュメント
 
 - [セキュリティ設計](spec/security_design.md)
+- [認証パッケージ一覧](docs/auth_packages.md)
+- [別プロジェクトへの実装ガイド](docs/integration_guide.md)
 - [リレー設計](docs/relay_design.md)
 - [サービスインターフェース](docs/service_interface.md)
 
