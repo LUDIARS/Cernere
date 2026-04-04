@@ -26,7 +26,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::ws::{RelayTarget, ServerMessage};
+use crate::ws::{RelayTarget, ServerMessage, ServiceServerMessage};
 
 // ── セッションレジストリ ────────────────────────────
 
@@ -86,6 +86,98 @@ impl SessionRegistry {
 
     pub fn active_session_count(&self) -> usize {
         self.sessions.len()
+    }
+}
+
+// ── サービス接続レジストリ ──────────────────────────
+
+/// Cernere に WebSocket 接続中のサービスのエントリ
+pub struct ServiceConnectionEntry {
+    pub service_id: Uuid,
+    pub service_code: String,
+    pub sender: Arc<Mutex<SplitSink<WebSocket, Message>>>,
+}
+
+/// サービス WebSocket 接続の in-memory レジストリ
+#[derive(Default)]
+pub struct ServiceConnectionRegistry {
+    /// service_code → ServiceConnectionEntry
+    connections: DashMap<String, ServiceConnectionEntry>,
+}
+
+impl ServiceConnectionRegistry {
+    pub fn new() -> Self {
+        Self {
+            connections: DashMap::new(),
+        }
+    }
+
+    pub fn register(
+        &self,
+        service_code: String,
+        service_id: Uuid,
+        sender: Arc<Mutex<SplitSink<WebSocket, Message>>>,
+    ) {
+        self.connections.insert(
+            service_code.clone(),
+            ServiceConnectionEntry {
+                service_id,
+                service_code,
+                sender,
+            },
+        );
+    }
+
+    pub fn unregister(&self, service_code: &str) {
+        self.connections.remove(service_code);
+    }
+
+    pub fn is_connected(&self, service_code: &str) -> bool {
+        self.connections.contains_key(service_code)
+    }
+
+    pub fn get_sender(
+        &self,
+        service_code: &str,
+    ) -> Option<Arc<Mutex<SplitSink<WebSocket, Message>>>> {
+        self.connections.get(service_code).map(|e| e.sender.clone())
+    }
+
+    pub fn connected_codes(&self) -> Vec<String> {
+        self.connections.iter().map(|e| e.key().clone()).collect()
+    }
+
+    /// サービスに user_admission メッセージを送信し、レスポンスを待たずに送る
+    pub async fn send_to_service(
+        &self,
+        service_code: &str,
+        msg: &ServiceServerMessage,
+    ) -> std::result::Result<(), String> {
+        let sender = self
+            .get_sender(service_code)
+            .ok_or_else(|| format!("Service '{}' is not connected", service_code))?;
+        let json = serde_json::to_string(msg)
+            .map_err(|e| format!("Failed to serialize: {}", e))?;
+        let mut guard = sender.lock().await;
+        guard
+            .send(Message::Text(json.into()))
+            .await
+            .map_err(|e| format!("Failed to send to service: {}", e))
+    }
+
+    /// 全接続サービスに user_revoke を送信
+    pub async fn broadcast_revoke(&self, user_id: &Uuid) {
+        let msg = ServiceServerMessage::UserRevoke {
+            user_id: *user_id,
+        };
+        let json = match serde_json::to_string(&msg) {
+            Ok(j) => j,
+            Err(_) => return,
+        };
+        for entry in self.connections.iter() {
+            let mut guard = entry.value().sender.lock().await;
+            let _ = guard.send(Message::Text(json.clone().into())).await;
+        }
     }
 }
 
