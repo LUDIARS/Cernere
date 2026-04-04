@@ -303,6 +303,42 @@ async function cmdEnv(config: EnvCliConfig, toStdout: boolean): Promise<void> {
   }
 }
 
+async function cmdInitialize(config: EnvCliConfig): Promise<void> {
+  const bootstrap = requireBootstrap(config);
+
+  console.log(`\n${config.name} — Infisical Initialization`);
+  console.log(`環境: ${bootstrap.environment}`);
+  console.log(`対象キー: ${Object.keys(config.infraKeys).length} 件\n`);
+
+  try {
+    const token = await authenticate(bootstrap);
+    const existingSecrets = await fetchSecrets(bootstrap, token);
+    const existingKeys = new Set(existingSecrets.map((s) => s.secretKey));
+
+    let createdCount = 0;
+    let skippedCount = 0;
+
+    for (const [key, value] of Object.entries(config.infraKeys)) {
+      if (existingKeys.has(key)) {
+        console.log(`  SKIP: ${key} (既に存在します)`);
+        skippedCount++;
+        continue;
+      }
+
+      console.log(`  CREATE: ${key}...`);
+      await upsertSecret(bootstrap, token, key, value);
+      createdCount++;
+    }
+
+    console.log(`\n完了しました。`);
+    console.log(`  新規作成: ${createdCount} 件`);
+    console.log(`  スキップ: ${skippedCount} 件`);
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : err}`);
+    process.exit(1);
+  }
+}
+
 // ─── Main ──────────────────────────────────────────────────
 
 function printUsage(config: EnvCliConfig): void {
@@ -316,12 +352,14 @@ function printUsage(config: EnvCliConfig): void {
   console.log("  env-cli set <KEY> <VALUE>  シークレット作成/更新");
   console.log("  env-cli env                Infisical → .env 生成");
   console.log("  env-cli env --stdout       .env 内容を標準出力");
+  console.log("  env-cli initialize         config の infraKeys を Infisical に流し込む (未存在のみ)");
   console.log();
   console.log("フロー:");
-  console.log("  1. setup → Infisical 認証情報を .env.secrets に保存");
-  console.log("  2. env   → Infisical から取得 → Docker 用 .env を生成");
-  console.log("  3. docker compose up → .env を読んで起動");
-  console.log("  4. サービス内で SecretManager が残りのシークレットを取得");
+  console.log("  1. setup      → Infisical 認証情報を .env.secrets に保存");
+  console.log("  2. initialize → env-cli.config.ts のデフォルト値を Infisical に登録");
+  console.log("  3. env        → Infisical から取得 → Docker 用 .env を生成");
+  console.log("  4. docker compose up → .env を読んで起動");
+  console.log("  5. サービス内で SecretManager が残りのシークレットを取得");
 }
 
 async function main(): Promise<void> {
@@ -334,6 +372,9 @@ async function main(): Promise<void> {
       break;
     case "test":
       await cmdTest(config);
+      break;
+    case "initialize":
+      await cmdInitialize(config);
       break;
     case "get":
       if (!args[0]) {
