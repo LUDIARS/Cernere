@@ -245,6 +245,7 @@ GET /ws?session_id=<id>      # 再接続 (セッション ID)
 
 - [セキュリティ設計](spec/security_design.md)
 - [認証パッケージ一覧](docs/auth_packages.md)
+- [別プロジェクトへの実装ガイド](docs/integration_guide.md)
 - [リレー設計](docs/relay_design.md)
 - [サービスインターフェース](docs/service_interface.md)
 
