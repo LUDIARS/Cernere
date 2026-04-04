@@ -17,6 +17,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import type { EnvCliConfig, InfisicalBootstrap, RawSecret } from "./types.js";
 import { authenticate, fetchSecrets, getSecretByKey, upsertSecret } from "./infisical.js";
 import { loadBootstrap, saveBootstrap } from "./env-file.js";
@@ -45,7 +46,7 @@ async function loadConfig(): Promise<EnvCliConfig> {
     }
 
     // Dynamic import for .ts/.js/.mjs
-    const mod = await import(filepath) as { default?: EnvCliConfig } & EnvCliConfig;
+    const mod = await import(pathToFileURL(filepath).toString()) as { default?: EnvCliConfig } & EnvCliConfig;
     return mod.default ?? mod;
   }
 
