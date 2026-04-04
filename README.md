@@ -84,42 +84,25 @@ npm install
 
 ```bash
 npm run env:setup
+npm run env:initialize
 ```
 
 対話形式で Infisical の認証情報（Project ID / Client ID / Client Secret）を入力します。
+`env:initialize` を実行すると、`env-cli.config.ts` で定義されたデフォルトの環境変数が Infisical に登録されます（既存のキーはスキップされます）。
 設定は `.env.secrets` に保存されます（gitignore 済み）。
 
-### 3. 環境変数の生成
+### 3. PostgreSQL・Redis の起動
+
+Infisical から環境変数を読み込んで Docker を起動します。
 
 ```bash
-npm run env:gen
+infisical run --env=dev -- docker compose up -d
 ```
 
-Infisical からシークレットを取得し、Docker Compose / アプリケーション用の `.env` を自動生成します。
-
-> **Infisical を使わない場合**: `cp .env.example .env` で手動設定も可能です。
-
-#### env-cli コマンド一覧
-
-| コマンド | 説明 |
-|---|---|
-| `npm run env:setup` | 対話形式で Infisical を設定 |
-| `npm run env:test` | 接続テスト |
-| `npm run env:gen` | Infisical → `.env` 生成 |
-| `npm run env:list` | シークレット一覧 |
-| `npm run env:get -- <KEY>` | シークレット取得 |
-| `npm run env:set -- <KEY> <VALUE>` | シークレット作成/更新 |
-
-### 4. PostgreSQL・Redis の起動
+### 4. ビルド・実行
 
 ```bash
-docker compose up -d
-```
-
-### 5. ビルド・実行
-
-```bash
-cargo run
+infisical run --env=dev -- cargo run
 ```
 
 データベースのマイグレーションは起動時に自動で実行されます。
