@@ -209,6 +209,21 @@ async fn execute(
             Ok(serde_json::to_value(res).unwrap())
         }
 
+        // ── ServiceAccess (3点方式) ───────────────
+        ("service_access", "list") => {
+            let res = svc.list_available_services().await?;
+            Ok(serde_json::to_value(res).unwrap())
+        }
+        ("service_access", "request") => {
+            let p = require_payload(&payload)?;
+            let org_id = p.get("organizationId").and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<Uuid>().ok());
+            let res = svc
+                .request_service_access(get_str(p, "serviceCode")?, org_id)
+                .await?;
+            Ok(serde_json::to_value(res).unwrap())
+        }
+
         _ => Err(AppError::BadRequest(format!(
             "Unknown method: {}.{}",
             module, action

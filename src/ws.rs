@@ -73,6 +73,45 @@ pub enum RelayTarget {
     Broadcast,
 }
 
+// ── サービス接続プロトコル ──────────────────────────
+
+/// サービス → Cernere (サービス接続用)
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ServiceClientMessage {
+    /// サービス認証
+    ServiceAuth { service_code: String, service_secret: String },
+    /// ユーザー受け入れ応答
+    AdmissionResponse {
+        ticket_id: String,
+        service_token: String,
+        expires_in: i64,
+    },
+    /// Pong
+    Pong { ts: i64 },
+}
+
+/// Cernere → サービス
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ServiceServerMessage {
+    /// 認証成功
+    ServiceAuthenticated { service_id: String },
+    /// ユーザー受け入れ要求
+    UserAdmission {
+        ticket_id: String,
+        user: serde_json::Value,
+        organization_id: Option<String>,
+        scopes: serde_json::Value,
+    },
+    /// ユーザー無効化
+    UserRevoke { user_id: Uuid },
+    /// Ping
+    Ping { ts: i64 },
+    /// エラー
+    Error { code: String, message: String },
+}
+
 // ── WebSocket 接続クエリ ────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -330,6 +369,215 @@ async fn handle_client_message(
 async fn send_message(
     sender: &Arc<Mutex<SplitSink<WebSocket, Message>>>,
     msg: &ServerMessage,
+) -> bool {
+    if let Ok(json) = serde_json::to_string(msg) {
+        let mut guard = sender.lock().await;
+        guard.send(Message::Text(json.into())).await.is_ok()
+    } else {
+        false
+    }
+}
+
+// ── サービス WebSocket エンドポイント ───────────────
+
+#[derive(Debug, Deserialize)]
+pub struct ServiceWsQuery {
+    pub service_code: Option<String>,
+}
+
+/// GET /ws/service — サービス用 WebSocket アップグレード
+pub async fn service_ws_upgrade(
+    State(state): State<AppState>,
+    Query(_query): Query<ServiceWsQuery>,
+    ws: WebSocketUpgrade,
+) -> std::result::Result<impl IntoResponse, AppError> {
+    Ok(ws
+        .max_message_size(MAX_MESSAGE_SIZE)
+        .on_upgrade(move |socket| handle_service_ws(state, socket)))
+}
+
+/// サービス WebSocket セッション
+async fn handle_service_ws(state: AppState, socket: WebSocket) {
+    let (sender, mut receiver) = socket.split();
+    let sender = Arc::new(Mutex::new(sender));
+    let mut authenticated_code: Option<String> = None;
+
+    // 最初のメッセージで認証を待つ (10秒タイムアウト)
+    let auth_result = tokio::time::timeout(
+        tokio::time::Duration::from_secs(10),
+        receiver.next(),
+    )
+    .await;
+
+    let first_msg = match auth_result {
+        Ok(Some(Ok(Message::Text(text)))) => text.to_string(),
+        _ => {
+            let err = ServiceServerMessage::Error {
+                code: "auth_timeout".into(),
+                message: "Authentication timeout".into(),
+            };
+            send_service_message(&sender, &err).await;
+            return;
+        }
+    };
+
+    // service_auth メッセージを解析
+    if let Ok(ServiceClientMessage::ServiceAuth {
+        service_code,
+        service_secret,
+    }) = serde_json::from_str(&first_msg)
+    {
+        match crate::db::get_service_by_code(&state.db, &service_code).await {
+            Ok(Some(svc)) if svc.is_active => {
+                let valid = bcrypt::verify(&service_secret, &svc.service_secret_hash)
+                    .unwrap_or(false);
+                if valid {
+                    // 認証成功
+                    state.service_connections.register(
+                        service_code.clone(),
+                        svc.id,
+                        sender.clone(),
+                    );
+                    let _ = crate::db::update_service_connected(&state.db, svc.id).await;
+                    authenticated_code = Some(service_code.clone());
+
+                    let ok = ServiceServerMessage::ServiceAuthenticated {
+                        service_id: svc.id.to_string(),
+                    };
+                    send_service_message(&sender, &ok).await;
+
+                    tracing::info!(service = %service_code, "Service connected");
+                } else {
+                    let err = ServiceServerMessage::Error {
+                        code: "auth_failed".into(),
+                        message: "Invalid service secret".into(),
+                    };
+                    send_service_message(&sender, &err).await;
+                    return;
+                }
+            }
+            _ => {
+                let err = ServiceServerMessage::Error {
+                    code: "service_not_found".into(),
+                    message: "Service not found or inactive".into(),
+                };
+                send_service_message(&sender, &err).await;
+                return;
+            }
+        }
+    } else {
+        let err = ServiceServerMessage::Error {
+            code: "invalid_auth".into(),
+            message: "Expected service_auth message".into(),
+        };
+        send_service_message(&sender, &err).await;
+        return;
+    }
+
+    let service_code = authenticated_code.clone().unwrap();
+
+    // Ping タスク
+    let ping_sender = sender.clone();
+    let ping_handle = tokio::spawn(async move {
+        let mut interval =
+            tokio::time::interval(tokio::time::Duration::from_secs(PING_INTERVAL_SECS));
+        loop {
+            interval.tick().await;
+            let ts = Utc::now().timestamp();
+            let ping = ServiceServerMessage::Ping { ts };
+            if !send_service_message(&ping_sender, &ping).await {
+                break;
+            }
+        }
+    });
+
+    // メッセージ受信ループ
+    while let Some(msg) = receiver.next().await {
+        match msg {
+            Ok(Message::Text(text)) => {
+                if let Ok(svc_msg) = serde_json::from_str::<ServiceClientMessage>(&text) {
+                    match svc_msg {
+                        ServiceClientMessage::Pong { .. } => {
+                            // keepalive — no-op
+                        }
+                        ServiceClientMessage::AdmissionResponse {
+                            ticket_id,
+                            service_token,
+                            expires_in,
+                        } => {
+                            // チケット消費 + ユーザーへ service_token を送信
+                            handle_admission_response(
+                                &state,
+                                &service_code,
+                                &ticket_id,
+                                &service_token,
+                                expires_in,
+                            )
+                            .await;
+                        }
+                        _ => {} // ServiceAuth は最初のみ
+                    }
+                }
+            }
+            Ok(Message::Close(_)) => break,
+            Err(_) => break,
+            _ => {}
+        }
+    }
+
+    // クリーンアップ
+    ping_handle.abort();
+    if let Some(ref code) = authenticated_code {
+        state.service_connections.unregister(code);
+        tracing::info!(service = %code, "Service disconnected");
+    }
+}
+
+/// admission_response を処理: チケットを消費し、ユーザーに service_token を返す
+async fn handle_admission_response(
+    state: &AppState,
+    service_code: &str,
+    ticket_id: &str,
+    service_token: &str,
+    expires_in: i64,
+) {
+    // チケットを消費
+    let ticket = match crate::db::consume_service_ticket(&state.db, ticket_id).await {
+        Ok(Some(t)) => t,
+        _ => {
+            tracing::warn!(ticket_id = %ticket_id, "Failed to consume ticket");
+            return;
+        }
+    };
+
+    // サービスのエンドポイント URL を取得
+    let service = match crate::db::get_service_by_code(&state.db, service_code).await {
+        Ok(Some(s)) => s,
+        _ => return,
+    };
+
+    // チケットのユーザーのアクティブセッションに service_token を送信
+    let response = ServerMessage::ModuleResponse {
+        module: "service_access".into(),
+        action: "ticket_resolved".into(),
+        payload: serde_json::json!({
+            "serviceToken": service_token,
+            "serviceUrl": service.endpoint_url,
+            "serviceCode": service_code,
+            "expiresIn": expires_in,
+        }),
+    };
+
+    let senders = state.sessions.get_user_senders(&ticket.user_id);
+    for (_sid, sender) in senders {
+        send_message(&sender, &response).await;
+    }
+}
+
+/// サービスメッセージ送信ヘルパー
+async fn send_service_message(
+    sender: &Arc<Mutex<SplitSink<WebSocket, Message>>>,
+    msg: &ServiceServerMessage,
 ) -> bool {
     if let Ok(json) = serde_json::to_string(msg) {
         let mut guard = sender.lock().await;

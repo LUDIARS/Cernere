@@ -959,3 +959,142 @@ pub async fn update_profile_privacy(
     .await?;
     Ok(())
 }
+
+// ── Service Registry ─────────────────────────────
+
+pub async fn create_service(
+    pool: &PgPool,
+    id: Uuid,
+    code: &str,
+    name: &str,
+    secret_hash: &str,
+    endpoint_url: &str,
+    scopes: &serde_json::Value,
+) -> Result<ServiceEntry> {
+    let svc = sqlx::query_as::<_, ServiceEntry>(
+        "INSERT INTO service_registry (id, code, name, service_secret_hash, endpoint_url, scopes)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING *",
+    )
+    .bind(id)
+    .bind(code)
+    .bind(name)
+    .bind(secret_hash)
+    .bind(endpoint_url)
+    .bind(scopes)
+    .fetch_one(pool)
+    .await?;
+    Ok(svc)
+}
+
+pub async fn get_service_by_code(pool: &PgPool, code: &str) -> Result<Option<ServiceEntry>> {
+    let svc = sqlx::query_as::<_, ServiceEntry>(
+        "SELECT * FROM service_registry WHERE code = $1",
+    )
+    .bind(code)
+    .fetch_optional(pool)
+    .await?;
+    Ok(svc)
+}
+
+pub async fn list_services(pool: &PgPool) -> Result<Vec<ServiceEntry>> {
+    let svcs = sqlx::query_as::<_, ServiceEntry>(
+        "SELECT * FROM service_registry WHERE is_active = TRUE ORDER BY name",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(svcs)
+}
+
+pub async fn list_user_services(pool: &PgPool, user_id: Uuid) -> Result<Vec<ServiceEntry>> {
+    // ユーザーが所属する組織で有効化されたサービスを返す
+    let svcs = sqlx::query_as::<_, ServiceEntry>(
+        "SELECT DISTINCT sr.* FROM service_registry sr
+         INNER JOIN project_definitions pd ON pd.code = sr.code
+         INNER JOIN organization_projects op ON op.project_definition_id = pd.id
+         INNER JOIN organization_members om ON om.organization_id = op.organization_id
+         WHERE om.user_id = $1 AND sr.is_active = TRUE
+         ORDER BY sr.name",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(svcs)
+}
+
+pub async fn update_service_connected(pool: &PgPool, service_id: Uuid) -> Result<()> {
+    let now = Utc::now();
+    sqlx::query("UPDATE service_registry SET last_connected_at = $2, updated_at = $2 WHERE id = $1")
+        .bind(service_id)
+        .bind(now)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn delete_service(pool: &PgPool, id: Uuid) -> Result<()> {
+    let result = sqlx::query("DELETE FROM service_registry WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound("Service not found".into()));
+    }
+    Ok(())
+}
+
+// ── Service Tickets ──────────────────────────────
+
+pub async fn create_service_ticket(
+    pool: &PgPool,
+    id: Uuid,
+    user_id: Uuid,
+    service_id: Uuid,
+    ticket_code: &str,
+    user_data: &serde_json::Value,
+    organization_id: Option<Uuid>,
+    scopes: &serde_json::Value,
+    expires_at: chrono::DateTime<Utc>,
+) -> Result<ServiceTicket> {
+    let ticket = sqlx::query_as::<_, ServiceTicket>(
+        "INSERT INTO service_tickets (id, user_id, service_id, ticket_code, user_data, organization_id, scopes, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING *",
+    )
+    .bind(id)
+    .bind(user_id)
+    .bind(service_id)
+    .bind(ticket_code)
+    .bind(user_data)
+    .bind(organization_id)
+    .bind(scopes)
+    .bind(expires_at)
+    .fetch_one(pool)
+    .await?;
+    Ok(ticket)
+}
+
+pub async fn consume_service_ticket(pool: &PgPool, ticket_code: &str) -> Result<Option<ServiceTicket>> {
+    let now = Utc::now();
+    let ticket = sqlx::query_as::<_, ServiceTicket>(
+        "UPDATE service_tickets SET consumed = TRUE
+         WHERE ticket_code = $1 AND NOT consumed AND expires_at > $2
+         RETURNING *",
+    )
+    .bind(ticket_code)
+    .bind(now)
+    .fetch_optional(pool)
+    .await?;
+    Ok(ticket)
+}
+
+pub async fn cleanup_expired_tickets(pool: &PgPool) -> Result<u64> {
+    let now = Utc::now();
+    let result = sqlx::query("DELETE FROM service_tickets WHERE expires_at < $1 OR consumed = TRUE")
+        .bind(now)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected())
+}
+
+use crate::models::{ServiceEntry, ServiceTicket};

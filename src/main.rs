@@ -23,7 +23,7 @@ mod ws;
 use app_state::AppState;
 use config::Config;
 use redis_session::RedisClient;
-use relay::SessionRegistry;
+use relay::{ServiceConnectionRegistry, SessionRegistry};
 
 /// セッション TTL（7日間）
 pub const SESSION_TTL_SECS: i64 = 7 * 24 * 60 * 60;
@@ -84,6 +84,7 @@ async fn main() {
         redis,
         config,
         sessions: Arc::new(SessionRegistry::new()),
+        service_connections: Arc::new(ServiceConnectionRegistry::new()),
         sns_client,
         ses_client,
     };
