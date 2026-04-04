@@ -99,20 +99,6 @@ Infisical から環境変数を読み込んで Docker を起動します。
 infisical run --env=dev -- docker compose up -d
 ```
 
-> **Infisical を使わない場合**: `cp .env.example .env` で手動設定し、`docker compose up -d` も可能です。
-
-#### env-cli コマンド一覧
-
-| コマンド | 説明 |
-|---|---|
-| `npm run env:setup` | 対話形式で Infisical を設定 |
-| `npm run env:initialize` | config のデフォルト値を Infisical に登録 |
-| `npm run env:test` | 接続テスト |
-| `infisical run --env=<ENV> -- <COMMAND>` | Infisical の環境変数をコマンドに注入 |
-| `npm run env:list` | シークレット一覧 |
-| `npm run env:get -- <KEY>` | シークレット取得 |
-| `npm run env:set -- <KEY> <VALUE>` | シークレット作成/更新 |
-
 ### 4. ビルド・実行
 
 ```bash
