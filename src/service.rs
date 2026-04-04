@@ -345,4 +345,103 @@ impl<'a> CernereService<'a> {
         }
         Ok(())
     }
+
+    // ── Service Access (3点方式) ─────────────────
+
+    /// ユーザーが利用可能なサービス一覧 (接続状態付き)
+    pub async fn list_available_services(
+        &self,
+    ) -> Result<Vec<crate::models::ServiceResponse>> {
+        let services = db::list_user_services(&self.state.db, self.user_id).await?;
+        let result = services
+            .into_iter()
+            .map(|s| crate::models::ServiceResponse {
+                id: s.id.to_string(),
+                code: s.code.clone(),
+                name: s.name,
+                endpoint_url: s.endpoint_url,
+                scopes: s.scopes,
+                is_active: s.is_active,
+                is_connected: self.state.service_connections.is_connected(&s.code),
+                last_connected_at: s.last_connected_at.map(|t| t.to_rfc3339()),
+            })
+            .collect();
+        Ok(result)
+    }
+
+    /// サービスアクセスをリクエスト: チケット発行 → サービスに admission 送信
+    pub async fn request_service_access(
+        &self,
+        service_code: &str,
+        organization_id: Option<uuid::Uuid>,
+    ) -> Result<serde_json::Value> {
+        // サービスが接続中か確認
+        if !self.state.service_connections.is_connected(service_code) {
+            return Err(AppError::BadRequest(format!(
+                "Service '{}' is not currently connected",
+                service_code
+            )));
+        }
+
+        // サービス情報取得
+        let service = db::get_service_by_code(&self.state.db, service_code)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Service not found".into()))?;
+
+        // ユーザーがこのサービスへのアクセス権を持つか確認
+        let user_services = db::list_user_services(&self.state.db, self.user_id).await?;
+        if !user_services.iter().any(|s| s.code == service_code) {
+            return Err(AppError::Forbidden("Not authorized for this service".into()));
+        }
+
+        // ユーザーデータ取得
+        let user = db::get_user(&self.state.db, self.user_id)
+            .await?
+            .ok_or_else(|| AppError::Unauthorized("User not found".into()))?;
+
+        let user_data = serde_json::json!({
+            "id": user.id.to_string(),
+            "login": user.login,
+            "displayName": user.display_name,
+            "email": user.email,
+            "avatarUrl": user.avatar_url,
+            "role": user.role,
+        });
+
+        // ワンタイムチケット発行 (60秒有効)
+        let ticket_code = uuid::Uuid::new_v4().to_string();
+        let expires_at = chrono::Utc::now() + chrono::Duration::seconds(60);
+        let ticket = db::create_service_ticket(
+            &self.state.db,
+            uuid::Uuid::new_v4(),
+            self.user_id,
+            service.id,
+            &ticket_code,
+            &user_data,
+            organization_id,
+            &service.scopes,
+            expires_at,
+        )
+        .await?;
+
+        // サービスに user_admission を送信
+        let admission = crate::ws::ServiceServerMessage::UserAdmission {
+            ticket_id: ticket.ticket_code.clone(),
+            user: user_data,
+            organization_id: organization_id.map(|id| id.to_string()),
+            scopes: service.scopes.clone(),
+        };
+        self.state
+            .service_connections
+            .send_to_service(service_code, &admission)
+            .await
+            .map_err(|e| AppError::Internal(e))?;
+
+        Ok(serde_json::json!({
+            "ticketId": ticket.ticket_code,
+            "serviceCode": service_code,
+            "status": "pending",
+            "message": "Waiting for service to issue token",
+        }))
+    }
 }

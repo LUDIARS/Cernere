@@ -450,3 +450,59 @@ pub struct MfaClaims {
     pub exp: usize,
     pub iat: usize,
 }
+
+// ── サービスレジストリ (3点方式認証) ────────────────
+
+/// 登録済みサービス
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ServiceEntry {
+    pub id: Uuid,
+    pub code: String,
+    pub name: String,
+    pub service_secret_hash: String,
+    pub endpoint_url: String,
+    pub scopes: serde_json::Value,
+    pub is_active: bool,
+    pub last_connected_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// サービス一覧レスポンス (secret除外)
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceResponse {
+    pub id: String,
+    pub code: String,
+    pub name: String,
+    pub endpoint_url: String,
+    pub scopes: serde_json::Value,
+    pub is_active: bool,
+    pub is_connected: bool,
+    pub last_connected_at: Option<String>,
+}
+
+/// サービスチケット (ワンタイム)
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ServiceTicket {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub service_id: Uuid,
+    pub ticket_code: String,
+    pub user_data: serde_json::Value,
+    pub organization_id: Option<Uuid>,
+    pub scopes: serde_json::Value,
+    pub expires_at: DateTime<Utc>,
+    pub consumed: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+/// サービスアクセスレスポンス (ブラウザに返す)
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceAccessResponse {
+    pub service_token: String,
+    pub service_url: String,
+    pub service_code: String,
+    pub expires_in: i64,
+}

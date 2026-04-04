@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::config::Config;
 use crate::redis_session::RedisClient;
-use crate::relay::SessionRegistry;
+use crate::relay::{SessionRegistry, ServiceConnectionRegistry};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -11,6 +11,7 @@ pub struct AppState {
     pub redis: RedisClient,
     pub config: Config,
     pub sessions: Arc<SessionRegistry>,
+    pub service_connections: Arc<ServiceConnectionRegistry>,
     pub sns_client: Option<aws_sdk_sns::Client>,
     pub ses_client: Option<aws_sdk_sesv2::Client>,
 }

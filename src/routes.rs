@@ -13,7 +13,7 @@ use crate::db;
 use crate::env_auth;
 use crate::error::{AppError, Result};
 use crate::mfa;
-use crate::models::{ProjectSummary, UserResponse};
+use crate::models::{ProjectSummary, ServiceResponse, UserResponse};
 use crate::session_state::{UserFullState, UserState};
 use crate::ws;
 
@@ -237,6 +237,92 @@ async fn api_delete_setting(
     Ok(Json(()))
 }
 
+// ── Service Management (admin only) ─────────────────
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RegisterServiceRequest {
+    code: String,
+    name: String,
+    endpoint_url: String,
+    scopes: Option<serde_json::Value>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RegisterServiceResponse {
+    service: ServiceResponse,
+    service_secret: String,
+}
+
+async fn api_register_service(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<RegisterServiceRequest>,
+) -> Result<Json<RegisterServiceResponse>> {
+    let user = auth::extract_user_from_jwt(&state, &headers).await?;
+    if user.role != "admin" {
+        return Err(AppError::Forbidden("System admin required".into()));
+    }
+
+    let id = uuid::Uuid::new_v4();
+    let secret = uuid::Uuid::new_v4().to_string();
+    let hash = bcrypt::hash(&secret, 12)
+        .map_err(|e| AppError::Internal(format!("Hash failed: {}", e)))?;
+    let scopes = req.scopes.unwrap_or(serde_json::json!([]));
+
+    let svc = db::create_service(&state.db, id, &req.code, &req.name, &hash, &req.endpoint_url, &scopes).await?;
+
+    Ok(Json(RegisterServiceResponse {
+        service: ServiceResponse {
+            id: svc.id.to_string(),
+            code: svc.code.clone(),
+            name: svc.name,
+            endpoint_url: svc.endpoint_url,
+            scopes: svc.scopes,
+            is_active: svc.is_active,
+            is_connected: state.service_connections.is_connected(&svc.code),
+            last_connected_at: None,
+        },
+        service_secret: secret,
+    }))
+}
+
+async fn api_list_services(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<Vec<ServiceResponse>>> {
+    let _user = auth::extract_user_from_jwt(&state, &headers).await?;
+    let services = db::list_services(&state.db).await?;
+    let result: Vec<ServiceResponse> = services
+        .into_iter()
+        .map(|s| ServiceResponse {
+            id: s.id.to_string(),
+            code: s.code.clone(),
+            name: s.name,
+            endpoint_url: s.endpoint_url,
+            scopes: s.scopes,
+            is_active: s.is_active,
+            is_connected: state.service_connections.is_connected(&s.code),
+            last_connected_at: s.last_connected_at.map(|t| t.to_rfc3339()),
+        })
+        .collect();
+    Ok(Json(result))
+}
+
+async fn api_delete_service(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Path(service_id): Path<uuid::Uuid>,
+) -> Result<Json<()>> {
+    let user = auth::extract_user_from_jwt(&state, &headers).await?;
+    if user.role != "admin" {
+        return Err(AppError::Forbidden("System admin required".into()));
+    }
+    db::delete_service(&state.db, service_id).await?;
+    Ok(Json(()))
+}
+
 // ── Router ──────────────────────────────────────────
 
 pub fn router(state: AppState) -> Router {
@@ -287,6 +373,11 @@ pub fn router(state: AppState) -> Router {
         // WebSocket セッション接続
         // 組織・プロジェクト定義・ユーザー情報の操作は全て WS セッション経由
         .route("/ws", get(ws::ws_upgrade))
+        // サービス管理 (admin)
+        .route("/api/services", post(api_register_service).get(api_list_services))
+        .route("/api/services/{service_id}", delete(api_delete_service))
+        // サービス WebSocket 接続 (3点方式認証)
+        .route("/ws/service", get(ws::service_ws_upgrade))
         // Projects (Ars BFF 用、Cookie ベース)
         .route("/api/projects", get(api_list_projects).post(api_save_project))
         .route("/api/projects/{project_id}", get(api_load_project).delete(api_delete_project))
