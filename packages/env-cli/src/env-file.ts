@@ -5,6 +5,11 @@
 import * as fs from "node:fs";
 import type { InfisicalBootstrap } from "./types.js";
 
+/** env-inf の EnvReader 互換の最小インタフェース */
+interface EnvSource {
+  get(key: string): string | undefined;
+}
+
 const DEFAULT_SITE_URL = "https://app.infisical.com";
 const DEFAULT_ENVIRONMENT = "dev";
 
@@ -34,10 +39,15 @@ export function parseEnvFile(content: string): Record<string, string> {
 /**
  * .env.secrets から Infisical bootstrap を読み込む。
  * ファイルが無い or 必要なキーが揃っていなければ null。
+ *
+ * @param secretsPath  .env.secrets ファイルパス
+ * @param defaults     デフォルト値
+ * @param envSource    環境変数ソース (EnvReader 互換)。省略時は process.env をラップ
  */
 export function loadBootstrap(
   secretsPath: string,
   defaults?: { siteUrl?: string; environment?: string },
+  envSource?: EnvSource,
 ): InfisicalBootstrap | null {
   const siteUrlDefault = defaults?.siteUrl ?? DEFAULT_SITE_URL;
   const envDefault = defaults?.environment ?? DEFAULT_ENVIRONMENT;
@@ -57,18 +67,20 @@ export function loadBootstrap(
     }
   }
 
-  // 2. 環境変数からフォールバック
-  if (
-    process.env.INFISICAL_PROJECT_ID &&
-    process.env.INFISICAL_CLIENT_ID &&
-    process.env.INFISICAL_CLIENT_SECRET
-  ) {
+  // 2. EnvSource / process.env からフォールバック
+  const src: EnvSource = envSource ?? { get: (k) => process.env[k] };
+
+  const projectId = src.get("INFISICAL_PROJECT_ID");
+  const clientId = src.get("INFISICAL_CLIENT_ID");
+  const clientSecret = src.get("INFISICAL_CLIENT_SECRET");
+
+  if (projectId && clientId && clientSecret) {
     return {
-      siteUrl: process.env.INFISICAL_SITE_URL || siteUrlDefault,
-      projectId: process.env.INFISICAL_PROJECT_ID,
-      environment: process.env.INFISICAL_ENVIRONMENT || envDefault,
-      clientId: process.env.INFISICAL_CLIENT_ID,
-      clientSecret: process.env.INFISICAL_CLIENT_SECRET,
+      siteUrl: src.get("INFISICAL_SITE_URL") || siteUrlDefault,
+      projectId,
+      environment: src.get("INFISICAL_ENVIRONMENT") || envDefault,
+      clientId,
+      clientSecret,
     };
   }
 
