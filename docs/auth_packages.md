@@ -351,9 +351,8 @@ cernere (Rust) ──→ PostgreSQL / Redis / GitHub API / Google API / AWS SNS 
 
 ## 新規プロジェクトへの導入手順
 
-1. **`@cernere/id-service`** をインストール — JWT 認証・ミドルウェア・ルート生成
-2. (オプション) **`@cernere/id-cache`** をインストール — 高トラフィック環境でのキャッシュ
-3. **`@cernere/env-cli`** で環境変数を設定 — `JWT_SECRET` 等のシークレット管理
-4. コアサーバー (`cernere`) をデプロイ — 認証基盤として稼働
+1. **`@cernere/id-cache`** をインストール — キャッシュ付き認証委譲 (標準パターン)
+2. **`@cernere/env-cli`** で環境変数を設定 — `JWT_SECRET` 等のシークレット管理
+3. コアサーバー (`cernere`) をデプロイ — 認証基盤として稼働
 
-> **注意**: `@cernere/auth` は後方互換のためのみ存在します。新規プロジェクトでは `@cernere/id-service` を直接使用してください。
+> **注意**: 別プロジェクトへの導入は `@cernere/id-cache` によるキャッシュ付き認証委譲を標準パターンとします。詳細は `docs/integration_guide.md` を参照してください。
