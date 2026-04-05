@@ -6,10 +6,14 @@ import { serve } from "@hono/node-server";
 import { config } from "./config.js";
 import { createApp } from "./app.js";
 import { redis } from "./redis.js";
+import { runMigrations } from "./db/migrate.js";
 
 async function main() {
   console.log("=== Cernere Server (TypeScript) ===");
   console.log(`  Environment: ${config.isProduction ? "production" : "development"}`);
+
+  // DB マイグレーション
+  await runMigrations();
 
   await redis.connect();
 
