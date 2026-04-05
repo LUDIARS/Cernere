@@ -10,6 +10,7 @@ import { AppError } from "./error.js";
 import { authRoutes } from "./auth/routes.js";
 import { googleOAuthRoutes } from "./auth/oauth-google.js";
 import { githubOAuthRoutes } from "./auth/oauth-github.js";
+import { projectRoutes } from "./project/routes.js";
 import {
   resolveWsAuth,
   createAuthenticatedWsHandler,
@@ -37,6 +38,9 @@ export function createApp() {
 
   // ─── Auth REST routes ─────────────────────────────────────
   app.route("/api/auth", authRoutes);
+
+  // ─── Project management ────────────────────────────────────
+  app.route("/api/projects", projectRoutes);
 
   // ─── OAuth routes ─────────────────────────────────────────
   app.route("/auth", googleOAuthRoutes);
