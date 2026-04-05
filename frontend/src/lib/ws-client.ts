@@ -12,6 +12,7 @@ type ServerMessage = {
   payload?: unknown;
   code?: string;
   message?: string;
+  ts?: number;
   [key: string]: unknown;
 };
 
@@ -28,36 +29,71 @@ class CernereWsClient {
   private listeners: Array<(msg: ServerMessage) => void> = [];
   private _connected = false;
   private _sessionId: string | null = null;
+  private connectPromise: Promise<void> | null = null;
 
   get connected() { return this._connected; }
   get sessionId() { return this._sessionId; }
 
   connect(token: string): Promise<void> {
-    return new Promise((resolve, reject) => {
+    // 既に接続中 or 接続済み
+    if (this._connected) {
+      console.log("[ws] Already connected, skipping");
+      return Promise.resolve();
+    }
+    if (this.connectPromise) {
+      console.log("[ws] Connection already in progress, waiting");
+      return this.connectPromise;
+    }
+
+    this.connectPromise = new Promise((resolve, reject) => {
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       const url = `${protocol}//${window.location.host}/auth?token=${encodeURIComponent(token)}`;
+      console.log("[ws] Connecting to:", url);
 
       this.ws = new WebSocket(url);
 
+      const timeout = setTimeout(() => {
+        console.error("[ws] Connection timeout (10s)");
+        this.connectPromise = null;
+        reject(new Error("WebSocket connection timeout"));
+      }, 10000);
+
       this.ws.onopen = () => {
-        console.log("[ws] Connected");
+        console.log("[ws] Socket opened, waiting for server connected message...");
       };
 
       this.ws.onmessage = (evt) => {
-        const msg: ServerMessage = JSON.parse(evt.data);
-        this.handleMessage(msg, resolve);
+        let msg: ServerMessage;
+        try {
+          msg = JSON.parse(evt.data);
+        } catch {
+          console.error("[ws] Failed to parse message:", evt.data);
+          return;
+        }
+        console.log("[ws] ←", msg.type, msg.module ? `${msg.module}.${msg.action}` : "");
+        this.handleMessage(msg, () => {
+          clearTimeout(timeout);
+          this.connectPromise = null;
+          resolve();
+        });
       };
 
-      this.ws.onerror = () => {
+      this.ws.onerror = (evt) => {
+        console.error("[ws] WebSocket error:", evt);
+        clearTimeout(timeout);
+        this.connectPromise = null;
         reject(new Error("WebSocket connection failed"));
       };
 
-      this.ws.onclose = () => {
+      this.ws.onclose = (evt) => {
         this._connected = false;
         this._sessionId = null;
-        console.log("[ws] Disconnected");
+        this.connectPromise = null;
+        console.log("[ws] Disconnected (code:", evt.code, "reason:", evt.reason || "none", ")");
       };
     });
+
+    return this.connectPromise;
   }
 
   disconnect() {
@@ -65,6 +101,7 @@ class CernereWsClient {
     this.ws = null;
     this._connected = false;
     this._sessionId = null;
+    this.connectPromise = null;
   }
 
   onMessage(listener: (msg: ServerMessage) => void) {
@@ -74,8 +111,19 @@ class CernereWsClient {
     };
   }
 
+  /**
+   * WS コマンド送信。接続がまだの場合は最大 5 秒待つ。
+   */
   async sendCommand<T = unknown>(module: string, action: string, payload?: unknown): Promise<T> {
+    // 接続待ち
+    if (!this._connected && this.connectPromise) {
+      console.log(`[ws] Waiting for connection before ${module}.${action}...`);
+      await this.connectPromise;
+    }
+
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      const state = this.ws ? this.ws.readyState : "no socket";
+      console.error(`[ws] Cannot send ${module}.${action}: not connected (state: ${state})`);
       throw new Error("WebSocket not connected");
     }
 
@@ -87,21 +135,23 @@ class CernereWsClient {
         action,
       });
 
-      this.ws!.send(JSON.stringify({
-        type: "module_request",
-        module,
-        action,
-        payload,
-      }));
+      const msg = { type: "module_request", module, action, payload };
+      console.log("[ws] →", module, action);
+      this.ws!.send(JSON.stringify(msg));
     });
   }
 
-  private handleMessage(msg: ServerMessage, onConnect?: (value: void) => void) {
+  private handleMessage(msg: ServerMessage, onConnect?: () => void) {
     switch (msg.type) {
       case "connected":
         this._connected = true;
         this._sessionId = msg.session_id ?? null;
+        console.log("[ws] Session established:", this._sessionId);
         onConnect?.();
+        break;
+
+      case "guest_connected":
+        console.log("[ws] Guest session:", msg.session_id);
         break;
 
       case "module_response": {
@@ -111,11 +161,14 @@ class CernereWsClient {
         if (idx >= 0) {
           const req = this.pendingRequests.splice(idx, 1)[0];
           req.resolve(msg.payload);
+        } else {
+          console.warn("[ws] Unmatched module_response:", msg.module, msg.action);
         }
         break;
       }
 
       case "error": {
+        console.error("[ws] Server error:", msg.code, msg.message);
         const pending = this.pendingRequests.shift();
         if (pending) {
           pending.reject(new Error(msg.message ?? "Unknown error"));

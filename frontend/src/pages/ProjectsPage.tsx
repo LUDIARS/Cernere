@@ -49,21 +49,26 @@ export function ProjectsPage() {
   const [urlInput, setUrlInput] = useState("");
   const [registerResult, setRegisterResult] = useState<RegisterResult | null>(null);
 
-  // プロジェクト一覧取得
+  // プロジェクト一覧取得 (wsConnected を待ってから実行)
   const fetchProjects = useCallback(async () => {
-    if (!wsConnected) return;
     try {
       setLoading(true);
+      setError(null);
+      console.log("[ProjectsPage] Fetching projects... (wsConnected:", wsConnected, ")");
       const result = await wsClient.sendCommand<ManagedProject[]>("managed_project", "list");
       setProjects(result);
+      console.log("[ProjectsPage] Loaded", result.length, "projects");
     } catch (err) {
+      console.error("[ProjectsPage] Failed to fetch projects:", err);
       setError((err as Error).message);
     } finally {
       setLoading(false);
     }
   }, [wsConnected]);
 
-  useEffect(() => { fetchProjects(); }, [fetchProjects]);
+  useEffect(() => {
+    if (wsConnected) fetchProjects();
+  }, [wsConnected, fetchProjects]);
 
   // プロジェクト詳細
   const selectProject = async (key: string) => {
