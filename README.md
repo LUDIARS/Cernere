@@ -92,33 +92,34 @@ npm run env:initialize
 `env:initialize` を実行すると、`env-cli.config.ts` で定義されたデフォルトの環境変数が Infisical に登録されます（既存のキーはスキップされます）。
 設定は `.env.secrets` に保存されます（gitignore 済み）。
 
-### 3. PostgreSQL・Redis の起動
+### 3. 開発環境の起動
 
 ```bash
 npm run env:up
 ```
 
-Infisical からシークレットを取得し、OS に応じた docker-compose ファイルで Docker を起動します。`.env` は起動後に自動削除されます。
+Infisical からシークレットを取得し、以下をまとめて起動します:
 
-| OS | 使用ファイル |
-|----|-------------|
-| Windows | `docker-compose.windows.yaml` |
-| Linux / macOS | `docker-compose.linux.yaml` |
+| サービス | 説明 | ポート |
+|---------|------|--------|
+| postgres | PostgreSQL 17 | 5432 |
+| redis | Redis 7 | 6379 |
+| backend | Rust (cargo-watch ホットリロード) | 8080 |
+| frontend | Vite dev server (HMR) | 5173 |
 
-### 4. ビルド・実行
+OS に応じた docker-compose ファイルが自動選択されます:
+
+| OS | ファイル | ベースイメージ |
+|----|---------|---------------|
+| Windows | `docker-compose.windows.yaml` | Debian ベース |
+| Linux / macOS | `docker-compose.linux.yaml` | Alpine ベース |
+
+データベースのマイグレーションはバックエンド起動時に自動で実行されます。
+
+DB のみ起動したい場合:
 
 ```bash
-infisical run --env=dev -- cargo run
-```
-
-データベースのマイグレーションは起動時に自動で実行されます。
-
-### 6. フロントエンド (開発)
-
-```bash
-cd frontend
-npm install
-npm run dev
+npm run env:up -- -- -d postgres redis
 ```
 
 ## API

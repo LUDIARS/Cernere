@@ -66,7 +66,7 @@ npx env-cli initialize
 
 `env-cli.config.ts` の `infraKeys` に定義されたデフォルト値を Infisical に登���します。既に存在するキーはスキップされるため、安全に何���でも実行可能です。
 
-### 4. Docker 起動
+### 4. 開発環境の起動
 
 ```bash
 npx env-cli up
@@ -75,13 +75,15 @@ npx env-cli up
 以下を自動で実行します:
 
 1. Infisical からシークレットを取得し `.env` を一時生成
-2. `docker compose up -d` を実行
-3. `.env` を自動削除
+2. OS を判定し適切な docker-compose ファイルを選択 (Windows / Linux)
+3. `docker compose --profile dev up` を実行 (DB + Backend + Frontend)
+4. `.env` を自動削除
 
 引数を渡すことも可能:
 
 ```bash
-npx env-cli up -- --build    # docker compose up --build -d
+npx env-cli up -- --build              # リビルド付き起動
+npx env-cli up -- -d postgres redis    # DB のみバックグラウンド起動
 ```
 
 ## CLI リファレンス

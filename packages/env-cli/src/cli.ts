@@ -333,7 +333,10 @@ async function cmdUp(config: EnvCliConfig, composeArgs: string[]): Promise<void>
     console.log(`  Platform: ${isWindows ? "Windows" : "Linux/macOS"} → ${resolvedComposeFile}`);
 
     // 3. docker compose up 実行
-    const args = ["compose", "-f", resolvedComposeFile, "up", ...composeArgs];
+    // --profile dev が指定されていなければ自動追加（backend/frontend を含める）
+    const hasDev = composeArgs.includes("--profile");
+    const profileArgs = hasDev ? [] : ["--profile", "dev"];
+    const args = ["compose", "-f", resolvedComposeFile, ...profileArgs, "up", ...composeArgs];
     console.log(`\n$ docker ${args.join(" ")}\n`);
 
     const exitCode = await new Promise<number>((resolve, reject) => {
