@@ -28,11 +28,15 @@ export async function runMigrations(): Promise<void> {
     `;
     const appliedSet = new Set(applied.map((r) => r.version));
 
-    // migrations/ ディレクトリを探す (server/ の親ディレクトリ)
-    const migrationsDir = path.resolve(
-      import.meta.dirname ?? process.cwd(),
-      "..", "..", "..", "migrations",
-    );
+    // migrations/ ディレクトリを探す
+    // Docker: /app/migrations (volume mount)
+    // ローカル: server/../migrations
+    const candidates = [
+      path.resolve(process.cwd(), "..", "migrations"),  // server/ の親
+      path.resolve("/app", "migrations"),                // Docker mount
+      path.resolve(process.cwd(), "migrations"),         // カレント直下
+    ];
+    const migrationsDir = candidates.find((d) => fs.existsSync(d)) ?? candidates[0];
 
     if (!fs.existsSync(migrationsDir)) {
       console.log(`[migrate] Migrations directory not found: ${migrationsDir}`);
