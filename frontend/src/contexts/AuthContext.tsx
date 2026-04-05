@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
-import { auth as authApi, getStoredUser, setTokens, setStoredUser } from "../lib/api";
+import { auth as authApi, getStoredUser, getAccessToken, setTokens, setStoredUser } from "../lib/api";
+import { wsClient } from "../lib/ws-client";
 
 interface User {
   id: string;
@@ -16,6 +17,7 @@ interface MfaChallenge {
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  wsConnected: boolean;
   mfaChallenge: MfaChallenge | null;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
@@ -33,12 +35,38 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(getStoredUser);
+  const [wsConnected, setWsConnected] = useState(false);
   const [mfaChallenge, setMfaChallenge] = useState<MfaChallenge | null>(null);
   const [loading, setLoading] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     const stored = getStoredUser();
     return !!(stored || (params.get("accessToken") && params.get("refreshToken")));
   });
+
+  // WS 接続
+  const connectWs = useCallback(async () => {
+    const token = getAccessToken();
+    if (!token || wsClient.connected) return;
+
+    try {
+      await wsClient.connect(token);
+      setWsConnected(true);
+      console.log("[AuthContext] WS session connected");
+    } catch (err) {
+      console.warn("[AuthContext] WS connection failed:", (err as Error).message);
+      setWsConnected(false);
+    }
+  }, []);
+
+  // ユーザーが認証されたら WS 自動接続
+  useEffect(() => {
+    if (user) {
+      connectWs();
+    } else {
+      wsClient.disconnect();
+      setWsConnected(false);
+    }
+  }, [user, connectWs]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -93,6 +121,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    wsClient.disconnect();
+    setWsConnected(false);
     await authApi.logout();
     setUser(null);
     setMfaChallenge(null);
@@ -119,6 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         loading,
+        wsConnected,
         mfaChallenge,
         login,
         register,
