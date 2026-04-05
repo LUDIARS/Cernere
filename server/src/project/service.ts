@@ -5,16 +5,15 @@
  */
 
 import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as dbSchema from "../db/schema.js";
 import { AppError } from "../error.js";
 import { projectDefinitionSchema, type ProjectDefinition } from "./schema.js";
 import { migrateProjectSchema } from "./schema-migrator.js";
 
-/**
- * プロジェクト一覧
- */
+// ── Project CRUD ─────────────────────────────────────────────
+
 export async function listProjects() {
   return db.select({
     key: dbSchema.managedProjects.key,
@@ -25,31 +24,40 @@ export async function listProjects() {
   }).from(dbSchema.managedProjects);
 }
 
-/**
- * プロジェクト詳細
- */
 export async function getProject(key: string) {
   const rows = await db.select().from(dbSchema.managedProjects)
     .where(eq(dbSchema.managedProjects.key, key)).limit(1);
   if (rows.length === 0) throw AppError.notFound("Project not found");
 
   const p = rows[0];
+  const def = p.schemaDefinition as ProjectDefinition;
+
+  // モジュール一覧をカラム定義から集約
+  const modules = def?.modules ?? {};
+  const columnsByModule: Record<string, string[]> = {};
+  if (def?.user_data?.columns) {
+    for (const [colName, col] of Object.entries(def.user_data.columns)) {
+      const mod = col.module ?? "default";
+      if (!columnsByModule[mod]) columnsByModule[mod] = [];
+      columnsByModule[mod].push(colName);
+    }
+  }
+
   return {
     key: p.key,
     name: p.name,
     description: p.description,
     clientId: p.clientId,
     schemaDefinition: p.schemaDefinition,
+    modules,
+    columnsByModule,
     isActive: p.isActive,
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
   };
 }
 
-/**
- * プロジェクト登録 (JSON 直接 or URL)
- */
-export async function registerProject(payload: unknown) {
+export async function registerProject(payload: unknown, userId?: string) {
   let definition: ProjectDefinition;
 
   const input = payload as Record<string, unknown>;
@@ -78,7 +86,6 @@ export async function registerProject(payload: unknown) {
 
   if (existing.length > 0) {
     if (!existing[0].isActive) {
-      // 再有効化
       await db.update(dbSchema.managedProjects).set({
         isActive: true,
         name: definition.project.name,
@@ -88,12 +95,12 @@ export async function registerProject(payload: unknown) {
       }).where(eq(dbSchema.managedProjects.key, definition.project.key));
 
       const result = await migrateProjectSchema(definition.project.key, definition);
+      await saveDefinitionHistory(definition.project.key, definition, userId);
       return { message: "Project reactivated", key: definition.project.key, columnsAdded: result.columnsAdded };
     }
     throw AppError.conflict(`Project '${definition.project.key}' already exists`);
   }
 
-  // クライアント認証情報
   const clientId = `proj_${definition.project.key}_${crypto.randomUUID().slice(0, 8)}`;
   const clientSecret = crypto.randomUUID();
   const clientSecretHash = await bcrypt.hash(clientSecret, 12);
@@ -108,6 +115,7 @@ export async function registerProject(payload: unknown) {
   });
 
   const result = await migrateProjectSchema(definition.project.key, definition);
+  await saveDefinitionHistory(definition.project.key, definition, userId);
 
   return {
     message: "Project registered",
@@ -120,9 +128,6 @@ export async function registerProject(payload: unknown) {
   };
 }
 
-/**
- * プロジェクト論理削除
- */
 export async function deleteProject(key: string) {
   const rows = await db.select({ key: dbSchema.managedProjects.key })
     .from(dbSchema.managedProjects).where(eq(dbSchema.managedProjects.key, key)).limit(1);
@@ -136,10 +141,7 @@ export async function deleteProject(key: string) {
   return { message: "Project deactivated", key };
 }
 
-/**
- * スキーマ更新 (カラム追加のみ)
- */
-export async function updateProjectSchema(key: string, payload: unknown) {
+export async function updateProjectSchema(key: string, payload: unknown, userId?: string) {
   const rows = await db.select().from(dbSchema.managedProjects)
     .where(eq(dbSchema.managedProjects.key, key)).limit(1);
   if (rows.length === 0) throw AppError.notFound("Project not found");
@@ -156,7 +158,6 @@ export async function updateProjectSchema(key: string, payload: unknown) {
 
   const result = await migrateProjectSchema(key, definition);
 
-  // 旧カラムで新定義にないものは保持
   const oldDef = rows[0].schemaDefinition as ProjectDefinition;
   const oldColumns = oldDef?.user_data?.columns ?? {};
   const newColumns = definition.user_data?.columns ?? {};
@@ -175,5 +176,70 @@ export async function updateProjectSchema(key: string, payload: unknown) {
     updatedAt: new Date(),
   }).where(eq(dbSchema.managedProjects.key, key));
 
+  await saveDefinitionHistory(key, definition, userId);
+
   return { message: "Schema updated", key, columnsAdded: result.columnsAdded };
+}
+
+// ── Definition History ───────────────────────────────────────
+
+async function saveDefinitionHistory(projectKey: string, definition: ProjectDefinition, userId?: string) {
+  // 最新バージョン番号を取得
+  const latest = await db.select({ version: dbSchema.projectDefinitionHistory.version })
+    .from(dbSchema.projectDefinitionHistory)
+    .where(eq(dbSchema.projectDefinitionHistory.projectKey, projectKey))
+    .orderBy(desc(dbSchema.projectDefinitionHistory.version))
+    .limit(1);
+
+  const nextVersion = (latest[0]?.version ?? 0) + 1;
+
+  await db.insert(dbSchema.projectDefinitionHistory).values({
+    projectKey,
+    definition,
+    version: nextVersion,
+    appliedBy: userId ?? null,
+  });
+}
+
+export async function getDefinitionHistory(projectKey: string) {
+  return db.select({
+    id: dbSchema.projectDefinitionHistory.id,
+    version: dbSchema.projectDefinitionHistory.version,
+    definition: dbSchema.projectDefinitionHistory.definition,
+    appliedBy: dbSchema.projectDefinitionHistory.appliedBy,
+    createdAt: dbSchema.projectDefinitionHistory.createdAt,
+  }).from(dbSchema.projectDefinitionHistory)
+    .where(eq(dbSchema.projectDefinitionHistory.projectKey, projectKey))
+    .orderBy(desc(dbSchema.projectDefinitionHistory.version));
+}
+
+// ── Module-level Opt-out ─────────────────────────────────────
+
+export async function listModuleOptouts(userId: string, projectKey: string) {
+  return db.select().from(dbSchema.userDataOptouts)
+    .where(and(
+      eq(dbSchema.userDataOptouts.userId, userId),
+      eq(dbSchema.userDataOptouts.serviceId, projectKey),
+    ));
+}
+
+export async function setModuleOptout(userId: string, projectKey: string, moduleKey: string) {
+  // category_key = "module:{moduleKey}" でモジュール単位のオプトアウトを記録
+  const categoryKey = `module:${moduleKey}`;
+  await db.insert(dbSchema.userDataOptouts).values({
+    userId,
+    serviceId: projectKey,
+    categoryKey,
+  }).onConflictDoNothing();
+  return { message: "Opted out", projectKey, moduleKey };
+}
+
+export async function removeModuleOptout(userId: string, projectKey: string, moduleKey: string) {
+  const categoryKey = `module:${moduleKey}`;
+  await db.delete(dbSchema.userDataOptouts).where(and(
+    eq(dbSchema.userDataOptouts.userId, userId),
+    eq(dbSchema.userDataOptouts.serviceId, projectKey),
+    eq(dbSchema.userDataOptouts.categoryKey, categoryKey),
+  ));
+  return { message: "Opt-out removed", projectKey, moduleKey };
 }

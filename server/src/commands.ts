@@ -287,7 +287,7 @@ async function managedProjectCmd(userId: string, action: string, p?: Record<stri
       return svc.getProject(requireStr(p, "key"));
     case "register": {
       await requireSystemAdmin(userId);
-      return svc.registerProject(p);
+      return svc.registerProject(p, userId);
     }
     case "delete": {
       await requireSystemAdmin(userId);
@@ -295,7 +295,17 @@ async function managedProjectCmd(userId: string, action: string, p?: Record<stri
     }
     case "update_schema": {
       await requireSystemAdmin(userId);
-      return svc.updateProjectSchema(requireStr(p, "key"), p);
+      return svc.updateProjectSchema(requireStr(p, "key"), p, userId);
+    }
+    case "definition_history":
+      return svc.getDefinitionHistory(requireStr(p, "key"));
+    case "list_optouts":
+      return svc.listModuleOptouts(userId, requireStr(p, "projectKey"));
+    case "optout": {
+      return svc.setModuleOptout(userId, requireStr(p, "projectKey"), requireStr(p, "moduleKey"));
+    }
+    case "remove_optout": {
+      return svc.removeModuleOptout(userId, requireStr(p, "projectKey"), requireStr(p, "moduleKey"));
     }
     default:
       throw AppError.badRequest(`Unknown managed_project action: ${action}`);

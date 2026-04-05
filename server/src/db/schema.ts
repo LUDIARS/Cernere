@@ -243,3 +243,14 @@ export const managedProjects = pgTable("managed_projects", {
 }, (t) => [
   index("idx_managed_projects_client_id").on(t.clientId),
 ]);
+
+export const projectDefinitionHistory = pgTable("project_definition_history", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectKey: text("project_key").notNull().references(() => managedProjects.key, { onDelete: "cascade" }),
+  definition: jsonb("definition").notNull(),
+  version: integer("version").notNull().default(1),
+  appliedBy: uuid("applied_by").references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("idx_project_def_history_key").on(t.projectKey),
+]);

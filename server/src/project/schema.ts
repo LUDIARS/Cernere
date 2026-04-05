@@ -25,11 +25,20 @@ export const COLUMN_TYPE_MAP: Record<ColumnType, string> = {
 
 export const columnDefinitionSchema = z.object({
   type: columnTypeEnum,
+  module: z.string().min(1, "module is required"),  // 所属モジュール
   nullable: z.boolean().optional().default(true),
   description: z.string().optional(),
   default_value: z.string().optional(),
 });
 export type ColumnDefinition = z.infer<typeof columnDefinitionSchema>;
+
+// ── モジュール定義 ───────────────────────────────────────────
+
+export const moduleDefinitionSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional().default(""),
+});
+export type ModuleDefinition = z.infer<typeof moduleDefinitionSchema>;
 
 // ── プロジェクト定義 ─────────────────────────────────────────
 
@@ -42,6 +51,7 @@ export const projectDefinitionSchema = z.object({
     name: z.string().min(1, "name is required"),
     description: z.string().optional().default(""),
   }),
+  modules: z.record(z.string(), moduleDefinitionSchema).optional(),
   user_data: z.object({
     columns: z.record(z.string(), columnDefinitionSchema),
   }).optional(),
@@ -52,9 +62,7 @@ export type ProjectDefinition = z.infer<typeof projectDefinitionSchema>;
 // ── 登録リクエスト ───────────────────────────────────────────
 
 export const registerProjectRequestSchema = z.union([
-  // JSON 直接
   projectDefinitionSchema,
-  // URL からフェッチ
   z.object({ url: z.string().url() }),
 ]);
 
