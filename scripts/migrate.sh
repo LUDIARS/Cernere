@@ -10,7 +10,7 @@
 # 環境変数:
 #   PGHOST, PGPORT, PGUSER, PGDATABASE で接続先を変更可能
 
-set -euo pipefail
+set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MIGRATIONS_DIR="$SCRIPT_DIR/../migrations"
