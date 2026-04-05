@@ -84,6 +84,7 @@ async function organizationCmd(userId: string, action: string, p?: Record<string
       return org[0];
     }
     case "create": {
+      await requireSystemAdmin(userId);
       const name = requireStr(p, "name");
       const slug = requireStr(p, "slug");
       const description = optStr(p, "description") ?? "";
@@ -97,9 +98,14 @@ async function organizationCmd(userId: string, action: string, p?: Record<string
       });
       return { id, name, slug, description, createdBy: userId, createdAt: now.toISOString() };
     }
-    case "update": {
+    case "presence": {
       const orgId = requireStr(p, "organizationId");
-      await requireOrgRole(userId, orgId, ["admin", "owner"]);
+      const { getOrgPresence } = await import("./ws/events.js");
+      return getOrgPresence(orgId);
+    }
+    case "update": {
+      await requireSystemAdmin(userId);
+      const orgId = requireStr(p, "organizationId");
       await db.update(schema.organizations).set({
         name: requireStr(p, "name"),
         description: optStr(p, "description"),
@@ -108,8 +114,8 @@ async function organizationCmd(userId: string, action: string, p?: Record<string
       return { ok: true };
     }
     case "delete": {
+      await requireSystemAdmin(userId);
       const orgId = requireStr(p, "organizationId");
-      await requireOrgRole(userId, orgId, ["owner"]);
       await db.delete(schema.organizations).where(eq(schema.organizations.id, orgId));
       return { ok: true };
     }
