@@ -319,13 +319,26 @@ async function cmdUp(config: EnvCliConfig, composeArgs: string[]): Promise<void>
     console.log(`✓ ${dotenvPath} を生成しました (一時ファイル)`);
 
     // 2. docker compose up 実行
-    const args = ["compose", "up", ...composeArgs];
+    // --profile dev が指定されていなければ自動追加（backend/frontend を含める）
+    const hasDev = composeArgs.includes("--profile");
+    const profileArgs = hasDev ? [] : ["--profile", "dev"];
+    const args = ["compose", ...profileArgs, "up", ...composeArgs];
+
+    // Windows Docker Desktop では arm64 イメージが選択されることがあるため
+    // DOCKER_DEFAULT_PLATFORM を設定して amd64 を強制する
+    const env = { ...process.env };
+    if (process.platform === "win32" && !env.DOCKER_DEFAULT_PLATFORM) {
+      env.DOCKER_DEFAULT_PLATFORM = "linux/amd64";
+      console.log("  Platform: Windows 検出 → DOCKER_DEFAULT_PLATFORM=linux/amd64");
+    }
+
     console.log(`\n$ docker ${args.join(" ")}\n`);
 
     const exitCode = await new Promise<number>((resolve, reject) => {
       const child = spawn("docker", args, {
         stdio: "inherit",
         cwd: process.cwd(),
+        env,
       });
       child.on("error", reject);
       child.on("close", (code) => resolve(code ?? 1));

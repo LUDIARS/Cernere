@@ -67,7 +67,7 @@ Layer 4: リソース所有権・ロールチェック (403)
 ├── docs/                  # 設計ドキュメント
 ├── spec/                  # セキュリティ仕様
 ├── env-cli.config.ts      # env-cli プロジェクト設定
-└── docker-compose.yaml    # PostgreSQL + Redis
+└── docker-compose.yaml    # Docker Compose (DB + Backend + Frontend)
 ```
 
 ## セットアップ
@@ -91,34 +91,28 @@ npm run env:initialize
 `env:initialize` を実行すると、`env-cli.config.ts` で定義されたデフォルトの環境変数が Infisical に登録されます（既存のキーはスキップされます）。
 設定は `.env.secrets` に保存されます（gitignore 済み）。
 
-### 3. PostgreSQL・Redis の起動
-
-`env-cli up` で Infisical からシークレットを取得し、Docker を起動します。`.env` は起動後に自動削除されるためディスク上に残りません。
+### 3. 開発環境の起動
 
 ```bash
-npm run env:up
+npm run env:up       # バックグラウンド起動 (-d)
+npm run env:up:fg    # フォアグラウンド起動 (ログ表示、Ctrl+C で停止)
 ```
 
-または Infisical CLI を直接使用:
+Infisical からシークレットを取得し、以下をまとめて起動します:
+
+| サービス | 説明 | ポート |
+|---------|------|--------|
+| postgres | PostgreSQL 17 | 5432 |
+| redis | Redis 7 | 6379 |
+| backend | Rust (cargo-watch ホットリロード) | 8080 |
+| frontend | Vite dev server (HMR) | 5173 |
+
+データベースのマイグレーションはバックエンド起動時に自動で実行されます。
+
+DB のみ起動したい場合:
 
 ```bash
-infisical run --env=dev -- docker compose up -d
-```
-
-### 4. ビルド・実行
-
-```bash
-infisical run --env=dev -- cargo run
-```
-
-データベースのマイグレーションは起動時に自動で実行されます。
-
-### 6. フロントエンド (開発)
-
-```bash
-cd frontend
-npm install
-npm run dev
+npm run env:up -- -- -d postgres redis
 ```
 
 ## API
