@@ -32,14 +32,6 @@ export const columnDefinitionSchema = z.object({
 });
 export type ColumnDefinition = z.infer<typeof columnDefinitionSchema>;
 
-// ── モジュール定義 ───────────────────────────────────────────
-
-export const moduleDefinitionSchema = z.object({
-  name: z.string().min(1),
-  description: z.string().optional().default(""),
-});
-export type ModuleDefinition = z.infer<typeof moduleDefinitionSchema>;
-
 // ── エンドポイント定義 ───────────────────────────────────────
 
 export const endpointDefinitionSchema = z.object({
@@ -83,9 +75,7 @@ export const projectDefinitionSchema = z.object({
   endpoint: endpointDefinitionSchema.optional(),
   /** データを共有できるプロジェクト */
   data_sharing: z.array(dataShareDefinitionSchema).optional(),
-  /** モジュール定義 */
-  modules: z.record(z.string(), moduleDefinitionSchema).optional(),
-  /** ユーザーデータのカラム定義 */
+  /** ユーザーデータのカラム定義 (各カラムの module フィールドでモジュール帰属を管理) */
   user_data: z.object({
     columns: z.record(z.string(), columnDefinitionSchema),
   }).optional(),

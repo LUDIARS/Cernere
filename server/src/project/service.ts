@@ -32,14 +32,13 @@ export async function getProject(key: string) {
   const p = rows[0];
   const def = p.schemaDefinition as ProjectDefinition;
 
-  // モジュール一覧をカラム定義から集約
-  const modules = def?.modules ?? {};
-  const columnsByModule: Record<string, string[]> = {};
+  // カラムの module フィールドからモジュール別にグルーピング
+  const columnsByModule: Record<string, Array<{ name: string; type: string; description?: string }>> = {};
   if (def?.user_data?.columns) {
     for (const [colName, col] of Object.entries(def.user_data.columns)) {
       const mod = col.module ?? "default";
       if (!columnsByModule[mod]) columnsByModule[mod] = [];
-      columnsByModule[mod].push(colName);
+      columnsByModule[mod].push({ name: colName, type: col.type, description: col.description });
     }
   }
 
@@ -49,7 +48,6 @@ export async function getProject(key: string) {
     description: p.description,
     clientId: p.clientId,
     schemaDefinition: p.schemaDefinition,
-    modules,
     columnsByModule,
     isActive: p.isActive,
     createdAt: p.createdAt,
