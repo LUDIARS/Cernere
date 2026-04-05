@@ -15,7 +15,7 @@ export const users = pgTable("users", {
   githubId: bigint("github_id", { mode: "number" }).unique(),
   login: text("login").notNull(),
   displayName: text("display_name").notNull(),
-  avatarUrl: text("avatar_url").notNull().default(""),
+  avatarUrl: text("avatar_url"),
   email: text("email"),
   role: text("role").notNull().default("general"),
   passwordHash: text("password_hash"),
