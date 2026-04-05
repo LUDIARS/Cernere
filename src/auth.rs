@@ -49,6 +49,28 @@ pub fn generate_access_token_pub(user: &User, secret: &str) -> Result<String> {
     generate_access_token(user, secret)
 }
 
+/// トークンペア生成 (WS ゲスト認証からも利用)
+pub fn generate_tokens_public(user: &User, secret: &str) -> Result<(String, String)> {
+    generate_tokens(user, secret)
+}
+
+/// MFA チャレンジ用の一時トークン生成 (WS ゲスト認証からも利用)
+pub fn generate_mfa_token_public(user: &User, secret: &str) -> Result<String> {
+    // MFA 用には短い有効期限のトークンを生成
+    let claims = JwtClaims {
+        sub: user.id.to_string(),
+        role: user.role.clone(),
+        iat: Utc::now().timestamp() as usize,
+        exp: (Utc::now() + Duration::minutes(5)).timestamp() as usize,
+    };
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .map_err(|e| AppError::Internal(format!("MFA token encode failed: {}", e)))
+}
+
 /// JWT 検証 (WebSocket 認証でも利用)
 pub fn verify_jwt_public(token: &str, secret: &str) -> Result<JwtClaims> {
     decode::<JwtClaims>(
