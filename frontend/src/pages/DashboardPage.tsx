@@ -121,6 +121,7 @@ export function DashboardPage() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", fontSize: "0.85rem" }}>
           {user && <span>{user.name} <span style={{ color: "var(--text-muted)" }}>({user.role})</span></span>}
+          <a href="/organizations" style={{ color: "var(--text-muted)", textDecoration: "none" }}>Organizations</a>
           <a href="/profile" style={{ color: "var(--text-muted)", textDecoration: "none" }}>Profile</a>
           <a href="/data-optout" style={{ color: "var(--text-muted)", textDecoration: "none" }}>Data</a>
           <button onClick={logout} style={{

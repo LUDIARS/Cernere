@@ -15,6 +15,7 @@ import {
 import { sessionRegistry } from "./session-registry.js";
 import { dispatch } from "../commands.js";
 import { handleGuestAuthCommand } from "./guest.js";
+import { notifyPresenceChange } from "./events.js";
 import type { ClientMessage, ServerMessage } from "./protocol.js";
 
 const PING_INTERVAL_MS = 30_000;
@@ -43,6 +44,9 @@ export function createAuthenticatedWsHandler(userId: string, sessionId: string):
       await setUserState(userState);
 
       send(ws, { type: "connected", session_id: sessionId, user_state: userState });
+
+      // プレゼンス通知: online
+      notifyPresenceChange(userId, "online").catch(() => {});
 
       pingTimer = setInterval(() => {
         send(ws, { type: "ping", ts: Math.floor(Date.now() / 1000) });
@@ -83,6 +87,11 @@ export function createAuthenticatedWsHandler(userId: string, sessionId: string):
       if (pingTimer) clearInterval(pingTimer);
       sessionRegistry.unregister(sessionId);
       await updateUserStateField(userId, "session_expired");
+
+      // プレゼンス通知: offline (他セッションがなければ)
+      if (!sessionRegistry.isOnline(userId)) {
+        notifyPresenceChange(userId, "offline").catch(() => {});
+      }
     },
   };
 }
