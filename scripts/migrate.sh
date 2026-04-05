@@ -1,32 +1,60 @@
-#!/bin/bash
+#!/bin/sh
 # 手動マイグレーション実行スクリプト
 #
 # Usage:
-#   ./scripts/migrate.sh                    # Docker コンテナの DB に全マイグレーション適用
+#   ./scripts/migrate.sh                    # 全未適用マイグレーション適用
 #   ./scripts/migrate.sh 010_managed_projects  # 特定バージョンのみ適用
 #   ./scripts/migrate.sh --status           # 適用状況を表示
-#   ./scripts/migrate.sh --reset VERSION    # 特定バージョンを未適用に戻す (SQLは実行しない)
+#   ./scripts/migrate.sh --reset VERSION    # 特定バージョンを未適用に戻す
 #
-# 環境変数:
-#   PGHOST, PGPORT, PGUSER, PGDATABASE で接続先を変更可能
+# 接続方法 (優先順):
+#   1. DATABASE_URL 環境変数
+#   2. docker exec でコンテナ内の psql を使用
+#   3. ローカルの psql を使用
 
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MIGRATIONS_DIR="$SCRIPT_DIR/../migrations"
-CONTAINER_NAME="${CONTAINER_NAME:-cernere-postgres}"
 
-# デフォルト接続情報
-PGUSER="${PGUSER:-cernere}"
-PGDATABASE="${PGDATABASE:-cernere}"
-
-run_sql() {
-  docker exec "$CONTAINER_NAME" psql -U "$PGUSER" -d "$PGDATABASE" -t -A -c "$1" 2>/dev/null
-}
-
-run_sql_file() {
-  docker exec -i "$CONTAINER_NAME" psql -U "$PGUSER" -d "$PGDATABASE" < "$1"
-}
+# 接続方法の判定
+if [ -n "${DATABASE_URL:-}" ]; then
+  # DATABASE_URL があればローカル psql で直接接続
+  run_sql() {
+    psql "$DATABASE_URL" -t -A -c "$1"
+  }
+  run_sql_file() {
+    psql "$DATABASE_URL" -f "$1"
+  }
+  echo "[migrate] Using DATABASE_URL"
+elif docker ps --format '{{.Names}}' 2>/dev/null | grep -q "cernere-postgres"; then
+  # Docker コンテナ経由
+  CONTAINER="cernere-postgres"
+  PGUSER="${PGUSER:-cernere}"
+  PGDB="${PGDATABASE:-cernere}"
+  run_sql() {
+    docker exec "$CONTAINER" psql -U "$PGUSER" -d "$PGDB" -t -A -c "$1"
+  }
+  run_sql_file() {
+    docker exec -i "$CONTAINER" psql -U "$PGUSER" -d "$PGDB" < "$1"
+  }
+  echo "[migrate] Using docker exec ($CONTAINER)"
+elif command -v psql >/dev/null 2>&1; then
+  # ローカル psql
+  PGUSER="${PGUSER:-cernere}"
+  PGDB="${PGDATABASE:-cernere}"
+  run_sql() {
+    psql -U "$PGUSER" -d "$PGDB" -t -A -c "$1"
+  }
+  run_sql_file() {
+    psql -U "$PGUSER" -d "$PGDB" -f "$1"
+  }
+  echo "[migrate] Using local psql"
+else
+  echo "[migrate] Error: No database connection available."
+  echo "  Set DATABASE_URL, or ensure docker/psql is available."
+  exit 1
+fi
 
 # _migrations テーブル確保
 run_sql "CREATE TABLE IF NOT EXISTS _migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())" > /dev/null
