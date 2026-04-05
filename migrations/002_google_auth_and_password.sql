@@ -15,7 +15,7 @@ ALTER TABLE users ADD COLUMN google_scopes JSONB;
 ALTER TABLE users ADD COLUMN password_hash TEXT;
 
 -- メールのユニーク制約
-CREATE UNIQUE INDEX idx_users_email ON users(email) WHERE email IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL;
 
 -- ロール (admin / general)
 ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'general';
@@ -24,12 +24,12 @@ ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'general';
 ALTER TABLE users ADD COLUMN last_login_at TIMESTAMPTZ;
 
 -- JWT リフレッシュトークン管理 (Redis セッションと別管理)
-CREATE TABLE refresh_sessions (
+CREATE TABLE IF NOT EXISTS refresh_sessions (
     id          UUID PRIMARY KEY,
     user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     refresh_token TEXT NOT NULL UNIQUE,
     expires_at  TIMESTAMPTZ NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_refresh_sessions_user_id ON refresh_sessions(user_id);
-CREATE INDEX idx_refresh_sessions_token ON refresh_sessions(refresh_token);
+CREATE INDEX IF NOT EXISTS idx_refresh_sessions_user_id ON refresh_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_refresh_sessions_token ON refresh_sessions(refresh_token);
