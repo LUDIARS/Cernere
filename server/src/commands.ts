@@ -1,0 +1,312 @@
+/**
+ * WebSocket コマンドディスパッチャ
+ *
+ * module_request メッセージを受け取り、ビジネスロジックにルーティングする。
+ * 全操作は operation_logs テーブルに記録される。
+ */
+
+import { db } from "./db/connection.js";
+import * as schema from "./db/schema.js";
+import { eq, and, sql } from "drizzle-orm";
+import { AppError } from "./error.js";
+
+export async function dispatch(
+  userId: string,
+  sessionId: string,
+  module: string,
+  action: string,
+  payload: unknown,
+): Promise<unknown> {
+  const method = `${capitalize(module)}.${capitalize(action)}`;
+  const params = payload ?? {};
+
+  let result: unknown;
+  let status = "ok";
+  let error: string | undefined;
+
+  try {
+    result = await execute(userId, module, action, payload as Record<string, unknown> | undefined);
+  } catch (err) {
+    status = "error";
+    error = (err as Error).message;
+    throw err;
+  } finally {
+    await db.insert(schema.operationLogs).values({
+      id: crypto.randomUUID(),
+      userId,
+      sessionId,
+      method,
+      params,
+      status,
+      error: error ?? null,
+    }).catch(() => {}); // ログ記録失敗は無視
+  }
+
+  return result;
+}
+
+async function execute(
+  userId: string,
+  module: string,
+  action: string,
+  payload?: Record<string, unknown>,
+): Promise<unknown> {
+  switch (module) {
+    case "organization": return organizationCmd(userId, action, payload);
+    case "member": return memberCmd(userId, action, payload);
+    case "project_definition": return projectDefCmd(userId, action, payload);
+    case "org_project": return orgProjectCmd(userId, action, payload);
+    case "user": return userCmd(userId, action, payload);
+    default:
+      throw AppError.badRequest(`Unknown module: ${module}`);
+  }
+}
+
+// ── Organization ─────────────────────────────────────────────
+
+async function organizationCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
+  switch (action) {
+    case "list": {
+      const memberships = await db.select({ orgId: schema.organizationMembers.organizationId })
+        .from(schema.organizationMembers).where(eq(schema.organizationMembers.userId, userId));
+      const orgIds = memberships.map((m) => m.orgId);
+      if (orgIds.length === 0) return [];
+      const orgs = await db.select().from(schema.organizations)
+        .where(sql`${schema.organizations.id} = ANY(${orgIds})`);
+      return orgs;
+    }
+    case "get": {
+      const orgId = requireStr(p, "organizationId");
+      const org = await db.select().from(schema.organizations)
+        .where(eq(schema.organizations.id, orgId)).limit(1);
+      if (org.length === 0) throw AppError.notFound("Organization not found");
+      return org[0];
+    }
+    case "create": {
+      const name = requireStr(p, "name");
+      const slug = requireStr(p, "slug");
+      const description = optStr(p, "description") ?? "";
+      const id = crypto.randomUUID();
+      const now = new Date();
+
+      await db.insert(schema.organizations).values({
+        id, name, slug, description, createdBy: userId, createdAt: now, updatedAt: now,
+      });
+      await db.insert(schema.organizationMembers).values({
+        organizationId: id, userId, role: "owner", joinedAt: now,
+      });
+
+      return { id, name, slug, description, createdBy: userId, createdAt: now.toISOString() };
+    }
+    case "update": {
+      const orgId = requireStr(p, "organizationId");
+      await requireOrgRole(userId, orgId, ["admin", "owner"]);
+      await db.update(schema.organizations).set({
+        name: requireStr(p, "name"),
+        description: optStr(p, "description"),
+        updatedAt: new Date(),
+      }).where(eq(schema.organizations.id, orgId));
+      return { ok: true };
+    }
+    case "delete": {
+      const orgId = requireStr(p, "organizationId");
+      await requireOrgRole(userId, orgId, ["owner"]);
+      await db.delete(schema.organizations).where(eq(schema.organizations.id, orgId));
+      return { ok: true };
+    }
+    default: throw AppError.badRequest(`Unknown organization action: ${action}`);
+  }
+}
+
+// ─��� Member ─────���─────────────────────────────────────────────
+
+async function memberCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
+  switch (action) {
+    case "list": {
+      const orgId = requireStr(p, "organizationId");
+      const members = await db.select({
+        userId: schema.organizationMembers.userId,
+        role: schema.organizationMembers.role,
+        joinedAt: schema.organizationMembers.joinedAt,
+        login: schema.users.login,
+        displayName: schema.users.displayName,
+        avatarUrl: schema.users.avatarUrl,
+        email: schema.users.email,
+      }).from(schema.organizationMembers)
+        .innerJoin(schema.users, eq(schema.organizationMembers.userId, schema.users.id))
+        .where(eq(schema.organizationMembers.organizationId, orgId));
+      return members;
+    }
+    case "add": {
+      const orgId = requireStr(p, "organizationId");
+      const targetUserId = requireStr(p, "userId");
+      const role = optStr(p, "role") ?? "member";
+      await requireOrgRole(userId, orgId, ["admin", "owner"]);
+      await db.insert(schema.organizationMembers).values({
+        organizationId: orgId, userId: targetUserId, role, joinedAt: new Date(),
+      });
+      return { ok: true };
+    }
+    case "update_role": {
+      const orgId = requireStr(p, "organizationId");
+      const targetUserId = requireStr(p, "userId");
+      const role = requireStr(p, "role");
+      await requireOrgRole(userId, orgId, ["admin", "owner"]);
+      await db.update(schema.organizationMembers).set({ role })
+        .where(and(
+          eq(schema.organizationMembers.organizationId, orgId),
+          eq(schema.organizationMembers.userId, targetUserId),
+        ));
+      return { ok: true };
+    }
+    case "remove": {
+      const orgId = requireStr(p, "organizationId");
+      const targetUserId = requireStr(p, "userId");
+      if (targetUserId !== userId) {
+        await requireOrgRole(userId, orgId, ["admin", "owner"]);
+      }
+      await db.delete(schema.organizationMembers)
+        .where(and(
+          eq(schema.organizationMembers.organizationId, orgId),
+          eq(schema.organizationMembers.userId, targetUserId),
+        ));
+      return { ok: true };
+    }
+    default: throw AppError.badRequest(`Unknown member action: ${action}`);
+  }
+}
+
+// ── ProjectDefinition ────────────────────────────────────────
+
+async function projectDefCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
+  switch (action) {
+    case "list":
+      return db.select().from(schema.projectDefinitions);
+    case "get": {
+      const id = requireStr(p, "id");
+      const rows = await db.select().from(schema.projectDefinitions)
+        .where(eq(schema.projectDefinitions.id, id)).limit(1);
+      if (rows.length === 0) throw AppError.notFound("Project definition not found");
+      return rows[0];
+    }
+    case "create": {
+      await requireSystemAdmin(userId);
+      const id = crypto.randomUUID();
+      const now = new Date();
+      await db.insert(schema.projectDefinitions).values({
+        id,
+        code: requireStr(p, "code"),
+        name: requireStr(p, "name"),
+        dataSchema: p?.dataSchema ?? {},
+        commands: p?.commands ?? [],
+        pluginRepository: optStr(p, "pluginRepository") ?? "",
+        createdAt: now, updatedAt: now,
+      });
+      return { id };
+    }
+    case "update": {
+      await requireSystemAdmin(userId);
+      const id = requireStr(p, "id");
+      await db.update(schema.projectDefinitions).set({
+        name: requireStr(p, "name"),
+        dataSchema: p?.dataSchema ?? {},
+        commands: p?.commands ?? [],
+        pluginRepository: optStr(p, "pluginRepository"),
+        updatedAt: new Date(),
+      }).where(eq(schema.projectDefinitions.id, id));
+      return { ok: true };
+    }
+    case "delete": {
+      await requireSystemAdmin(userId);
+      await db.delete(schema.projectDefinitions).where(eq(schema.projectDefinitions.id, requireStr(p, "id")));
+      return { ok: true };
+    }
+    default: throw AppError.badRequest(`Unknown project_definition action: ${action}`);
+  }
+}
+
+// ── OrganizationProject ──────────────────────────────────────
+
+async function orgProjectCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
+  switch (action) {
+    case "list": {
+      const orgId = requireStr(p, "organizationId");
+      const rows = await db.select().from(schema.organizationProjects)
+        .innerJoin(schema.projectDefinitions,
+          eq(schema.organizationProjects.projectDefinitionId, schema.projectDefinitions.id))
+        .where(eq(schema.organizationProjects.organizationId, orgId));
+      return rows.map((r) => r.project_definitions);
+    }
+    case "enable": {
+      const orgId = requireStr(p, "organizationId");
+      await requireOrgRole(userId, orgId, ["admin", "owner"]);
+      await db.insert(schema.organizationProjects).values({
+        organizationId: orgId,
+        projectDefinitionId: requireStr(p, "projectDefinitionId"),
+      });
+      return { ok: true };
+    }
+    case "disable": {
+      const orgId = requireStr(p, "organizationId");
+      await requireOrgRole(userId, orgId, ["admin", "owner"]);
+      await db.delete(schema.organizationProjects).where(and(
+        eq(schema.organizationProjects.organizationId, orgId),
+        eq(schema.organizationProjects.projectDefinitionId, requireStr(p, "projectDefinitionId")),
+      ));
+      return { ok: true };
+    }
+    default: throw AppError.badRequest(`Unknown org_project action: ${action}`);
+  }
+}
+
+// ── User ─────────────────────────────────────────────────────
+
+async function userCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
+  if (action === "get") {
+    const targetId = requireStr(p, "userId");
+    const rows = await db.select().from(schema.users)
+      .where(eq(schema.users.id, targetId)).limit(1);
+    if (rows.length === 0) throw AppError.notFound("User not found");
+    const u = rows[0];
+    return {
+      id: u.id, login: u.login, displayName: u.displayName,
+      avatarUrl: u.avatarUrl, email: u.email, role: u.role,
+    };
+  }
+  throw AppError.badRequest(`Unknown user action: ${action}`);
+}
+
+// ── Helpers ──���───────────────────────────────────────────────
+
+function requireStr(p: Record<string, unknown> | undefined, key: string): string {
+  const v = p?.[key];
+  if (typeof v !== "string" || !v) throw AppError.badRequest(`${key} is required`);
+  return v;
+}
+
+function optStr(p: Record<string, unknown> | undefined, key: string): string | undefined {
+  const v = p?.[key];
+  return typeof v === "string" ? v : undefined;
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+async function requireSystemAdmin(userId: string): Promise<void> {
+  const rows = await db.select({ role: schema.users.role })
+    .from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+  if (rows[0]?.role !== "admin") throw AppError.forbidden("System admin required");
+}
+
+async function requireOrgRole(userId: string, orgId: string, allowed: string[]): Promise<void> {
+  const rows = await db.select({ role: schema.organizationMembers.role })
+    .from(schema.organizationMembers)
+    .where(and(
+      eq(schema.organizationMembers.organizationId, orgId),
+      eq(schema.organizationMembers.userId, userId),
+    )).limit(1);
+  if (rows.length === 0 || !allowed.includes(rows[0].role)) {
+    throw AppError.forbidden("Insufficient organization permissions");
+  }
+}

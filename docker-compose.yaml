@@ -33,29 +33,25 @@ services:
       retries: 5
 
   backend:
-    image: rust:1-bookworm
+    image: node:22-alpine
     container_name: cernere-backend
-    working_dir: /app
+    working_dir: /app/server
     ports:
       - "${LISTEN_PORT:-8080}:8080"
     volumes:
-      - .:/app
-      - cargo-cache:/usr/local/cargo/registry
-      - target-cache:/app/target
+      - ./server:/app/server
+      - backend-node-modules:/app/server/node_modules
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-cernere}:${POSTGRES_PASSWORD:-cernere}@postgres:5432/${POSTGRES_DB:-cernere}"
       REDIS_URL: "redis://redis:6379"
-      LISTEN_ADDR: "0.0.0.0:8080"
+      LISTEN_PORT: "8080"
+      FRONTEND_URL: "http://localhost:${FRONTEND_PORT:-5173}"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: >
-      bash -c "
-        cargo install cargo-watch --locked 2>/dev/null || true;
-        cargo watch -x run
-      "
+    command: sh -c "npm install && npx tsx watch src/index.ts"
     profiles:
       - dev
 
@@ -78,6 +74,5 @@ services:
 volumes:
   pg-data:
   redis-data:
-  cargo-cache:
-  target-cache:
+  backend-node-modules:
   frontend-node-modules:
