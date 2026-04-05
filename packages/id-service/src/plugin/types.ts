@@ -18,6 +18,24 @@ export interface ProfileFieldDef {
   description?: string;
 }
 
+// ─── Data Category (オプトアウト対象) ──────────────────────
+
+/**
+ * プラグインが宣言するデータカテゴリ。
+ * 各カテゴリはオプトアウトの最小単位となり、
+ * ユーザーは管理画面からカテゴリ単位でデータを削除できる。
+ */
+export interface DataCategory {
+  /** カテゴリの一意キー (例: "work_history", "health_data") */
+  key: string;
+  /** 管理画面に表示するラベル */
+  label: string;
+  /** カテゴリの説明 */
+  description?: string;
+  /** このカテゴリに属する profileFields のキー一覧 */
+  fields: string[];
+}
+
 // ─── Profile Plugin ────────────────────────────────────────
 
 export interface ProfilePlugin {
@@ -29,6 +47,13 @@ export interface ProfilePlugin {
 
   /** サービス固有のプロフィールフィールド定義 */
   profileFields: Record<string, ProfileFieldDef>;
+
+  /**
+   * データカテゴリ定義。
+   * プラグインは profileFields をカテゴリに分類し、
+   * ユーザーがカテゴリ単位でオプトアウト（データ削除）できるようにする。
+   */
+  dataCategories?: DataCategory[];
 
   /**
    * ユーザーリスト用のフィールド一覧。
@@ -79,4 +104,20 @@ export interface ProfileRepo {
   findByUser(userId: string): Promise<UserServiceProfile[]>;
   upsert(userId: string, serviceId: string, profileData: Record<string, unknown>): Promise<void>;
   deleteByUser(userId: string, serviceId: string): Promise<void>;
+}
+
+// ─── Data Opt-Out ──────────────────────────────────────────
+
+export interface DataOptOut {
+  userId: string;
+  serviceId: string;
+  categoryKey: string;
+  optedOutAt: Date;
+}
+
+export interface DataOptOutRepo {
+  findByUser(userId: string): Promise<DataOptOut[]>;
+  findByUserAndService(userId: string, serviceId: string): Promise<DataOptOut[]>;
+  insert(userId: string, serviceId: string, categoryKey: string): Promise<void>;
+  delete(userId: string, serviceId: string, categoryKey: string): Promise<void>;
 }

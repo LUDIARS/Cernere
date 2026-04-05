@@ -1209,3 +1209,62 @@ pub async fn get_public_profile(
         hobbies,
     }))
 }
+
+// ── データオプトアウト管理 ────────────────────────────
+
+use crate::models::DataOptOutResponse;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptOutRequest {
+    pub service_id: String,
+    pub category_key: String,
+    /// オプトアウト時に削除する extra 内のフィールド名（フロントから指定）
+    #[serde(default)]
+    pub fields: Vec<String>,
+}
+
+/// GET /api/profile/optouts — 自分のオプトアウト一覧
+pub async fn list_optouts(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<DataOptOutResponse>>> {
+    let user = extract_user_from_jwt(&state, &headers).await?;
+    let optouts = db::list_user_optouts(&state.db, user.id).await?;
+    Ok(Json(optouts.into_iter().map(DataOptOutResponse::from).collect()))
+}
+
+/// POST /api/profile/optouts — データをオプトアウト（該当データ削除）
+pub async fn create_optout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<OptOutRequest>,
+) -> Result<Json<serde_json::Value>> {
+    let user = extract_user_from_jwt(&state, &headers).await?;
+
+    // オプトアウトを記録
+    let optout = db::insert_optout(&state.db, user.id, &req.service_id, &req.category_key).await?;
+
+    // 該当フィールドのデータを削除
+    if !req.fields.is_empty() {
+        db::delete_profile_extra_fields(&state.db, user.id, &req.fields).await?;
+    }
+
+    Ok(Json(serde_json::json!({
+        "message": "データをオプトアウトしました。該当データは削除されました。",
+        "optout": DataOptOutResponse::from(optout),
+    })))
+}
+
+/// DELETE /api/profile/optouts — オプトアウトを撤回
+pub async fn delete_optout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<OptOutRequest>,
+) -> Result<Json<serde_json::Value>> {
+    let user = extract_user_from_jwt(&state, &headers).await?;
+    db::delete_optout(&state.db, user.id, &req.service_id, &req.category_key).await?;
+    Ok(Json(serde_json::json!({
+        "message": "オプトアウトを撤回しました。",
+    })))
+}

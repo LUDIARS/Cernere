@@ -369,6 +369,7 @@ pub fn router(state: AppState) -> Router {
         // ユーザープロファイル
         .route("/api/profile", get(auth::get_my_profile).put(auth::update_my_profile))
         .route("/api/profile/privacy", put(auth::update_profile_privacy))
+        .route("/api/profile/optouts", get(auth::list_optouts).post(auth::create_optout).delete(auth::delete_optout))
         .route("/api/users/{user_id}/profile", get(auth::get_public_profile))
         // WebSocket セッション接続
         // 組織・プロジェクト定義・ユーザー情報の操作は全て WS セッション経由
