@@ -48,6 +48,9 @@ export type {
   ProfileFieldType,
   UserServiceProfile,
   ProfileRepo,
+  DataCategory,
+  DataOptOut,
+  DataOptOutRepo,
 } from "./plugin/types.js";
 export { PluginRegistry, pluginRegistry } from "./plugin/registry.js";
 

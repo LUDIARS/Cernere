@@ -368,6 +368,40 @@ export const profile = {
   },
 };
 
+// ── Data Opt-Out API ─────────────────────────────
+
+export interface DataOptOutItem {
+  serviceId: string;
+  categoryKey: string;
+  optedOutAt: string;
+}
+
+export interface OptOutRequest {
+  serviceId: string;
+  categoryKey: string;
+  fields?: string[];
+}
+
+export const optouts = {
+  async list(): Promise<DataOptOutItem[]> {
+    return request<DataOptOutItem[]>("/api/profile/optouts");
+  },
+
+  async create(body: OptOutRequest): Promise<{ message: string; optout: DataOptOutItem }> {
+    return request<{ message: string; optout: DataOptOutItem }>("/api/profile/optouts", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  async remove(body: OptOutRequest): Promise<{ message: string }> {
+    return request<{ message: string }>("/api/profile/optouts", {
+      method: "DELETE",
+      body: JSON.stringify(body),
+    });
+  },
+};
+
 // ── Tool Client API ──────────────────────────────
 
 export interface ToolClientData {
