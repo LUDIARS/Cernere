@@ -18,6 +18,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
+import { spawn } from "node:child_process";
 import type { EnvCliConfig, InfisicalBootstrap, RawSecret } from "./types.js";
 import { authenticate, fetchSecrets, getSecretByKey, upsertSecret } from "./infisical.js";
 import { loadBootstrap, saveBootstrap } from "./env-file.js";
@@ -303,6 +304,52 @@ async function cmdEnv(config: EnvCliConfig, toStdout: boolean): Promise<void> {
   }
 }
 
+async function cmdUp(config: EnvCliConfig, composeArgs: string[]): Promise<void> {
+  const bootstrap = requireBootstrap(config);
+  const dotenvPath = resolveDotenvPath(config);
+  const dotenvExisted = fs.existsSync(dotenvPath);
+
+  try {
+    // 1. Infisical → .env 生成
+    console.log("Infisical から .env を生成中...");
+    const token = await authenticate(bootstrap);
+    const secrets = await fetchSecrets(bootstrap, token);
+    const result = buildDotenv(secrets, bootstrap, config);
+    fs.writeFileSync(dotenvPath, result.content, "utf-8");
+    console.log(`✓ ${dotenvPath} を生成しました (一時ファイル)`);
+
+    // 2. docker compose up 実行
+    const args = ["compose", "up", ...composeArgs];
+    console.log(`\n$ docker ${args.join(" ")}\n`);
+
+    const exitCode = await new Promise<number>((resolve, reject) => {
+      const child = spawn("docker", args, {
+        stdio: "inherit",
+        cwd: process.cwd(),
+      });
+      child.on("error", reject);
+      child.on("close", (code) => resolve(code ?? 1));
+    });
+
+    if (exitCode !== 0) {
+      console.error(`\ndocker compose が終了コード ${exitCode} で失敗しました。`);
+      process.exitCode = exitCode;
+    }
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : err}`);
+    process.exitCode = 1;
+  } finally {
+    // 3. .env を削除 (元々存在していなかった場合のみ)
+    if (!dotenvExisted && fs.existsSync(dotenvPath)) {
+      fs.unlinkSync(dotenvPath);
+      console.log(`\n✓ ${dotenvPath} を削除しました (一時ファイル)`);
+    } else if (dotenvExisted) {
+      fs.unlinkSync(dotenvPath);
+      console.log(`\n✓ ${dotenvPath} を削除しました`);
+    }
+  }
+}
+
 async function cmdInitialize(config: EnvCliConfig): Promise<void> {
   const bootstrap = requireBootstrap(config);
 
@@ -352,13 +399,14 @@ function printUsage(config: EnvCliConfig): void {
   console.log("  env-cli set <KEY> <VALUE>  シークレット作成/更新");
   console.log("  env-cli env                Infisical → .env 生成");
   console.log("  env-cli env --stdout       .env 内容を標準出力");
+  console.log("  env-cli up [-- ...]        .env 生成 → docker compose up → .env 削除");
   console.log("  env-cli initialize         config の infraKeys を Infisical に流し込む (未存在のみ)");
   console.log();
   console.log("フロー:");
   console.log("  1. setup      → Infisical 認証情報を .env.secrets に保存");
   console.log("  2. initialize → env-cli.config.ts のデフォルト値を Infisical に登録");
   console.log("  3. env        → Infisical から取得 → Docker 用 .env を生成");
-  console.log("  4. docker compose up → .env を読んで起動");
+  console.log("  4. up         → .env 一時生成 → docker compose up -d → .env 自動削除");
   console.log("  5. サービス内で SecretManager が残りのシークレットを取得");
 }
 
@@ -396,6 +444,12 @@ async function main(): Promise<void> {
     case "env":
       await cmdEnv(config, args.includes("--stdout"));
       break;
+    case "up": {
+      const dashDashIdx = args.indexOf("--");
+      const composeArgs = dashDashIdx >= 0 ? args.slice(dashDashIdx + 1) : ["-d"];
+      await cmdUp(config, composeArgs);
+      break;
+    }
     default:
       printUsage(config);
       if (command && command !== "help" && command !== "--help" && command !== "-h") {
