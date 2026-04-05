@@ -66,8 +66,9 @@ Layer 4: リソース所有権・ロールチェック (403)
 ├── migrations/            # SQL マイグレーション
 ├── docs/                  # 設計ドキュメント
 ├── spec/                  # セキュリティ仕様
-├── env-cli.config.ts      # env-cli プロジェクト設定
-└── docker-compose.yaml    # PostgreSQL + Redis
+├── env-cli.config.ts              # env-cli プロジェクト設定
+├── docker-compose.windows.yaml    # Docker Compose (Windows)
+└── docker-compose.linux.yaml      # Docker Compose (Linux / macOS)
 ```
 
 ## セットアップ
@@ -93,17 +94,16 @@ npm run env:initialize
 
 ### 3. PostgreSQL・Redis の起動
 
-`env-cli up` で Infisical からシークレットを取得し、Docker を起動します。`.env` は起動後に自動削除されるためディスク上に残りません。
-
 ```bash
 npm run env:up
 ```
 
-または Infisical CLI を直接使用:
+Infisical からシークレットを取得し、OS に応じた docker-compose ファイルで Docker を起動します。`.env` は起動後に自動削除されます。
 
-```bash
-infisical run --env=dev -- docker compose up -d
-```
+| OS | 使用ファイル |
+|----|-------------|
+| Windows | `docker-compose.windows.yaml` |
+| Linux / macOS | `docker-compose.linux.yaml` |
 
 ### 4. ビルド・実行
 

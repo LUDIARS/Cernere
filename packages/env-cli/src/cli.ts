@@ -318,8 +318,22 @@ async function cmdUp(config: EnvCliConfig, composeArgs: string[]): Promise<void>
     fs.writeFileSync(dotenvPath, result.content, "utf-8");
     console.log(`✓ ${dotenvPath} を生成しました (一時ファイル)`);
 
-    // 2. docker compose up 実行
-    const args = ["compose", "up", ...composeArgs];
+    // 2. OS に応じた docker-compose ファイルを選択
+    const isWindows = process.platform === "win32";
+    const composeFile = isWindows
+      ? "docker-compose.windows.yaml"
+      : "docker-compose.linux.yaml";
+
+    // compose ファイルが存在しない場合はデフォルト (docker-compose.yaml) にフォールバック
+    const cwd = process.cwd();
+    const resolvedComposeFile = fs.existsSync(path.join(cwd, composeFile))
+      ? composeFile
+      : "docker-compose.yaml";
+
+    console.log(`  Platform: ${isWindows ? "Windows" : "Linux/macOS"} → ${resolvedComposeFile}`);
+
+    // 3. docker compose up 実行
+    const args = ["compose", "-f", resolvedComposeFile, "up", ...composeArgs];
     console.log(`\n$ docker ${args.join(" ")}\n`);
 
     const exitCode = await new Promise<number>((resolve, reject) => {
