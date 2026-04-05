@@ -227,3 +227,30 @@ export const userDataOptouts = pgTable("user_data_optouts", {
   index("idx_user_data_optouts_user").on(t.userId),
   index("idx_user_data_optouts_user_service").on(t.userId, t.serviceId),
 ]);
+
+// ── Managed Projects (動的プロジェクト管理) ──────────────────
+
+export const managedProjects = pgTable("managed_projects", {
+  key: text("key").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  clientId: text("client_id").notNull().unique(),
+  clientSecretHash: text("client_secret_hash").notNull(),
+  schemaDefinition: jsonb("schema_definition").notNull().default({}),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("idx_managed_projects_client_id").on(t.clientId),
+]);
+
+export const projectDefinitionHistory = pgTable("project_definition_history", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectKey: text("project_key").notNull().references(() => managedProjects.key, { onDelete: "cascade" }),
+  definition: jsonb("definition").notNull(),
+  version: integer("version").notNull().default(1),
+  appliedBy: uuid("applied_by").references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("idx_project_def_history_key").on(t.projectKey),
+]);

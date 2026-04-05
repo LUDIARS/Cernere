@@ -1,7 +1,7 @@
 -- 組織（Organization）とプロジェクト定義
 
 -- 組織テーブル
-CREATE TABLE organizations (
+CREATE TABLE IF NOT EXISTS organizations (
     id          UUID PRIMARY KEY,
     name        TEXT NOT NULL,
     slug        TEXT NOT NULL UNIQUE,
@@ -12,17 +12,17 @@ CREATE TABLE organizations (
 );
 
 -- 組織メンバーテーブル (ユーザーは複数の組織に所属可能)
-CREATE TABLE organization_members (
+CREATE TABLE IF NOT EXISTS organization_members (
     organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     role            TEXT NOT NULL DEFAULT 'member',  -- owner / admin / member
     joined_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (organization_id, user_id)
 );
-CREATE INDEX idx_org_members_user ON organization_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_org_members_user ON organization_members(user_id);
 
 -- プロジェクト定義テーブル (Ars, Schedula などのプロジェクトタイプ)
-CREATE TABLE project_definitions (
+CREATE TABLE IF NOT EXISTS project_definitions (
     id                  UUID PRIMARY KEY,
     code                TEXT NOT NULL UNIQUE,           -- プロジェクトコード (例: "ars", "schedula")
     name                TEXT NOT NULL,                  -- プロジェクト名
@@ -34,7 +34,7 @@ CREATE TABLE project_definitions (
 );
 
 -- 組織が使用するプロジェクト定義 (各組織はどのプロジェクトを使用するかを選択)
-CREATE TABLE organization_projects (
+CREATE TABLE IF NOT EXISTS organization_projects (
     organization_id     UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     project_definition_id UUID NOT NULL REFERENCES project_definitions(id) ON DELETE CASCADE,
     enabled_at          TIMESTAMPTZ NOT NULL DEFAULT now(),

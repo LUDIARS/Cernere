@@ -2,7 +2,7 @@
  * WebSocket コマンドディスパッチャ
  *
  * module_request メッセージを受け取り、ビジネスロジックにルーティングする。
- * 全操作は operation_logs テーブルに記録される。
+ * 全操作は operation_logs テーブルに��録される。
  */
 
 import { db } from "./db/connection.js";
@@ -39,7 +39,7 @@ export async function dispatch(
       params,
       status,
       error: error ?? null,
-    }).catch(() => {}); // ログ記録失敗は無視
+    }).catch(() => {});
   }
 
   return result;
@@ -57,12 +57,13 @@ async function execute(
     case "project_definition": return projectDefCmd(userId, action, payload);
     case "org_project": return orgProjectCmd(userId, action, payload);
     case "user": return userCmd(userId, action, payload);
+    case "managed_project": return managedProjectCmd(userId, action, payload);
     default:
       throw AppError.badRequest(`Unknown module: ${module}`);
   }
 }
 
-// ── Organization ─────────────────────────────────────────────
+// -- Organization --
 
 async function organizationCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
   switch (action) {
@@ -88,14 +89,12 @@ async function organizationCmd(userId: string, action: string, p?: Record<string
       const description = optStr(p, "description") ?? "";
       const id = crypto.randomUUID();
       const now = new Date();
-
       await db.insert(schema.organizations).values({
         id, name, slug, description, createdBy: userId, createdAt: now, updatedAt: now,
       });
       await db.insert(schema.organizationMembers).values({
         organizationId: id, userId, role: "owner", joinedAt: now,
       });
-
       return { id, name, slug, description, createdBy: userId, createdAt: now.toISOString() };
     }
     case "update": {
@@ -118,7 +117,7 @@ async function organizationCmd(userId: string, action: string, p?: Record<string
   }
 }
 
-// ─��� Member ─────���─────────────────────────────────────────────
+// -- Member --
 
 async function memberCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
   switch (action) {
@@ -176,7 +175,7 @@ async function memberCmd(userId: string, action: string, p?: Record<string, unkn
   }
 }
 
-// ── ProjectDefinition ────────────────────────────────────────
+// -- ProjectDefinition --
 
 async function projectDefCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
   switch (action) {
@@ -225,7 +224,7 @@ async function projectDefCmd(userId: string, action: string, p?: Record<string, 
   }
 }
 
-// ── OrganizationProject ──────────────────────────────────────
+// -- OrganizationProject --
 
 async function orgProjectCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
   switch (action) {
@@ -259,7 +258,7 @@ async function orgProjectCmd(userId: string, action: string, p?: Record<string, 
   }
 }
 
-// ── User ─────────────────────────────────────────────────────
+// -- User --
 
 async function userCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
   if (action === "get") {
@@ -276,7 +275,44 @@ async function userCmd(userId: string, action: string, p?: Record<string, unknow
   throw AppError.badRequest(`Unknown user action: ${action}`);
 }
 
-// ── Helpers ──���───────────────────────────────────────────────
+// -- ManagedProject (WS session only) --
+
+async function managedProjectCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
+  const svc = await import("./project/service.js");
+
+  switch (action) {
+    case "list":
+      return svc.listProjects();
+    case "get":
+      return svc.getProject(requireStr(p, "key"));
+    case "register": {
+      await requireSystemAdmin(userId);
+      return svc.registerProject(p, userId);
+    }
+    case "delete": {
+      await requireSystemAdmin(userId);
+      return svc.deleteProject(requireStr(p, "key"));
+    }
+    case "update_schema": {
+      await requireSystemAdmin(userId);
+      return svc.updateProjectSchema(requireStr(p, "key"), p, userId);
+    }
+    case "definition_history":
+      return svc.getDefinitionHistory(requireStr(p, "key"));
+    case "list_optouts":
+      return svc.listModuleOptouts(userId, requireStr(p, "projectKey"));
+    case "optout": {
+      return svc.setModuleOptout(userId, requireStr(p, "projectKey"), requireStr(p, "moduleKey"));
+    }
+    case "remove_optout": {
+      return svc.removeModuleOptout(userId, requireStr(p, "projectKey"), requireStr(p, "moduleKey"));
+    }
+    default:
+      throw AppError.badRequest(`Unknown managed_project action: ${action}`);
+  }
+}
+
+// -- Helpers --
 
 function requireStr(p: Record<string, unknown> | undefined, key: string): string {
   const v = p?.[key];

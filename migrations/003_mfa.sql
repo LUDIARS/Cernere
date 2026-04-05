@@ -10,7 +10,7 @@ ALTER TABLE users ADD COLUMN mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE users ADD COLUMN mfa_methods JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- 検証コードテーブル (SMS / メール OTP 用)
-CREATE TABLE verification_codes (
+CREATE TABLE IF NOT EXISTS verification_codes (
     id          UUID PRIMARY KEY,
     user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     code        TEXT NOT NULL,
@@ -20,8 +20,8 @@ CREATE TABLE verification_codes (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_verification_codes_user_id ON verification_codes(user_id);
-CREATE INDEX idx_verification_codes_lookup ON verification_codes(user_id, method, used) WHERE NOT used;
+CREATE INDEX IF NOT EXISTS idx_verification_codes_user_id ON verification_codes(user_id);
+CREATE INDEX IF NOT EXISTS idx_verification_codes_lookup ON verification_codes(user_id, method, used) WHERE NOT used;
 
 -- 期限切れコードの自動クリーンアップ用
-CREATE INDEX idx_verification_codes_expires ON verification_codes(expires_at) WHERE NOT used;
+CREATE INDEX IF NOT EXISTS idx_verification_codes_expires ON verification_codes(expires_at) WHERE NOT used;

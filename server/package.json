@@ -17,7 +17,8 @@
     "ioredis": "^5.10.0",
     "jsonwebtoken": "^9.0.3",
     "postgres": "^3.4.8",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

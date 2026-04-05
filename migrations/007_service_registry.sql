@@ -1,7 +1,7 @@
 -- Service Registry: Cernere に WebSocket 接続するサービスの登録
 -- Service Tickets: 3点方式認証のワンタイムチケット
 
-CREATE TABLE service_registry (
+CREATE TABLE IF NOT EXISTS service_registry (
     id                UUID PRIMARY KEY,
     code              TEXT UNIQUE NOT NULL,
     name              TEXT NOT NULL,
@@ -14,7 +14,7 @@ CREATE TABLE service_registry (
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE service_tickets (
+CREATE TABLE IF NOT EXISTS service_tickets (
     id              UUID PRIMARY KEY,
     user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     service_id      UUID NOT NULL REFERENCES service_registry(id) ON DELETE CASCADE,
@@ -26,5 +26,5 @@ CREATE TABLE service_tickets (
     consumed        BOOLEAN NOT NULL DEFAULT FALSE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_service_tickets_code ON service_tickets(ticket_code);
-CREATE INDEX idx_service_tickets_expires ON service_tickets(expires_at) WHERE NOT consumed;
+CREATE INDEX IF NOT EXISTS idx_service_tickets_code ON service_tickets(ticket_code);
+CREATE INDEX IF NOT EXISTS idx_service_tickets_expires ON service_tickets(expires_at) WHERE NOT consumed;
