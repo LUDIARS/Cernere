@@ -72,13 +72,18 @@ export async function runMigrations(): Promise<void> {
           try {
             await sql.unsafe(stmt);
           } catch (err) {
-            const msg = (err as { code?: string; message?: string }).code;
-            // 既に存在するオブジェクトは無視
-            if (msg === "42P07" || msg === "42701" || msg === "42710") {
-              // 42P07: relation already exists
-              // 42701: column already exists
-              // 42710: object already exists
-              console.log(`[migrate]   Skipped (already exists): ${stmt.slice(0, 60)}...`);
+            const code = (err as { code?: string }).code;
+            // 既に存在する / 存在しない参照先 → スキップ
+            const ignorable = new Set([
+              "42P07",  // relation already exists
+              "42701",  // column already exists
+              "42710",  // object already exists
+              "42P01",  // relation does not exist (INDEX on missing table = already handled)
+              "42704",  // type does not exist
+              "23505",  // duplicate key (migration already recorded)
+            ]);
+            if (code && ignorable.has(code)) {
+              console.log(`[migrate]   Skipped (${code}): ${stmt.slice(0, 80)}...`);
               continue;
             }
             throw err;
