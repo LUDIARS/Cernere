@@ -7,7 +7,7 @@
 
 import { db } from "./db/connection.js";
 import * as schema from "./db/schema.js";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import { AppError } from "./error.js";
 
 export async function dispatch(
@@ -73,7 +73,7 @@ async function organizationCmd(userId: string, action: string, p?: Record<string
       const orgIds = memberships.map((m) => m.orgId);
       if (orgIds.length === 0) return [];
       const orgs = await db.select().from(schema.organizations)
-        .where(sql`${schema.organizations.id} = ANY(${orgIds})`);
+        .where(inArray(schema.organizations.id, orgIds));
       return orgs;
     }
     case "get": {
