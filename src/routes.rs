@@ -60,7 +60,7 @@ struct SettingsQuery {
 ///
 /// セッション情報がない場合 → ログイン/サインアップ画面遷移用情報
 /// セッションがある場合 → ユーザのステートを確認して返す
-async fn auth_negotiate(
+async fn auth_get(
     State(state): State<AppState>,
     jar: CookieJar,
     headers: axum::http::HeaderMap,
@@ -328,7 +328,8 @@ async fn api_delete_service(
 pub fn router(state: AppState) -> Router {
     Router::new()
         // 統合認証エンドポイント (共通 /auth)
-        .route("/auth", get(auth_negotiate))
+        // GET -> 認証状態取得, WS -> セッション接続
+        .route("/auth", get(auth_get).patch(ws::ws_upgrade))
         .route("/auth/state", get(auth_state))
         // JWT Auth (password / Google OAuth)
         .route("/api/auth/register", post(auth::register))
@@ -371,9 +372,6 @@ pub fn router(state: AppState) -> Router {
         .route("/api/profile/privacy", put(auth::update_profile_privacy))
         .route("/api/profile/optouts", get(auth::list_optouts).post(auth::create_optout).delete(auth::delete_optout))
         .route("/api/users/{user_id}/profile", get(auth::get_public_profile))
-        // WebSocket セッション接続
-        // 組織・プロジェクト定義・ユーザー情報の操作は全て WS セッション経由
-        .route("/ws", get(ws::ws_upgrade))
         // サービス管理 (admin)
         .route("/api/services", post(api_register_service).get(api_list_services))
         .route("/api/services/{service_id}", delete(api_delete_service))

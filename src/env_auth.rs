@@ -94,7 +94,7 @@ pub fn build_auth_config(state: &AppState) -> EnvironmentAuthConfig {
     let transports = vec![
         TransportMode::Http,
         TransportMode::WebSocket {
-            endpoint: "/ws".into(),
+            endpoint: "/auth".into(),
         },
     ];
 
