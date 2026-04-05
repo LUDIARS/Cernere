@@ -1,6 +1,7 @@
 services:
   postgres:
-    image: postgres:17
+    image: postgres:17-alpine
+    platform: linux/amd64
     container_name: cernere-postgres
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
@@ -18,7 +19,8 @@ services:
       retries: 5
 
   redis:
-    image: redis:7
+    image: redis:7-alpine
+    platform: linux/amd64
     container_name: cernere-redis
     ports:
       - "${REDIS_PORT:-6379}:6379"
@@ -33,7 +35,8 @@ services:
       retries: 5
 
   backend:
-    image: rust:1.87
+    image: rust:1.87-slim
+    platform: linux/amd64
     container_name: cernere-backend
     working_dir: /app
     ports:
@@ -60,7 +63,8 @@ services:
       - dev
 
   frontend:
-    image: node:22
+    image: node:22-alpine
+    platform: linux/amd64
     container_name: cernere-frontend
     working_dir: /app/frontend
     ports:

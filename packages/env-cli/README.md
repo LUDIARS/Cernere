@@ -75,9 +75,8 @@ npx env-cli up
 以下を自動で実行します:
 
 1. Infisical からシークレットを取得し `.env` を一時生成
-2. OS を判定し適切な docker-compose ファイルを選択 (Windows / Linux)
-3. `docker compose --profile dev up` を実行 (DB + Backend + Frontend)
-4. `.env` を自動削除
+2. `docker compose --profile dev up` を実行 (DB + Backend + Frontend)
+3. `.env` を自動削除
 
 引数を渡すことも可能:
 
