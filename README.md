@@ -94,7 +94,8 @@ npm run env:initialize
 ### 3. 開発環境の起動
 
 ```bash
-npm run env:up
+npm run env:up       # バックグラウンド起動 (-d)
+npm run env:up:fg    # フォアグラウンド起動 (ログ表示、Ctrl+C で停止)
 ```
 
 Infisical からシークレットを取得し、以下をまとめて起動します:

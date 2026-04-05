@@ -10,7 +10,8 @@
     "env:get": "npx tsx packages/env-cli/src/cli.ts get",
     "env:set": "npx tsx packages/env-cli/src/cli.ts set",
     "env:initialize": "npx tsx packages/env-cli/src/cli.ts initialize",
-    "env:up": "npx tsx packages/env-cli/src/cli.ts up"
+    "env:up": "npx tsx packages/env-cli/src/cli.ts up",
+    "env:up:fg": "npx tsx packages/env-cli/src/cli.ts up -- --abort-on-container-exit"
   },
   "devDependencies": {
     "tsx": "^4.19.0",
