@@ -8,8 +8,8 @@
 
 import postgres from "postgres";
 import { config } from "../config.js";
-import type { ProjectYaml, ColumnDefinition } from "./types.js";
-import { COLUMN_TYPE_MAP } from "./types.js";
+import type { ProjectDefinition } from "./schema.js";
+import { COLUMN_TYPE_MAP } from "./schema.js";
 
 function tableNameFor(projectKey: string): string {
   return `project_data_${projectKey}`;
@@ -20,7 +20,7 @@ function tableNameFor(projectKey: string): string {
  */
 export async function migrateProjectSchema(
   projectKey: string,
-  definition: ProjectYaml,
+  definition: ProjectDefinition,
 ): Promise<{ created: boolean; columnsAdded: string[] }> {
   const sql = postgres(config.databaseUrl, { max: 1 });
   const tableName = tableNameFor(projectKey);
