@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { wsClient } from "../lib/ws-client";
-import { getAccessToken } from "../lib/api.js";
 
 interface ManagedProject {
   key: string;
@@ -36,34 +35,19 @@ interface RegisterResult {
 }
 
 export function ProjectsPage() {
-  const { user } = useAuth();
+  const { user, wsConnected } = useAuth();
   const isAdmin = user?.role === "admin";
 
   const [projects, setProjects] = useState<ManagedProject[]>([]);
   const [selected, setSelected] = useState<ProjectDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [wsConnected, setWsConnected] = useState(false);
 
   // 登録フォーム
   const [showRegister, setShowRegister] = useState(false);
   const [jsonInput, setJsonInput] = useState("");
   const [urlInput, setUrlInput] = useState("");
   const [registerResult, setRegisterResult] = useState<RegisterResult | null>(null);
-
-  // WS 接続
-  useEffect(() => {
-    const token = getAccessToken();
-    if (!token) return;
-
-    wsClient.connect(token).then(() => {
-      setWsConnected(true);
-    }).catch((err) => {
-      setError(`WebSocket 接続失敗: ${err.message}`);
-    });
-
-    return () => wsClient.disconnect();
-  }, []);
 
   // プロジェクト一覧取得
   const fetchProjects = useCallback(async () => {
