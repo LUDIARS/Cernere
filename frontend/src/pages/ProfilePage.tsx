@@ -197,6 +197,7 @@ export function ProfilePage() {
             border: "1px solid var(--border)",
             borderRadius: "var(--radius)",
             padding: "1.5rem",
+            marginBottom: "1rem",
           }}
         >
           <h2 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.5rem", color: "var(--text-muted)" }}>
@@ -207,6 +208,39 @@ export function ProfilePage() {
             非公開にしたフィールドは、他のユーザーやツールからのプロファイル参照時に表示されません。
             データ自体はサーバーに保存されますが、API レスポンスからフィルタされます。
           </p>
+        </div>
+
+        {/* データオプトアウトリンク */}
+        <div
+          style={{
+            background: "var(--bg-surface)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius)",
+            padding: "1.5rem",
+          }}
+        >
+          <h2 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.5rem", color: "var(--text-muted)" }}>
+            データ管理
+          </h2>
+          <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: 1.7, marginBottom: "0.75rem" }}>
+            データのオプトアウト（削除）を管理できます。
+            オプトアウトすると該当カテゴリのデータは完全に削除されます。
+          </p>
+          <a href="/data-optout">
+            <button
+              style={{
+                fontSize: "0.85rem",
+                padding: "0.4rem 1rem",
+                borderRadius: "var(--radius)",
+                border: "1px solid var(--border)",
+                background: "var(--bg-surface)",
+                color: "var(--text)",
+                cursor: "pointer",
+              }}
+            >
+              データオプトアウト管理
+            </button>
+          </a>
         </div>
       </div>
     </div>

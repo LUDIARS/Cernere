@@ -415,6 +415,36 @@ pub struct PublicProfileResponse {
     pub hobbies: Option<Vec<String>>,
 }
 
+// ── データオプトアウト ────────────────────────────────
+
+/// データオプトアウト記録
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct DataOptOut {
+    pub user_id: Uuid,
+    pub service_id: String,
+    pub category_key: String,
+    pub opted_out_at: DateTime<Utc>,
+}
+
+/// データオプトアウトレスポンス
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DataOptOutResponse {
+    pub service_id: String,
+    pub category_key: String,
+    pub opted_out_at: String,
+}
+
+impl From<DataOptOut> for DataOptOutResponse {
+    fn from(o: DataOptOut) -> Self {
+        Self {
+            service_id: o.service_id,
+            category_key: o.category_key,
+            opted_out_at: o.opted_out_at.to_rfc3339(),
+        }
+    }
+}
+
 /// JWT クレーム
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JwtClaims {

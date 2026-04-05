@@ -38,6 +38,16 @@ export function DashboardPage() {
           <a href="/profile">
             <button className="primary">プロファイル設定</button>
           </a>
+          <a href="/data-optout">
+            <button style={{
+              padding: "0.4rem 1rem",
+              borderRadius: "var(--radius)",
+              border: "1px solid var(--border)",
+              background: "var(--bg-surface)",
+              color: "var(--text)",
+              cursor: "pointer",
+            }}>データ管理</button>
+          </a>
           <button onClick={logout} className="danger">
             Logout
           </button>

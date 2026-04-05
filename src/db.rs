@@ -4,9 +4,9 @@ use uuid::Uuid;
 
 use crate::error::{AppError, Result};
 use crate::models::{
-    Organization, OrganizationMember, OrganizationMemberWithUser, Project, ProjectDefinition,
-    ProjectSetting, ProjectSummary, RefreshSession, ToolClient, User, UserProfile,
-    VerificationCode,
+    DataOptOut, Organization, OrganizationMember, OrganizationMemberWithUser, Project,
+    ProjectDefinition, ProjectSetting, ProjectSummary, RefreshSession, ToolClient, User,
+    UserProfile, VerificationCode,
 };
 
 // ── User ────────────────────────────────────────────
@@ -957,6 +957,78 @@ pub async fn update_profile_privacy(
     .bind(now)
     .execute(pool)
     .await?;
+    Ok(())
+}
+
+// ── Data Opt-Outs ───────────────────────────────
+
+pub async fn list_user_optouts(pool: &PgPool, user_id: Uuid) -> Result<Vec<DataOptOut>> {
+    let optouts = sqlx::query_as::<_, DataOptOut>(
+        "SELECT * FROM user_data_optouts WHERE user_id = $1 ORDER BY opted_out_at DESC",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(optouts)
+}
+
+pub async fn insert_optout(
+    pool: &PgPool,
+    user_id: Uuid,
+    service_id: &str,
+    category_key: &str,
+) -> Result<DataOptOut> {
+    let optout = sqlx::query_as::<_, DataOptOut>(
+        "INSERT INTO user_data_optouts (user_id, service_id, category_key)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (user_id, service_id, category_key) DO UPDATE SET opted_out_at = now()
+         RETURNING *",
+    )
+    .bind(user_id)
+    .bind(service_id)
+    .bind(category_key)
+    .fetch_one(pool)
+    .await?;
+    Ok(optout)
+}
+
+pub async fn delete_optout(
+    pool: &PgPool,
+    user_id: Uuid,
+    service_id: &str,
+    category_key: &str,
+) -> Result<()> {
+    sqlx::query(
+        "DELETE FROM user_data_optouts WHERE user_id = $1 AND service_id = $2 AND category_key = $3",
+    )
+    .bind(user_id)
+    .bind(service_id)
+    .bind(category_key)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// オプトアウト時にプロファイルの該当フィールドを削除する。
+/// fields: 削除対象の extra 内キー一覧
+pub async fn delete_profile_extra_fields(
+    pool: &PgPool,
+    user_id: Uuid,
+    fields: &[String],
+) -> Result<()> {
+    if fields.is_empty() {
+        return Ok(());
+    }
+    // extra JSONB から指定キーを除去
+    for field in fields {
+        sqlx::query(
+            "UPDATE user_profiles SET extra = extra - $2, updated_at = now() WHERE user_id = $1",
+        )
+        .bind(user_id)
+        .bind(field)
+        .execute(pool)
+        .await?;
+    }
     Ok(())
 }
 
