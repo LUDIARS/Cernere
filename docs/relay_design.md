@@ -166,7 +166,7 @@ None → Exists → Updated → Exists
 ## 7. 接続ライフサイクル
 
 ```
-1. クライアント → GET /ws?token=<jwt>        (WebSocket アップグレード)
+1. クライアント → GET /auth?token=<jwt>        (WebSocket アップグレード)
 2. サーバ → { type: "connected", ... }         (セッション確立)
 3. サーバ → { type: "ping", ts: ... }          (30秒ごと)
 4. クライアント → { type: "pong", ts: ... }    (応答)
@@ -178,7 +178,7 @@ None → Exists → Updated → Exists
 ### 7.1 再接続フロー
 
 ```
-1. クライアント → GET /ws?session_id=<sid>    (既存セッション復帰)
+1. クライアント → GET /auth?session_id=<sid>    (既存セッション復帰)
 2. セッション有効 → { type: "connected", ... }
 3. セッション無効 → 401 Unauthorized → ログイン画面遷移
 ```

@@ -122,7 +122,7 @@ pub struct WsConnectQuery {
     pub token: Option<String>,
 }
 
-/// GET /ws — WebSocket アップグレード
+/// GET /auth — WebSocket アップグレード
 pub async fn ws_upgrade(
     State(state): State<AppState>,
     Query(query): Query<WsConnectQuery>,

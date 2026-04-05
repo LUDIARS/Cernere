@@ -30,7 +30,7 @@ Cernere は **常時接続セッションの強固な認証によって、外部
 ```
 クライアント                          Cernere
     │                                    │
-    │─── GET /ws?token=<jwt> ──────────>│
+    │─── GET /auth?token=<jwt> ──────────>│
     │                                    │── JWT 検証
     │                                    │── ユーザ存在確認
     │                                    │── SessionRegistry 登録
