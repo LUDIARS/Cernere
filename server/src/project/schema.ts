@@ -85,9 +85,6 @@ export type ProjectDefinition = z.infer<typeof projectDefinitionSchema>;
 
 // ── リクエストスキーマ ───────────────────────────────────────
 
-export const registerProjectRequestSchema = z.union([
-  projectDefinitionSchema,
-  z.object({ url: z.string().url() }),
-]);
+export const registerProjectRequestSchema = projectDefinitionSchema;
 
 export const updateSchemaRequestSchema = projectDefinitionSchema;

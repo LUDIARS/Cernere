@@ -1,0 +1,27 @@
+{
+  "project": {
+    "key": "my_service",
+    "name": "My Service",
+    "description": ""
+  },
+
+  "endpoint": {
+    "url": "http://localhost:3000",
+    "frontend_url": "http://localhost:5173",
+    "same_server": false,
+    "bridge_path": "/my_service"
+  },
+
+  "data_sharing": [],
+
+  "user_data": {
+    "columns": {
+      "example_field": {
+        "type": "text",
+        "module": "core",
+        "nullable": true,
+        "description": "Example user data field"
+      }
+    }
+  }
+}

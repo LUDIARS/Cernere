@@ -285,6 +285,10 @@ async function managedProjectCmd(userId: string, action: string, p?: Record<stri
       return svc.listProjects();
     case "get":
       return svc.getProject(requireStr(p, "key"));
+    case "templates":
+      return svc.listServiceTemplates();
+    case "get_template":
+      return svc.getServiceTemplate(requireStr(p, "key"));
     case "register": {
       await requireSystemAdmin(userId);
       return svc.registerProject(p, userId);
