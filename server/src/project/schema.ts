@@ -25,7 +25,7 @@ export const COLUMN_TYPE_MAP: Record<ColumnType, string> = {
 
 export const columnDefinitionSchema = z.object({
   type: columnTypeEnum,
-  module: z.string().min(1, "module is required"),  // 所属モジュール
+  module: z.string().min(1, "module is required"),
   nullable: z.boolean().optional().default(true),
   description: z.string().optional(),
   default_value: z.string().optional(),
@@ -40,6 +40,34 @@ export const moduleDefinitionSchema = z.object({
 });
 export type ModuleDefinition = z.infer<typeof moduleDefinitionSchema>;
 
+// ── エンドポイント定義 ───────────────────────────────────────
+
+export const endpointDefinitionSchema = z.object({
+  /** サービスのベース URL (例: "http://localhost:3000") */
+  url: z.string().url(),
+  /** フロントエンドの URL (例: "http://localhost:5173") */
+  frontend_url: z.string().url().optional(),
+  /** Cernere と同一サーバー上で動作しているか */
+  same_server: z.boolean().optional().default(false),
+  /** 同一サーバーの場合のフロントエンドブリッジパス (例: "/schedula") */
+  bridge_path: z.string().optional(),
+});
+export type EndpointDefinition = z.infer<typeof endpointDefinitionSchema>;
+
+// ── データ共有定義 ───────────────────────────────────────────
+
+export const dataShareDefinitionSchema = z.object({
+  /** 共有先プロジェクトキー */
+  project_key: z.string().min(1),
+  /** 共有するモジュール (省略時は全モジュール) */
+  modules: z.array(z.string()).optional(),
+  /** 共有方向: "read" = 読み取りのみ, "readwrite" = 読み書き */
+  access: z.enum(["read", "readwrite"]).optional().default("read"),
+  /** 共有の説明 */
+  description: z.string().optional(),
+});
+export type DataShareDefinition = z.infer<typeof dataShareDefinitionSchema>;
+
 // ── プロジェクト定義 ─────────────────────────────────────────
 
 const projectKeyRegex = /^[a-z][a-z0-9_]{1,62}$/;
@@ -51,7 +79,13 @@ export const projectDefinitionSchema = z.object({
     name: z.string().min(1, "name is required"),
     description: z.string().optional().default(""),
   }),
+  /** サービスのエンドポイント */
+  endpoint: endpointDefinitionSchema.optional(),
+  /** データを共有できるプロジェクト */
+  data_sharing: z.array(dataShareDefinitionSchema).optional(),
+  /** モジュール定義 */
   modules: z.record(z.string(), moduleDefinitionSchema).optional(),
+  /** ユーザーデータのカラム定義 */
   user_data: z.object({
     columns: z.record(z.string(), columnDefinitionSchema),
   }).optional(),
@@ -59,13 +93,11 @@ export const projectDefinitionSchema = z.object({
 
 export type ProjectDefinition = z.infer<typeof projectDefinitionSchema>;
 
-// ── 登録リクエスト ───────────────────────────────────────────
+// ── リクエストスキーマ ───────────────────────────────────────
 
 export const registerProjectRequestSchema = z.union([
   projectDefinitionSchema,
   z.object({ url: z.string().url() }),
 ]);
-
-// ── スキーマ更新リクエスト ────────────────────────────────────
 
 export const updateSchemaRequestSchema = projectDefinitionSchema;
