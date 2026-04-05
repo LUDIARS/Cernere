@@ -40,6 +40,7 @@ services:
       - "${LISTEN_PORT:-8080}:8080"
     volumes:
       - ./server:/app/server
+      - ./migrations:/app/migrations
       - backend-node-modules:/app/server/node_modules
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-cernere}:${POSTGRES_PASSWORD:-cernere}@postgres:5432/${POSTGRES_DB:-cernere}"
