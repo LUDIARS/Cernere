@@ -26,4 +26,5 @@ export type ServerMessage =
   | { type: "state_changed"; user_state: UserFullState }
   | { type: "module_response"; module: string; action: string; payload: unknown }
   | { type: "relayed"; from_session: string; payload: unknown }
+  | { type: "event"; event: string; payload: unknown }
   | { type: "error"; code: string; message: string };
