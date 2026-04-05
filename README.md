@@ -60,7 +60,7 @@ Layer 4: リソース所有権・ロールチェック (403)
 ├── packages/
 │   ├── id-service/        # 汎用 Identity Service SDK
 │   ├── id-cache/          # Id Service 用キャッシュレイヤー
-│   ├── auth/              # id-service 互換レイヤー (旧パッケージ)
+│   ├── service-adapter/   # 外部サービス用 WebSocket 認証アダプタ
 │   └── env-cli/           # Infisical シークレット管理 CLI
 ├── frontend/              # React フロントエンド
 ├── migrations/            # SQL マイグレーション
@@ -93,7 +93,13 @@ npm run env:initialize
 
 ### 3. PostgreSQL・Redis の起動
 
-Infisical から環境変数を読み込んで Docker を起動します。
+`env-cli up` で Infisical からシークレットを取得し、Docker を起動します。`.env` は起動後に自動削除されるためディスク上に残りません。
+
+```bash
+npm run env:up
+```
+
+または Infisical CLI を直接使用:
 
 ```bash
 infisical run --env=dev -- docker compose up -d

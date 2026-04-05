@@ -1,49 +1,41 @@
-# @ludiars/env-cli
+# @cernere/env-cli
 
-Infisical からシークレットを取得し、Docker 用 `.env` を自動生成する CLI ツール。
+Infisical からシークレットを取得し、Docker 用 `.env` を一時生成して安全に起動する CLI ツール。
 
 ## 概要
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  env-cli setup   → Infisical 認証設定 (.env.secrets)     │
-│  env-cli env     → Infisical → .env 生成                 │
-│  docker compose up → .env を読んで起動                    │
-│  サービス内 → SecretManager がランタイムで残りを取得       │
+│  env-cli setup      → Infisical 認証設定 (.env.secrets)  │
+│  env-cli initialize → config のデフォルト値を Infisical に│
+│  env-cli up         → .env 一時生成 → docker compose up  │
+│                        → 起動後 .env 自動削除             │
 └──────────────────────────────────────────────────────────┘
 ```
 
-設定は2層に分離されます:
+設定は 2 層に分離されます:
 
 | 層 | 管理方法 | 例 |
 |---|---|---|
-| **インフラ設定** | `.env` に出力 → Docker が使用 | ポート, DB接続先, Redis URL |
+| **インフラ設定** | `.env` に一時出力 → Docker が使用 | ポート, DB 接続���, Redis URL |
 | **シークレット** | サービスがランタイムで Infisical API 取得 | JWT_SECRET, OAuth 認証情報 |
 
-## インストール
-
-```bash
-npm install -D @ludiars/env-cli
-```
+> `.env` はディスク上に残りません。`env-cli up` は起動後に自動削除します。
 
 ## セットアップ
 
 ### 1. 設定ファイルを作成
 
-プロジェクトルートに `env-cli.config.ts` (または `.js` / `.json`) を作成:
+プロジェクトルートに `env-cli.config.ts` (または `.js` / `.json`) を作��:
 
 ```ts
-import type { EnvCliConfig } from "@ludiars/env-cli";
+import type { EnvCliConfig } from "@cernere/env-cli";
 
 export default {
   name: "MyProject",
   infraKeys: {
     APP_PORT: "3000",
     DB_PORT: "5432",
-    DB_HOST: "db",
-    DB_USER: "myapp",
-    DB_PASSWORD: "myapp",
-    DB_NAME: "myapp",
     DATABASE_URL: "postgresql://myapp:myapp@db:5432/myapp",
     REDIS_URL: "redis://redis:6379",
   },
@@ -66,22 +58,30 @@ npx env-cli setup
 
 認証情報は `.env.secrets` に保存されます (`.gitignore` に追加してください)。
 
-### 3. .env を生成
+### 3. デフォルト値を Infisical に登録
 
 ```bash
-npx env-cli env
+npx env-cli initialize
 ```
 
-Infisical から全シークレットを取得し、`.env` を生成します:
-
-- `infraKeys` にあるキー → `.env` に値を出力 (Infisical に登録があればそちら優先)
-- Infisical bootstrap 認証情報 → `.env` に出力 (サービスが SecretManager で使用)
-- その他のキー → コメントとして記載 (サービスがランタイムで取得)
+`env-cli.config.ts` の `infraKeys` に定義されたデフォルト値を Infisical に登���します。既に存在するキーはスキップされるため、安全に何���でも実行可能です。
 
 ### 4. Docker 起動
 
 ```bash
-docker compose up -d
+npx env-cli up
+```
+
+以下を自動で実行します:
+
+1. Infisical からシークレットを取得し `.env` を一時生成
+2. `docker compose up -d` を実行
+3. `.env` を自動削除
+
+引数を渡すことも可能:
+
+```bash
+npx env-cli up -- --build    # docker compose up --build -d
 ```
 
 ## CLI リファレンス
@@ -89,12 +89,14 @@ docker compose up -d
 | コマンド | 説明 |
 |---|---|
 | `env-cli setup` | 対話形式で Infisical 認証を設定 |
+| `env-cli initialize` | config の infraKeys を Infisical に登録 (未存在のみ) |
+| `env-cli test` | Infisical 接続テスト |
+| `env-cli list` | シークレット一覧 (値はマスク表示) |
+| `env-cli get <KEY>` | 指定キーの値を取得 (パイプ用) |
+| `env-cli set <KEY> <VALUE>` | シークレットを作成/更新 |
 | `env-cli env` | Infisical → `.env` を生成 |
 | `env-cli env --stdout` | `.env` 内容を標準出力 (パイプ用) |
-| `env-cli test` | Infisical 接続テスト |
-| `env-cli get <KEY>` | 指定キーの値を取得 (パイプ用) |
-| `env-cli list` | シークレット一覧 (値はマスク表示) |
-| `env-cli set <KEY> <VALUE>` | シークレットを作成/更新 |
+| `env-cli up [-- ...]` | `.env` 一時生成 → `docker compose up` → `.env` 自動削除 |
 
 ## 設定オプション (`EnvCliConfig`)
 
@@ -130,7 +132,7 @@ import {
   fetchSecrets,
   buildDotenv,
   loadBootstrap,
-} from "@ludiars/env-cli";
+} from "@cernere/env-cli";
 
 const bootstrap = loadBootstrap(".env.secrets");
 if (bootstrap) {
@@ -140,7 +142,7 @@ if (bootstrap) {
 }
 ```
 
-### エクスポート一覧
+### エクスポ���ト一覧
 
 | モジュール | 関数 / 型 |
 |---|---|
@@ -154,7 +156,7 @@ if (bootstrap) {
 
 ```
 .env.secrets       ← Infisical 認証情報 (gitignore)
-.env               ← Docker 用環境変数 (env-cli env で生成, gitignore)
+.env               ← Docker 用環���変数 (env-cli up で一時��成・自動削除)
 env-cli.config.ts  ← プロジェクト固有設定 (git 管理)
 ```
 
