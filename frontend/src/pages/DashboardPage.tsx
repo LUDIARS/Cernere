@@ -231,43 +231,36 @@ export function DashboardPage() {
             <div style={{ marginBottom: "1.5rem", padding: "1rem", background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "6px" }}>
               <h3 style={{ fontSize: "0.9rem", fontWeight: 600, marginBottom: "0.75rem" }}>Register Project</h3>
 
-              {/* Template selector */}
+              {/* Template selector (dropdown) */}
               <div style={{ marginBottom: "0.75rem" }}>
-                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.4rem" }}>Supported Services (click to load template)</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+                <label style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.3rem" }}>Service Template</label>
+                <select
+                  onChange={(e) => { if (e.target.value) selectTemplate(e.target.value); }}
+                  defaultValue=""
+                  style={{
+                    width: "100%", padding: "0.4rem 0.5rem", fontSize: "0.85rem", borderRadius: "4px",
+                    border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)",
+                  }}
+                >
+                  <option value="" disabled>-- Select a service template --</option>
                   {loadingTemplates ? (
-                    <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Loading...</span>
-                  ) : templates.length === 0 ? (
-                    <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>No templates available</span>
-                  ) : templates.map((t) => (
-                    <button
-                      key={t.key}
-                      onClick={() => selectTemplate(t.key)}
-                      title={t.description}
-                      style={{
-                        padding: "0.2rem 0.6rem", fontSize: "0.75rem", borderRadius: "3px",
-                        border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)",
-                        cursor: "pointer",
-                      }}
-                    >{t.name}</button>
-                  ))}
-                  <button
-                    onClick={() => selectTemplate("_template")}
-                    style={{
-                      padding: "0.2rem 0.6rem", fontSize: "0.75rem", borderRadius: "3px",
-                      border: "1px dashed var(--border)", background: "transparent", color: "var(--text-muted)",
-                      cursor: "pointer",
-                    }}
-                  >+ Blank Template</button>
-                </div>
+                    <option disabled>Loading...</option>
+                  ) : (
+                    <>
+                      {templates.map((t) => (
+                        <option key={t.key} value={t.key}>{t.name} — {t.description || t.key}</option>
+                      ))}
+                      <option value="_template">+ Blank Template</option>
+                    </>
+                  )}
+                </select>
               </div>
 
               <textarea
                 value={jsonInput}
                 onChange={(e) => setJsonInput(e.target.value)}
                 placeholder="Select a template above or paste JSON definition"
-                rows={12}
-                style={{ width: "100%", padding: "0.5rem", fontFamily: "monospace", fontSize: "0.8rem", borderRadius: "4px", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", boxSizing: "border-box", resize: "vertical" }}
+                style={{ width: "100%", height: "calc(100vh - 380px)", minHeight: "300px", padding: "0.5rem", fontFamily: "monospace", fontSize: "0.8rem", borderRadius: "4px", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", boxSizing: "border-box", resize: "vertical" }}
               />
               <button className="primary" onClick={handleRegister} style={{ marginTop: "0.5rem" }}>Register</button>
             </div>
