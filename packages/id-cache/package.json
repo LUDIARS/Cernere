@@ -16,6 +16,15 @@
     "build": "tsc",
     "prepublishOnly": "npm run build"
   },
+  "dependencies": {
+    "hono": "^4.12.0",
+    "jsonwebtoken": "^9.0.3"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0"
+  },
   "license": "MIT",
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
