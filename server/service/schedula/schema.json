@@ -1,0 +1,106 @@
+{
+  "project": {
+    "key": "schedula",
+    "name": "Schedula",
+    "description": "汎用スケジューリング & 予約プラットフォーム"
+  },
+
+  "endpoint": {
+    "url": "http://localhost:3000",
+    "frontend_url": "http://localhost:5173",
+    "same_server": false,
+    "bridge_path": "/schedula"
+  },
+
+  "data_sharing": [
+    {
+      "project_key": "discutere",
+      "modules": ["machina"],
+      "access": "readwrite",
+      "description": "MACHINA タスク自動生成の連携 (Discutere に移行済み)"
+    }
+  ],
+
+  "user_data": {
+    "columns": {
+      "major": {
+        "type": "text",
+        "module": "core",
+        "nullable": true,
+        "description": "学科・専攻"
+      },
+      "calendar_access_id": {
+        "type": "text",
+        "module": "calendar",
+        "nullable": true,
+        "description": "Google Calendar 連携 ID"
+      },
+      "google_calendar_sync_enabled": {
+        "type": "boolean",
+        "module": "integrations",
+        "nullable": true,
+        "description": "Google Calendar 同期有効フラグ"
+      },
+      "notification_preference": {
+        "type": "json",
+        "module": "notification",
+        "nullable": true,
+        "description": "通知設定 (チャネル・イベント・静寂時間)"
+      },
+      "reminder_timezone": {
+        "type": "text",
+        "module": "reminder",
+        "nullable": true,
+        "description": "リマインダーのタイムゾーン"
+      },
+      "alexa_user_id": {
+        "type": "text",
+        "module": "reminder",
+        "nullable": true,
+        "description": "Alexa ユーザー ID (Alexa リマインダー拡張)"
+      },
+      "pm_default_project_id": {
+        "type": "text",
+        "module": "pm",
+        "nullable": true,
+        "description": "PM デフォルトプロジェクト ID"
+      },
+      "external_api_key_id": {
+        "type": "text",
+        "module": "external_api",
+        "nullable": true,
+        "description": "外部 API キー ID"
+      },
+      "voting_auto_reply_enabled": {
+        "type": "boolean",
+        "module": "voting",
+        "nullable": true,
+        "description": "日程調整の自動回答有効フラグ"
+      },
+      "smart_scheduler_preference": {
+        "type": "json",
+        "module": "smart_scheduler",
+        "nullable": true,
+        "description": "自動配置スケジューラの優先設定"
+      },
+      "myplan_active_plan_id": {
+        "type": "text",
+        "module": "myplan",
+        "nullable": true,
+        "description": "現在アクティブなマイプラン ID"
+      },
+      "facility_booking_default_room": {
+        "type": "text",
+        "module": "m1_facility_booking",
+        "nullable": true,
+        "description": "施設予約のデフォルト教室"
+      },
+      "holiday_group_id": {
+        "type": "text",
+        "module": "holiday",
+        "nullable": true,
+        "description": "休日管理の対象グループ ID"
+      }
+    }
+  }
+}

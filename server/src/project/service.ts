@@ -4,6 +4,8 @@
  * WS コマンドから呼び出される。REST は公開しない。
  */
 
+import fs from "node:fs";
+import path from "node:path";
 import bcrypt from "bcryptjs";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
@@ -11,6 +13,64 @@ import * as dbSchema from "../db/schema.js";
 import { AppError } from "../error.js";
 import { projectDefinitionSchema, type ProjectDefinition } from "./schema.js";
 import { migrateProjectSchema } from "./schema-migrator.js";
+
+// ── Service Templates ────────────────────────────────────────
+
+function getServiceDir(): string {
+  const candidates = [
+    path.resolve(process.cwd(), "..", "server", "service"),
+    path.resolve(process.cwd(), "service"),
+    path.resolve("/app", "server", "service"),
+  ];
+  return candidates.find((d) => fs.existsSync(d)) ?? candidates[0];
+}
+
+/** 対応サービス一覧 (service/ 以下のディレクトリ名、_template 除外) */
+export function listServiceTemplates(): Array<{ key: string; name: string; description: string }> {
+  const dir = getServiceDir();
+  if (!fs.existsSync(dir)) return [];
+
+  return fs.readdirSync(dir)
+    .filter((d) => d !== "_template" && fs.statSync(path.join(dir, d)).isDirectory())
+    .map((d) => {
+      const schemaPath = path.join(dir, d, "schema.json");
+      if (!fs.existsSync(schemaPath)) return null;
+      try {
+        const json = JSON.parse(fs.readFileSync(schemaPath, "utf-8"));
+        return {
+          key: json.project?.key ?? d,
+          name: json.project?.name ?? d,
+          description: json.project?.description ?? "",
+        };
+      } catch {
+        return { key: d, name: d, description: "" };
+      }
+    })
+    .filter(Boolean) as Array<{ key: string; name: string; description: string }>;
+}
+
+/** サービステンプレートの schema.json を取得 */
+export function getServiceTemplate(key: string): ProjectDefinition {
+  const dir = getServiceDir();
+  const schemaPath = path.join(dir, key, "schema.json");
+
+  if (!fs.existsSync(schemaPath)) {
+    // _template をフォールバック
+    const templatePath = path.join(dir, "_template", "schema.json");
+    if (!fs.existsSync(templatePath)) {
+      throw AppError.notFound(`Service template '${key}' not found`);
+    }
+    const json = JSON.parse(fs.readFileSync(templatePath, "utf-8"));
+    return projectDefinitionSchema.parse(json);
+  }
+
+  const json = JSON.parse(fs.readFileSync(schemaPath, "utf-8"));
+  const parsed = projectDefinitionSchema.safeParse(json);
+  if (!parsed.success) {
+    throw AppError.internal(`Invalid template schema for '${key}': ${parsed.error.issues[0]?.message}`);
+  }
+  return parsed.data;
+}
 
 // ── Project CRUD ─────────────────────────────────────────────
 
@@ -32,14 +92,13 @@ export async function getProject(key: string) {
   const p = rows[0];
   const def = p.schemaDefinition as ProjectDefinition;
 
-  // モジュール一覧をカラム定義から集約
-  const modules = def?.modules ?? {};
-  const columnsByModule: Record<string, string[]> = {};
+  // カラムの module フィールドからモジュール別にグルーピング
+  const columnsByModule: Record<string, Array<{ name: string; type: string; description?: string }>> = {};
   if (def?.user_data?.columns) {
     for (const [colName, col] of Object.entries(def.user_data.columns)) {
       const mod = col.module ?? "default";
       if (!columnsByModule[mod]) columnsByModule[mod] = [];
-      columnsByModule[mod].push(colName);
+      columnsByModule[mod].push({ name: colName, type: col.type, description: col.description });
     }
   }
 
@@ -49,7 +108,6 @@ export async function getProject(key: string) {
     description: p.description,
     clientId: p.clientId,
     schemaDefinition: p.schemaDefinition,
-    modules,
     columnsByModule,
     isActive: p.isActive,
     createdAt: p.createdAt,
@@ -60,24 +118,11 @@ export async function getProject(key: string) {
 export async function registerProject(payload: unknown, userId?: string) {
   let definition: ProjectDefinition;
 
-  const input = payload as Record<string, unknown>;
-
-  if (input?.url && typeof input.url === "string") {
-    const res = await fetch(input.url);
-    if (!res.ok) throw AppError.badRequest(`Failed to fetch from URL: ${res.status}`);
-    const json = await res.json();
-    const parsed = projectDefinitionSchema.safeParse(json);
-    if (!parsed.success) {
-      throw AppError.badRequest(`Invalid project definition: ${parsed.error.issues.map((i) => i.message).join(", ")}`);
-    }
-    definition = parsed.data;
-  } else {
-    const parsed = projectDefinitionSchema.safeParse(input);
-    if (!parsed.success) {
-      throw AppError.badRequest(`Invalid project definition: ${parsed.error.issues.map((i) => i.message).join(", ")}`);
-    }
-    definition = parsed.data;
+  const parsed = projectDefinitionSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw AppError.badRequest(`Invalid project definition: ${parsed.error.issues.map((i) => i.message).join(", ")}`);
   }
+  definition = parsed.data;
 
   // 既存チェック
   const existing = await db.select().from(dbSchema.managedProjects)
