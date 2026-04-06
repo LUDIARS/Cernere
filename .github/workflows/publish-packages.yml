@@ -30,7 +30,7 @@ jobs:
         with:
           node-version: '22'
           registry-url: 'https://npm.pkg.github.com'
-          scope: '@cernere'
+          scope: '@ludiars'
 
       - name: Install dependencies
         working-directory: packages/${{ matrix.package }}
