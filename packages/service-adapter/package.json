@@ -1,5 +1,5 @@
 {
-  "name": "@cernere/service-adapter",
+  "name": "@ludiars/cernere-service-adapter",
   "version": "0.1.0",
   "description": "Cernere service adapter — WebSocket connection, user admission handling, token issuance, revocation",
   "type": "module",

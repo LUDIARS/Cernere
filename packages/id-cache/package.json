@@ -1,5 +1,5 @@
 {
-  "name": "@cernere/id-cache",
+  "name": "@ludiars/cernere-id-cache",
   "version": "0.1.0",
   "description": "Embeddable cache for Id Service — optional, services work without it",
   "type": "module",
