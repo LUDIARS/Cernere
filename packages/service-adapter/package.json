@@ -16,6 +16,10 @@
     "build": "tsc",
     "prepublishOnly": "npm run build"
   },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0"
+  },
   "license": "MIT",
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
