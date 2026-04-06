@@ -4,10 +4,10 @@
 
 ### 1. `.npmrc` を作成
 
-プロジェクトルートに `.npmrc` を作成し、`@cernere` スコープの registry を指定:
+プロジェクトルートに `.npmrc` を作成し、`@ludiars` スコープの registry を指定:
 
 ```
-@cernere:registry=https://npm.pkg.github.com
+@ludiars:registry=https://npm.pkg.github.com
 //npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
 ```
 
@@ -22,20 +22,20 @@ export GITHUB_TOKEN=ghp_xxxxxxxxxxxx
 ### 3. インストール
 
 ```bash
-npm install @cernere/id-cache
-npm install @cernere/id-service
-npm install @cernere/service-adapter
-npm install @cernere/env-cli
+npm install @ludiars/cernere-id-cache
+npm install @ludiars/cernere-id-service
+npm install @ludiars/cernere-service-adapter
+npm install @ludiars/cernere-env-cli
 ```
 
 ## パッケージ一覧
 
 | パッケージ | 説明 |
 |-----------|------|
-| `@cernere/id-cache` | JWT 検証 + ユーザー情報キャッシュ (Hono ミドルウェア) |
-| `@cernere/id-service` | 汎用 Identity Service SDK (認証ルート, セッション, プラグイン) |
-| `@cernere/service-adapter` | サービス間 WebSocket 接続アダプタ (3点方式認証) |
-| `@cernere/env-cli` | Infisical シークレット管理 CLI |
+| `@ludiars/cernere-id-cache` | JWT 検証 + ユーザー情報キャッシュ (Hono ミドルウェア) |
+| `@ludiars/cernere-id-service` | 汎用 Identity Service SDK (認証ルート, セッション, プラグイン) |
+| `@ludiars/cernere-service-adapter` | サービス間 WebSocket 接続アダプタ (3点方式認証) |
+| `@ludiars/cernere-env-cli` | Infisical シークレット管理 CLI |
 
 ## バージョニング
 
