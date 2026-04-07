@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { Link } from "react-router-dom";
 import { optouts, type DataOptOutItem } from "../lib/api";
 
 /**
@@ -172,12 +173,12 @@ export function DataOptOutPage() {
             データ管理・オプトアウト
           </h1>
           <div style={{ display: "flex", gap: "0.75rem" }}>
-            <a href="/profile" style={{ fontSize: "0.875rem" }}>
+            <Link to="/profile" style={{ fontSize: "0.875rem" }}>
               ← プロファイル
-            </a>
-            <a href="/" style={{ fontSize: "0.875rem" }}>
+            </Link>
+            <Link to="/" style={{ fontSize: "0.875rem" }}>
               ダッシュボード
-            </a>
+            </Link>
           </div>
         </div>
 

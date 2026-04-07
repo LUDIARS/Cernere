@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { profile as profileApi, type UserProfileData, type ProfilePrivacy } from "../lib/api";
 
@@ -82,7 +83,7 @@ export function ProfilePage() {
         {/* ヘッダー */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
           <h1 style={{ fontSize: "1.25rem", fontWeight: 600 }}>プロファイル設定</h1>
-          <a href="/" style={{ fontSize: "0.875rem" }}>← ダッシュボード</a>
+          <Link to="/" style={{ fontSize: "0.875rem" }}>← ダッシュボード</Link>
         </div>
 
         {/* ユーザー基本情報 */}
@@ -226,7 +227,7 @@ export function ProfilePage() {
             データのオプトアウト（削除）を管理できます。
             オプトアウトすると該当カテゴリのデータは完全に削除されます。
           </p>
-          <a href="/data-optout">
+          <Link to="/data-optout">
             <button
               style={{
                 fontSize: "0.85rem",
@@ -240,7 +241,7 @@ export function ProfilePage() {
             >
               データオプトアウト管理
             </button>
-          </a>
+          </Link>
         </div>
       </div>
     </div>

@@ -32,7 +32,7 @@ interface RegisterResult {
 }
 
 export function DashboardPage() {
-  const { user, wsConnected, logout } = useAuth();
+  const { user, wsConnected } = useAuth();
   const isAdmin = user?.role === "admin";
 
   const [projects, setProjects] = useState<ManagedProject[]>([]);
@@ -131,37 +131,7 @@ export function DashboardPage() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
-      {/* Header bar */}
-      <div style={{
-        display: "flex", justifyContent: "space-between", alignItems: "center",
-        padding: "0.75rem 1.5rem",
-        borderBottom: "1px solid var(--border)",
-        background: "var(--bg-surface)",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-          <h1 style={{ fontSize: "1rem", fontWeight: 700, margin: 0 }}>Cernere</h1>
-          <span style={{
-            fontSize: "0.7rem", padding: "0.1rem 0.5rem", borderRadius: "3px",
-            background: wsConnected ? "var(--green, #2ea043)" : "var(--yellow, #d29922)",
-            color: "#fff",
-          }}>
-            {wsConnected ? "connected" : "connecting..."}
-          </span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", fontSize: "0.85rem" }}>
-          {user && <span>{user.name} <span style={{ color: "var(--text-muted)" }}>({user.role})</span></span>}
-          <a href="/organizations" style={{ color: "var(--text-muted)", textDecoration: "none" }}>Organizations</a>
-          <a href="/profile" style={{ color: "var(--text-muted)", textDecoration: "none" }}>Profile</a>
-          <a href="/data-optout" style={{ color: "var(--text-muted)", textDecoration: "none" }}>Data</a>
-          <button onClick={logout} style={{
-            padding: "0.25rem 0.75rem", fontSize: "0.8rem", borderRadius: "4px",
-            border: "1px solid var(--border)", background: "transparent", color: "var(--text)", cursor: "pointer",
-          }}>Logout</button>
-        </div>
-      </div>
-
-      <div style={{ display: "flex", height: "calc(100vh - 49px)" }}>
+    <div style={{ display: "flex", height: "100%" }}>
         {/* Sidebar: project list */}
         <div style={{
           width: 280, borderRight: "1px solid var(--border)", background: "var(--bg-surface)",
@@ -335,6 +305,5 @@ export function DashboardPage() {
           )}
         </div>
       </div>
-    </div>
   );
 }
