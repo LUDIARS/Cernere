@@ -170,35 +170,18 @@ export function OrganizationsPage() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
-      {/* Header */}
-      <div style={{
-        display: "flex", justifyContent: "space-between", alignItems: "center",
-        padding: "0.75rem 1.5rem", borderBottom: "1px solid var(--border)", background: "var(--bg-surface)",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-          <a href="/" style={{ textDecoration: "none", color: "var(--text)" }}>
-            <h1 style={{ fontSize: "1rem", fontWeight: 700, margin: 0 }}>Cernere</h1>
-          </a>
-          <span style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>/</span>
-          <span style={{ fontSize: "0.9rem", fontWeight: 600 }}>Organizations</span>
-        </div>
-        <div style={{ display: "flex", gap: "0.5rem" }}>
-          {isAdmin && (
-            <button className="primary" onClick={() => setShowCreate(!showCreate)} style={{ fontSize: "0.8rem", padding: "0.3rem 0.75rem" }}>
-              {showCreate ? "Cancel" : "+ New Organization"}
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div style={{ display: "flex", height: "calc(100vh - 49px)" }}>
+    <div style={{ display: "flex", height: "100%" }}>
         {/* Sidebar: org list */}
         <div style={{ width: 260, borderRight: "1px solid var(--border)", background: "var(--bg-surface)", overflow: "auto" }}>
-          <div style={{ padding: "0.75rem 1rem", borderBottom: "1px solid var(--border)" }}>
+          <div style={{ padding: "0.75rem 1rem", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: "0.75rem", fontWeight: 600, textTransform: "uppercase", color: "var(--text-muted)" }}>
               My Organizations
             </span>
+            {isAdmin && (
+              <button className="primary" onClick={() => setShowCreate(!showCreate)} style={{ fontSize: "0.75rem", padding: "0.15rem 0.5rem" }}>
+                {showCreate ? "Cancel" : "+ Add"}
+              </button>
+            )}
           </div>
           {loading ? (
             <p style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>Loading...</p>
@@ -346,7 +329,6 @@ export function OrganizationsPage() {
           )}
         </div>
       </div>
-    </div>
   );
 }
 
