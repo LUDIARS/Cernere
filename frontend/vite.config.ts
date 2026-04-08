@@ -10,9 +10,13 @@ export default defineConfig({
     host: "0.0.0.0",
     allowedHosts: "all",
     proxy: {
-      "/api": backendUrl,
+      "/api": {
+        target: backendUrl,
+        changeOrigin: true,
+      },
       "/auth": {
         target: backendUrl,
+        changeOrigin: true,
         ws: true,
       },
     },

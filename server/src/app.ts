@@ -15,7 +15,6 @@ import {
   createAuthenticatedWsHandler,
   createGuestWsHandler,
 } from "./ws/handler.js";
-
 export function createApp() {
   const app = new Hono();
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
