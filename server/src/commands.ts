@@ -57,6 +57,7 @@ async function execute(
     case "project_definition": return projectDefCmd(userId, action, payload);
     case "org_project": return orgProjectCmd(userId, action, payload);
     case "user": return userCmd(userId, action, payload);
+    case "profile": return profileCmd(userId, action, payload);
     case "managed_project": return managedProjectCmd(userId, action, payload);
     default:
       throw AppError.badRequest(`Unknown module: ${module}`);
@@ -267,18 +268,137 @@ async function orgProjectCmd(userId: string, action: string, p?: Record<string, 
 // -- User --
 
 async function userCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
-  if (action === "get") {
-    const targetId = requireStr(p, "userId");
-    const rows = await db.select().from(schema.users)
-      .where(eq(schema.users.id, targetId)).limit(1);
-    if (rows.length === 0) throw AppError.notFound("User not found");
-    const u = rows[0];
-    return {
-      id: u.id, login: u.login, displayName: u.displayName,
-      avatarUrl: u.avatarUrl, email: u.email, role: u.role,
-    };
+  switch (action) {
+    case "get": {
+      const targetId = requireStr(p, "userId");
+      const rows = await db.select().from(schema.users)
+        .where(eq(schema.users.id, targetId)).limit(1);
+      if (rows.length === 0) throw AppError.notFound("User not found");
+      const u = rows[0];
+      return {
+        id: u.id, login: u.login, displayName: u.displayName,
+        avatarUrl: u.avatarUrl, email: u.email, role: u.role,
+      };
+    }
+    case "get_profile": {
+      // 他ユーザーの公開プロフィール (privacy フィルタ付き)
+      const targetId = requireStr(p, "userId");
+      const userRows = await db.select().from(schema.users)
+        .where(eq(schema.users.id, targetId)).limit(1);
+      if (userRows.length === 0) throw AppError.notFound("User not found");
+      const u = userRows[0];
+
+      const profileRows = await db.select().from(schema.userProfiles)
+        .where(eq(schema.userProfiles.userId, targetId)).limit(1);
+      const profile = profileRows[0];
+      const privacy = (profile?.privacy ?? { bio: true, roleTitle: true, expertise: true, hobbies: true }) as Record<string, boolean>;
+
+      return {
+        userId: u.id, displayName: u.displayName, avatarUrl: u.avatarUrl,
+        roleTitle: privacy.roleTitle ? (profile?.roleTitle ?? "") : undefined,
+        bio: privacy.bio ? (profile?.bio ?? "") : undefined,
+        expertise: privacy.expertise ? (profile?.expertise ?? []) : undefined,
+        hobbies: privacy.hobbies ? (profile?.hobbies ?? []) : undefined,
+      };
+    }
+    default:
+      throw AppError.badRequest(`Unknown user action: ${action}`);
   }
-  throw AppError.badRequest(`Unknown user action: ${action}`);
+}
+
+// -- Profile (自分のプロフィール) --
+
+async function profileCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
+  switch (action) {
+    case "get": {
+      const rows = await db.select().from(schema.userProfiles)
+        .where(eq(schema.userProfiles.userId, userId)).limit(1);
+      if (rows.length === 0) {
+        return {
+          userId, roleTitle: "", bio: "", expertise: [], hobbies: [],
+          extra: {}, privacy: { bio: true, roleTitle: true, expertise: true, hobbies: true },
+        };
+      }
+      return rows[0];
+    }
+    case "update": {
+      const now = new Date();
+      const existing = await db.select({ userId: schema.userProfiles.userId })
+        .from(schema.userProfiles).where(eq(schema.userProfiles.userId, userId)).limit(1);
+
+      if (existing.length === 0) {
+        await db.insert(schema.userProfiles).values({
+          userId,
+          roleTitle: optStr(p, "roleTitle") ?? "",
+          bio: optStr(p, "bio") ?? "",
+          expertise: (p?.expertise as string[]) ?? [],
+          hobbies: (p?.hobbies as string[]) ?? [],
+          extra: (p?.extra as Record<string, unknown>) ?? {},
+          privacy: { bio: true, roleTitle: true, expertise: true, hobbies: true },
+          createdAt: now, updatedAt: now,
+        });
+      } else {
+        const updates: Record<string, unknown> = { updatedAt: now };
+        if (p?.roleTitle !== undefined) updates.roleTitle = p.roleTitle;
+        if (p?.bio !== undefined) updates.bio = p.bio;
+        if (p?.expertise !== undefined) updates.expertise = p.expertise;
+        if (p?.hobbies !== undefined) updates.hobbies = p.hobbies;
+        if (p?.extra !== undefined) updates.extra = p.extra;
+        await db.update(schema.userProfiles).set(updates)
+          .where(eq(schema.userProfiles.userId, userId));
+      }
+
+      const rows = await db.select().from(schema.userProfiles)
+        .where(eq(schema.userProfiles.userId, userId)).limit(1);
+      return rows[0];
+    }
+    case "update_privacy": {
+      const privacy = p?.privacy as Record<string, boolean> | undefined;
+      if (!privacy) throw AppError.badRequest("privacy object is required");
+      const now = new Date();
+
+      const existing = await db.select({ userId: schema.userProfiles.userId })
+        .from(schema.userProfiles).where(eq(schema.userProfiles.userId, userId)).limit(1);
+
+      if (existing.length === 0) {
+        await db.insert(schema.userProfiles).values({
+          userId, privacy, createdAt: now, updatedAt: now,
+        });
+      } else {
+        await db.update(schema.userProfiles).set({ privacy, updatedAt: now })
+          .where(eq(schema.userProfiles.userId, userId));
+      }
+      return { ok: true };
+    }
+    case "list_optouts": {
+      const rows = await db.select().from(schema.userDataOptouts)
+        .where(eq(schema.userDataOptouts.userId, userId));
+      return rows.map((r) => ({
+        serviceId: r.serviceId, categoryKey: r.categoryKey,
+        optedOutAt: r.optedOutAt.toISOString(),
+      }));
+    }
+    case "optout": {
+      const serviceId = requireStr(p, "serviceId");
+      const categoryKey = requireStr(p, "categoryKey");
+      await db.insert(schema.userDataOptouts).values({
+        userId, serviceId, categoryKey, optedOutAt: new Date(),
+      }).onConflictDoNothing();
+      return { ok: true };
+    }
+    case "remove_optout": {
+      const serviceId = requireStr(p, "serviceId");
+      const categoryKey = requireStr(p, "categoryKey");
+      await db.delete(schema.userDataOptouts).where(and(
+        eq(schema.userDataOptouts.userId, userId),
+        eq(schema.userDataOptouts.serviceId, serviceId),
+        eq(schema.userDataOptouts.categoryKey, categoryKey),
+      ));
+      return { ok: true };
+    }
+    default:
+      throw AppError.badRequest(`Unknown profile action: ${action}`);
+  }
 }
 
 // -- ManagedProject (WS session only) --
