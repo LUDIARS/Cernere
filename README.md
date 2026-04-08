@@ -60,53 +60,87 @@ Layer 4: リソース所有権・ロールチェック (403)
 ├── docs/                  # 設計ドキュメント
 ├── spec/                  # セキュリティ仕様
 ├── env-cli.config.ts      # env-cli プロジェクト設定
-└── docker-compose.yaml    # Docker Compose (DB + Backend + Frontend)
+├── docker-compose.yaml           # 本番 + dev profile (DB 外部)
+└── docker-compose.standalone.yaml # All-in-One 用 (DB 内蔵)
 ```
 
 ## セットアップ
 
-環境変数は [Infisical](https://infisical.com) で管理しています。初期セットアップには `env-cli` を使用します。
-
-### 1. 依存インストール
+### 依存インストール
 
 ```bash
-npm install
+cd server && npm install
+cd frontend && npm install
 ```
 
-### 2. Infisical 設定（初回のみ）
+### 環境変数
+
+`.env` をプロジェクトルートに作成（`.env.example` を参照）。
+[Infisical](https://infisical.com) を使用する場合は `env-cli` で管理可能。
 
 ```bash
-npm run env:setup
-npm run env:initialize
+npm run env:setup        # Infisical 初回設定
+npm run env:initialize   # デフォルト値を Infisical に登録
 ```
 
-対話形式で Infisical の認証情報（Project ID / Client ID / Client Secret）を入力します。
-`env:initialize` を実行すると、`env-cli.config.ts` で定義されたデフォルトの環境変数が Infisical に登録されます（既存のキーはスキップされます）。
-設定は `.env.secrets` に保存されます（gitignore 済み）。
+## 起動方法
 
-### 3. 開発環境の起動
+### 1. 開発 (ホットリロード) — Infra の DB を使用
+
+LUDIARS 共有インフラ ([Infra](https://github.com/LUDIARS/Infra)) が起動済みの前提。
 
 ```bash
-npm run env:up       # バックグラウンド起動 (-d)
-npm run env:up:fg    # フォアグラウンド起動 (ログ表示、Ctrl+C で停止)
+docker compose --profile dev up
 ```
 
-Infisical からシークレットを取得し、以下をまとめて起動します:
+| サービス | 説明 | ポート |
+|---------|------|--------|
+| backend-dev | Node.js (tsx watch) | 8080 |
+| frontend-dev | Vite dev server (HMR) | 5173 |
+
+DB/Redis は Infra 側 (`DATABASE_URL`, `REDIS_URL` で接続)。
+
+### 2. 本番 (ビルド済みイメージ) — Infra の DB を使用
+
+```bash
+docker compose up -d
+```
+
+| サービス | 説明 | ポート |
+|---------|------|--------|
+| backend | Node.js (dist/index.js) | 8080 |
+| frontend | nginx (静的配信 + API/WS プロキシ) | 5173 (→80) |
+
+### 3. All-in-One (PostgreSQL + Redis 込み) — 単体運用
+
+Infra なしで Cernere 単体で動かしたい場合。
+
+```bash
+# 本番
+docker compose -f docker-compose.yaml -f docker-compose.standalone.yaml up -d
+
+# 開発
+docker compose -f docker-compose.yaml -f docker-compose.standalone.yaml --profile dev up
+```
 
 | サービス | 説明 | ポート |
 |---------|------|--------|
 | postgres | PostgreSQL 17 | 5432 |
 | redis | Redis 7 | 6379 |
-| backend | Node.js (tsx watch ホットリロード) | 8080 |
-| frontend | Vite dev server (HMR) | 5173 |
+| backend / backend-dev | 上記と同じ | 8080 |
+| frontend / frontend-dev | 上記と同じ | 5173 |
 
-データベースのマイグレーションはバックエンド起動時に自動で実行されます。
-
-DB のみ起動したい場合:
+### 4. ローカル直接起動 (Docker なし)
 
 ```bash
-npm run env:up -- -- -d postgres redis
+# バックエンド
+cd server && npm run dev
+
+# フロントエンド (別ターミナル)
+cd frontend && npm run dev
 ```
+
+`DATABASE_URL` と `REDIS_URL` が外部の PostgreSQL / Redis を指していること。
 
 ## API
 
