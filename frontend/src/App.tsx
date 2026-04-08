@@ -6,6 +6,8 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { DataOptOutPage } from "./pages/DataOptOutPage";
 import { OrganizationsPage } from "./pages/OrganizationsPage";
+import { CompositeLoginPage } from "./pages/composite/CompositeLoginPage";
+import { CompositeCallbackPage } from "./pages/composite/CompositeCallbackPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -33,6 +35,10 @@ function AppRoutes() {
 
   return (
     <Routes>
+      {/* Composite: 他サービス組み込み用 (アプリシェルなし) */}
+      <Route path="/composite/login" element={<CompositeLoginPage />} />
+      <Route path="/composite/callback" element={<CompositeCallbackPage />} />
+
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
       {/* 認証済みページは AppLayout 内で描画 — WS 接続を維持 */}
       <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
