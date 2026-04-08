@@ -304,32 +304,47 @@ async function cmdEnv(config: EnvCliConfig, toStdout: boolean): Promise<void> {
   }
 }
 
-async function cmdUp(config: EnvCliConfig, composeArgs: string[]): Promise<void> {
+// ─── Up: 4-mode Docker Compose launcher ──────────────────
+
+type UpMode = "dev" | "prod" | "standalone" | "standalone-dev";
+
+const UP_MODES: Record<UpMode, { description: string; files: string[]; profile: string | null }> = {
+  "dev":             { description: "開発 (ホットリロード, 外部 DB)",   files: ["docker-compose.yaml"], profile: "dev" },
+  "prod":            { description: "本番 (ビルド済み, 外部 DB)",      files: ["docker-compose.yaml"], profile: null },
+  "standalone":      { description: "All-in-One 本番 (DB 内蔵)",      files: ["docker-compose.yaml", "docker-compose.standalone.yaml"], profile: null },
+  "standalone-dev":  { description: "All-in-One 開発 (DB 内蔵 + HR)", files: ["docker-compose.yaml", "docker-compose.standalone.yaml"], profile: "dev" },
+};
+
+async function cmdUp(config: EnvCliConfig, mode: UpMode, extraArgs: string[]): Promise<void> {
   const bootstrap = requireBootstrap(config);
   const dotenvPath = resolveDotenvPath(config);
   const dotenvExisted = fs.existsSync(dotenvPath);
+  const modeConfig = UP_MODES[mode];
+
+  console.log(`\n╔══════════════════════════════════════════════╗`);
+  console.log(`║  ${config.name} — ${modeConfig.description}`.padEnd(47) + "║");
+  console.log(`╚══════════════════════════════════════════════╝`);
 
   try {
     // 1. Infisical → .env 生成
-    console.log("Infisical から .env を生成中...");
+    console.log("\nInflsical から .env を生成中...");
     const token = await authenticate(bootstrap);
     const secrets = await fetchSecrets(bootstrap, token);
     const result = buildDotenv(secrets, bootstrap, config);
     fs.writeFileSync(dotenvPath, result.content, "utf-8");
     console.log(`✓ ${dotenvPath} を生成しました (一時ファイル)`);
 
-    // 2. docker compose up 実行
-    // --profile dev が指定されていなければ自動追加（backend/frontend を含める）
-    const hasDev = composeArgs.includes("--profile");
-    const profileArgs = hasDev ? [] : ["--profile", "dev"];
-    const args = ["compose", ...profileArgs, "up", ...composeArgs];
+    // 2. docker compose コマンドを組み立て
+    const fileArgs = modeConfig.files.flatMap((f) => ["-f", f]);
+    const profileArgs = modeConfig.profile ? ["--profile", modeConfig.profile] : [];
+    const defaultArgs = extraArgs.length > 0 ? extraArgs : ["-d"];
+    const args = ["compose", ...fileArgs, ...profileArgs, "up", ...defaultArgs];
 
-    // Windows Docker Desktop では arm64 イメージが選択されることがあるため
-    // DOCKER_DEFAULT_PLATFORM を設定して amd64 を強制する
+    // Windows Docker Desktop: amd64 を強制
     const env = { ...process.env };
     if (process.platform === "win32" && !env.DOCKER_DEFAULT_PLATFORM) {
       env.DOCKER_DEFAULT_PLATFORM = "linux/amd64";
-      console.log("  Platform: Windows 検出 → DOCKER_DEFAULT_PLATFORM=linux/amd64");
+      console.log("  Platform: Windows → DOCKER_DEFAULT_PLATFORM=linux/amd64");
     }
 
     console.log(`\n$ docker ${args.join(" ")}\n`);
@@ -352,7 +367,7 @@ async function cmdUp(config: EnvCliConfig, composeArgs: string[]): Promise<void>
     console.error(`Error: ${err instanceof Error ? err.message : err}`);
     process.exitCode = 1;
   } finally {
-    // 3. .env を削除 (元々存在していなかった場合のみ)
+    // 3. .env を削除
     if (!dotenvExisted && fs.existsSync(dotenvPath)) {
       fs.unlinkSync(dotenvPath);
       console.log(`\n✓ ${dotenvPath} を削除しました (一時ファイル)`);
@@ -412,7 +427,11 @@ function printUsage(config: EnvCliConfig): void {
   console.log("  env-cli set <KEY> <VALUE>  シークレット作成/更新");
   console.log("  env-cli env                Infisical → .env 生成");
   console.log("  env-cli env --stdout       .env 内容を標準出力");
-  console.log("  env-cli up [-- ...]        .env 生成 → docker compose up → .env 削除");
+  console.log("  env-cli up [mode] [-- ..]   .env 生成 → docker compose up → .env 削除");
+  console.log("    modes: dev (default)     開発 (ホットリロード, 外部 DB)");
+  console.log("           prod              本番 (ビルド済み, 外部 DB)");
+  console.log("           standalone        All-in-One 本番 (DB 内蔵)");
+  console.log("           standalone-dev    All-in-One 開発 (DB 内蔵 + ホットリロード)");
   console.log("  env-cli initialize         config の infraKeys を Infisical に流し込む (未存在のみ)");
   console.log();
   console.log("フロー:");
@@ -458,9 +477,19 @@ async function main(): Promise<void> {
       await cmdEnv(config, args.includes("--stdout"));
       break;
     case "up": {
-      const dashDashIdx = args.indexOf("--");
-      const composeArgs = dashDashIdx >= 0 ? args.slice(dashDashIdx + 1) : ["-d"];
-      await cmdUp(config, composeArgs);
+      const validModes = ["dev", "prod", "standalone", "standalone-dev"] as const;
+      const firstArg = args[0];
+      let mode: UpMode = "dev";
+      let restArgs = args;
+
+      if (firstArg && validModes.includes(firstArg as UpMode)) {
+        mode = firstArg as UpMode;
+        restArgs = args.slice(1);
+      }
+
+      const dashDashIdx = restArgs.indexOf("--");
+      const extraArgs = dashDashIdx >= 0 ? restArgs.slice(dashDashIdx + 1) : [];
+      await cmdUp(config, mode, extraArgs);
       break;
     }
     default:

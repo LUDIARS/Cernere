@@ -85,12 +85,22 @@ npm run env:initialize   # デフォルト値を Infisical に登録
 
 ## 起動方法
 
+すべて `npm run env:up` 経由で起動できます。Infisical から環境変数を取得し、`.env` を一時生成して `docker compose up` を実行、終了後に `.env` を自動削除します。
+
+| コマンド | モード | DB/Redis | 説明 |
+|---------|--------|----------|------|
+| `npm run env:up` | dev | 外部 (Infra) | ホットリロード開発 |
+| `npm run env:up:prod` | prod | 外部 (Infra) | ビルド済みイメージで本番起動 |
+| `npm run env:up:standalone` | standalone | 内蔵 | DB 込み All-in-One 本番 |
+| `npm run env:up:standalone:dev` | standalone-dev | 内蔵 | DB 込み All-in-One 開発 |
+| `npm run env:up:fg` | dev (フォアグラウンド) | 外部 | ログ表示、Ctrl+C で停止 |
+
 ### 1. 開発 (ホットリロード) — Infra の DB を使用
 
-LUDIARS 共有インフラ ([Infra](https://github.com/LUDIARS/Infra)) が起動済みの前提。
+[LUDIARS Infra](https://github.com/LUDIARS/Infra) が起動済みの前提。
 
 ```bash
-docker compose --profile dev up
+npm run env:up
 ```
 
 | サービス | 説明 | ポート |
@@ -98,29 +108,27 @@ docker compose --profile dev up
 | backend-dev | Node.js (tsx watch) | 8080 |
 | frontend-dev | Vite dev server (HMR) | 5173 |
 
-DB/Redis は Infra 側 (`DATABASE_URL`, `REDIS_URL` で接続)。
-
-### 2. 本番 (ビルド済みイメージ) — Infra の DB を使用
+### 2. 本番 — Infra の DB を使用
 
 ```bash
-docker compose up -d
+npm run env:up:prod
 ```
 
 | サービス | 説明 | ポート |
 |---------|------|--------|
 | backend | Node.js (dist/index.js) | 8080 |
-| frontend | nginx (静的配信 + API/WS プロキシ) | 5173 (→80) |
+| frontend | nginx (静的配信 + API/WS プロキシ) | 80 |
 
-### 3. All-in-One (PostgreSQL + Redis 込み) — 単体運用
+### 3. All-in-One — 単体運用 (DB 内蔵)
 
 Infra なしで Cernere 単体で動かしたい場合。
 
 ```bash
 # 本番
-docker compose -f docker-compose.yaml -f docker-compose.standalone.yaml up -d
+npm run env:up:standalone
 
 # 開発
-docker compose -f docker-compose.yaml -f docker-compose.standalone.yaml --profile dev up
+npm run env:up:standalone:dev
 ```
 
 | サービス | 説明 | ポート |
@@ -133,6 +141,9 @@ docker compose -f docker-compose.yaml -f docker-compose.standalone.yaml --profil
 ### 4. ローカル直接起動 (Docker なし)
 
 ```bash
+# 環境変数を生成
+npm run env:gen
+
 # バックエンド
 cd server && npm run dev
 
@@ -140,7 +151,16 @@ cd server && npm run dev
 cd frontend && npm run dev
 ```
 
-`DATABASE_URL` と `REDIS_URL` が外部の PostgreSQL / Redis を指していること。
+### docker compose を直接使う場合
+
+`env:up` を使わず手動で起動することも可能。
+
+```bash
+docker compose --profile dev up                # dev
+docker compose up -d                           # prod
+docker compose -f docker-compose.yaml -f docker-compose.standalone.yaml up -d           # standalone
+docker compose -f docker-compose.yaml -f docker-compose.standalone.yaml --profile dev up # standalone-dev
+```
 
 ## API
 
