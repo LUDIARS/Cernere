@@ -4,12 +4,15 @@
 # 接続先は環境変数 DATABASE_URL, REDIS_URL で指定。
 #
 # Usage:
-#   docker compose up -d                          # prod (ビルド済みイメージ)
+#   docker compose --profile prod up -d           # prod (ビルド済みイメージ)
 #   docker compose --profile dev up               # dev (ホットリロード)
 #   docker compose -f docker-compose.yaml \
 #     -f docker-compose.standalone.yaml up -d      # all-in-one (DB込み)
 
 services:
+  # ── 本番モード (--profile prod) ─────────────────────────
+  # ビルド済みイメージで起動
+
   backend:
     build:
       context: ./server
@@ -25,6 +28,8 @@ services:
       JWT_SECRET: "${JWT_SECRET:-}"
       NODE_ENV: "production"
     restart: unless-stopped
+    profiles:
+      - prod
 
   frontend:
     build:
@@ -36,9 +41,11 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+    profiles:
+      - prod
 
   # ── 開発モード (--profile dev) ──────────────────────────
-  # ビルド済みイメージではなくソースマウント + ホットリロード
+  # ソースマウント + ホットリロード
 
   backend-dev:
     image: node:22-alpine

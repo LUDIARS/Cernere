@@ -310,8 +310,8 @@ type UpMode = "dev" | "prod" | "standalone" | "standalone-dev";
 
 const UP_MODES: Record<UpMode, { description: string; files: string[]; profile: string | null }> = {
   "dev":             { description: "開発 (ホットリロード, 外部 DB)",   files: ["docker-compose.yaml"], profile: "dev" },
-  "prod":            { description: "本番 (ビルド済み, 外部 DB)",      files: ["docker-compose.yaml"], profile: null },
-  "standalone":      { description: "All-in-One 本番 (DB 内蔵)",      files: ["docker-compose.yaml", "docker-compose.standalone.yaml"], profile: null },
+  "prod":            { description: "本番 (ビルド済み, 外部 DB)",      files: ["docker-compose.yaml"], profile: "prod" },
+  "standalone":      { description: "All-in-One 本番 (DB 内蔵)",      files: ["docker-compose.yaml", "docker-compose.standalone.yaml"], profile: "prod" },
   "standalone-dev":  { description: "All-in-One 開発 (DB 内蔵 + HR)", files: ["docker-compose.yaml", "docker-compose.standalone.yaml"], profile: "dev" },
 };
 
