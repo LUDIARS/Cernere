@@ -29,7 +29,7 @@ pub struct User {
     pub updated_at: DateTime<Utc>,
 }
 
-/// Redis セッション (Cookie ベース、Ars BFF 用)
+/// Redis セッション (Cookie ベース)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
     pub id: String,
@@ -76,7 +76,7 @@ pub struct ProjectSetting {
     pub updated_at: DateTime<Utc>,
 }
 
-/// Ars Editor 向け User レスポンス（camelCase, Cookie ベースの /auth/me 用）
+/// Cookie ベース User レスポンス（camelCase, /auth/me 用）
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserResponse {
@@ -228,7 +228,7 @@ impl From<OrganizationMemberWithUser> for MemberResponse {
 
 // ── プロジェクト定義 ───────────────────────────────
 
-/// プロジェクト定義 (Ars, Schedula などのプロジェクトタイプ)
+/// プロジェクト定義 (サービスごとのプロジェクトタイプ)
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct ProjectDefinition {
     pub id: Uuid,
