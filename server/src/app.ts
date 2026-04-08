@@ -8,6 +8,7 @@
 import uWS from "uWebSockets.js";
 import { config } from "./config.js";
 import { handleAuthRoute } from "./http/auth-handler.js";
+import { handleCompositeRoute } from "./http/composite-handler.js";
 import { handleOAuthRoute } from "./http/oauth-handler.js";
 import {
   handleWsOpen,
@@ -111,6 +112,26 @@ export function createApp() {
       const body = await readBody(res);
       if (aborted) return;
       const result = await handleAuthRoute(action, body, authHeader);
+      jsonResponse(res, result.status, result.data);
+    } catch (err) {
+      if (aborted) return;
+      const msg = (err as Error).message;
+      const status = msg.includes("Unauthorized") ? "401 Unauthorized"
+        : msg.includes("not found") ? "404 Not Found" : "400 Bad Request";
+      jsonResponse(res, status, { error: msg });
+    }
+  });
+
+  // ── Composite Auth: POST /api/auth/composite/:action ────
+  app.post("/api/auth/composite/:action", async (res, req) => {
+    const action = req.getParameter(0) ?? "";
+    let aborted = false;
+    res.onAborted(() => { aborted = true; });
+
+    try {
+      const body = await readBody(res);
+      if (aborted) return;
+      const result = await handleCompositeRoute(action, body);
       jsonResponse(res, result.status, result.data);
     } catch (err) {
       if (aborted) return;

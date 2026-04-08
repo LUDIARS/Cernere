@@ -53,15 +53,19 @@ export function handleOAuthRoute(
   const query = req.getQuery();
   const cookieHeader = req.getHeader("cookie") ?? "";
 
+  // Composite origin (外部サービスからの認証委譲時に指定される)
+  const queryParams = new URLSearchParams(query);
+  const compositeOrigin = queryParams.get("composite_origin") ?? undefined;
+
   // 非同期処理
   (async () => {
     try {
       if (provider === "github" && action === "login") {
-        await githubLogin(res, aborted);
+        await githubLogin(res, aborted, compositeOrigin);
       } else if (provider === "github" && action === "callback") {
         await githubCallback(res, query, cookieHeader, aborted);
       } else if (provider === "google" && action === "login") {
-        await googleLogin(res, aborted);
+        await googleLogin(res, aborted, compositeOrigin);
       } else if (provider === "google" && action === "callback") {
         await googleCallback(res, query, cookieHeader, aborted);
       }
@@ -74,10 +78,12 @@ export function handleOAuthRoute(
 
 // ── GitHub ─────────────────────────────────────────────────
 
-async function githubLogin(res: uWS.HttpResponse, aborted: boolean): Promise<void> {
+async function githubLogin(res: uWS.HttpResponse, aborted: boolean, compositeOrigin?: string): Promise<void> {
   if (!config.githubClientId) throw new Error("GitHub OAuth is not configured");
 
-  const csrfState = crypto.randomUUID();
+  const csrfState = compositeOrigin
+    ? `composite:${compositeOrigin}:${crypto.randomUUID()}`
+    : crypto.randomUUID();
   const params = new URLSearchParams({
     client_id: config.githubClientId,
     redirect_uri: config.githubRedirectUri,
@@ -98,7 +104,12 @@ async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader
   const expectedState = getCookie(cookieHeader, CSRF_COOKIE);
   const frontend = config.frontendUrl;
 
-  if (!stateParam || (!stateParam.startsWith("link:") && expectedState !== stateParam)) {
+  const isComposite = stateParam?.startsWith("composite:");
+  if (!stateParam || (!stateParam.startsWith("link:") && !isComposite && expectedState !== stateParam)) {
+    throw new Error("Invalid OAuth state");
+  }
+  // composite state の CSRF 検証: "composite:<origin>:<uuid>" の uuid 部分を cookie と比較
+  if (isComposite && expectedState !== stateParam) {
     throw new Error("Invalid OAuth state");
   }
   if (!code) throw new Error("Authorization code not provided");
@@ -166,6 +177,30 @@ async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader
     });
   }
 
+  // Composite flow: auth_code を生成して composite callback にリダイレクト
+  if (isComposite) {
+    const userRole = userRows.length > 0 ? userRows[0].role : "general";
+    const { accessToken, refreshToken } = generateTokenPair(userId, userRole);
+    const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
+    await db.insert(schema.refreshSessions).values({
+      id: crypto.randomUUID(), userId, refreshToken, expiresAt,
+    });
+
+    const authCode = crypto.randomUUID();
+    await redis.set(`authcode:${authCode}`, JSON.stringify({
+      accessToken, refreshToken,
+      user: { id: userId, displayName: ghUser.name ?? ghUser.login, email: ghUser.email, role: userRole },
+    }), "EX", 60);
+
+    // composite:<origin>:<uuid> から origin を抽出
+    const compositeOrigin = stateParam!.split(":").slice(1, -1).join(":");
+    if (aborted) return;
+    redirect(res, `${config.frontendUrl}/composite/callback?code=${authCode}&origin=${encodeURIComponent(compositeOrigin)}`, [
+      deleteCookieHeader(CSRF_COOKIE),
+    ]);
+    return;
+  }
+
   // Redis session
   const sessionId = crypto.randomUUID();
   await redis.set(`session:${sessionId}`, JSON.stringify({
@@ -182,10 +217,12 @@ async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader
 
 // ── Google ────────────────────────────────────────────────
 
-async function googleLogin(res: uWS.HttpResponse, aborted: boolean): Promise<void> {
+async function googleLogin(res: uWS.HttpResponse, aborted: boolean, compositeOrigin?: string): Promise<void> {
   if (!config.googleClientId) throw new Error("Google OAuth is not configured");
 
-  const csrfState = crypto.randomUUID();
+  const csrfState = compositeOrigin
+    ? `composite:${compositeOrigin}:${crypto.randomUUID()}`
+    : crypto.randomUUID();
   const params = new URLSearchParams({
     client_id: config.googleClientId,
     redirect_uri: config.googleRedirectUri,
@@ -209,6 +246,7 @@ async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader
   const expectedState = getCookie(cookieHeader, CSRF_COOKIE);
   const frontend = config.frontendUrl;
 
+  const isCompositeGoogle = stateParam?.startsWith("composite:");
   if (!stateParam || expectedState !== stateParam) throw new Error("Invalid OAuth state");
   if (!code) throw new Error("Authorization code not provided");
 
@@ -279,11 +317,22 @@ async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader
 
   // Auth code → Redis (フロントが exchange で取得)
   const authCode = crypto.randomUUID();
+  const authCodeTtl = isCompositeGoogle ? 60 : 300;
   await redis.set(`authcode:${authCode}`, JSON.stringify({
     accessToken, refreshToken, user: { id: userId, displayName: gUser.name, email: gUser.email, role: userRole },
-  }), "EX", 300);
+  }), "EX", authCodeTtl);
 
   if (aborted) return;
+
+  // Composite flow: composite callback にリダイレクト
+  if (isCompositeGoogle) {
+    const compositeOrigin = stateParam!.split(":").slice(1, -1).join(":");
+    redirect(res, `${frontend}/composite/callback?code=${authCode}&origin=${encodeURIComponent(compositeOrigin)}`, [
+      deleteCookieHeader(CSRF_COOKIE),
+    ]);
+    return;
+  }
+
   redirect(res, `${frontend}?authCode=${authCode}`, [
     deleteCookieHeader(CSRF_COOKIE),
   ]);
