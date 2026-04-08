@@ -29,13 +29,13 @@ Layer 4: リソース所有権・ロールチェック (403)
 
 | 分類 | 技術 |
 |------|------|
-| Web サーバー | TypeScript / Hono (Node.js) |
+| Web サーバー | TypeScript / uWebSockets.js |
 | データベース | PostgreSQL 17 (Drizzle ORM) |
 | セッション管理 | Redis 7 (ioredis / TTL 7 日) |
 | 認証 | GitHub OAuth / Google OAuth / パスワード (bcrypt) |
 | MFA | TOTP / SMS (AWS SNS) / Email (AWS SES) |
 | JWT | アクセストークン (60 分) / リフレッシュトークン (30 日) |
-| フロントエンド | React 19 / React Router 7 / TypeScript / Vite |
+| フロントエンド | React 19 / React Router 7 / TanStack Query / TypeScript / Vite |
 
 ## プロジェクト構成
 

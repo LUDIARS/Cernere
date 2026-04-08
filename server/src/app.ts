@@ -1,80 +1,157 @@
 /**
- * Hono アプリケーション — ルート定義
+ * Cernere Server — uWebSockets.js アプリケーション
+ *
+ * WS メインの認証プラットフォーム。HTTP は OAuth コールバックと
+ * 認証 REST の最小セットのみ。
  */
 
-import { Hono } from "hono";
-import { cors } from "hono/cors";
-import { createNodeWebSocket } from "@hono/node-ws";
+import uWS from "uWebSockets.js";
 import { config } from "./config.js";
-import { AppError } from "./error.js";
-import { authRoutes } from "./auth/routes.js";
-import { googleOAuthRoutes } from "./auth/oauth-google.js";
-import { githubOAuthRoutes } from "./auth/oauth-github.js";
+import { handleAuthRoute } from "./http/auth-handler.js";
+import { handleOAuthRoute } from "./http/oauth-handler.js";
 import {
-  resolveWsAuth,
-  createAuthenticatedWsHandler,
-  createGuestWsHandler,
+  handleWsOpen,
+  handleWsMessage,
+  handleWsClose,
 } from "./ws/handler.js";
+import { resolveWsAuth } from "./ws/auth.js";
+
+// ── uWS UserData (WS 接続ごとに保持) ──────────────────────
+
+export interface WsUserData {
+  userId: string;
+  sessionId: string;
+  isGuest: boolean;
+  promoted: boolean;
+}
+
+// ── HTTP ヘルパー ──────────────────────────────────────────
+
+function readBody(res: uWS.HttpResponse): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let buffer = "";
+    res.onData((chunk, isLast) => {
+      buffer += Buffer.from(chunk).toString();
+      if (isLast) resolve(buffer);
+    });
+    res.onAborted(() => reject(new Error("Request aborted")));
+  });
+}
+
+function jsonResponse(res: uWS.HttpResponse, status: string, data: unknown): void {
+  res.cork(() => {
+    res.writeStatus(status)
+      .writeHeader("Content-Type", "application/json")
+      .writeHeader("Access-Control-Allow-Origin", config.frontendUrl)
+      .writeHeader("Access-Control-Allow-Credentials", "true")
+      .end(JSON.stringify(data));
+  });
+}
+
+// ── App 生成 ──────────────────────────────────────────────
+
 export function createApp() {
-  const app = new Hono();
-  const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
+  const app = uWS.App();
 
-  // ─── Global Error Handler ─────────────────────────────────
-  app.onError((err, c) => {
-    if (err instanceof AppError) {
-      return c.json({ error: err.message }, err.statusCode as 400);
-    }
-    console.error(`[server] Unhandled error: ${c.req.method} ${c.req.path}`, err);
-    return c.json({ error: "Internal server error" }, 500);
+  // ── CORS preflight ──────────────────────────────────────
+  app.options("/*", (res) => {
+    res.cork(() => {
+      res.writeStatus("204 No Content")
+        .writeHeader("Access-Control-Allow-Origin", config.frontendUrl)
+        .writeHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        .writeHeader("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        .writeHeader("Access-Control-Allow-Credentials", "true")
+        .end();
+    });
   });
 
-  // ─── CORS ─────────────────────────────────────────────────
-  app.use("*", cors({
-    origin: config.frontendUrl,
-    credentials: true,
-  }));
+  // ── WebSocket: /auth ────────────────────────────────────
+  app.ws<WsUserData>("/auth", {
+    maxPayloadLength: 16 * 1024 * 1024,
+    idleTimeout: 120,
 
-  // ─── Auth REST routes ─────────────────────────────────────
-  app.route("/api/auth", authRoutes);
+    upgrade: async (res, req, context) => {
+      const query = req.getQuery();
+      const params = new URLSearchParams(query);
+      const token = params.get("token") ?? undefined;
+      const sessionId = params.get("session_id") ?? undefined;
 
-  // ─── OAuth routes ─────────────────────────────────────────
-  app.route("/auth", googleOAuthRoutes);
-  app.route("/auth", githubOAuthRoutes);
+      const secWsKey = req.getHeader("sec-websocket-key");
+      const secWsProtocol = req.getHeader("sec-websocket-protocol");
+      const secWsExtensions = req.getHeader("sec-websocket-extensions");
 
-  // ─── Auth code exchange ───────────────────────────────────
-  app.post("/api/auth/exchange", async (c) => {
-    const { code } = await c.req.json<{ code: string }>();
-    if (!code) throw AppError.badRequest("code is required");
-
-    const { redis } = await import("./redis.js");
-    const raw = await redis.get(`authcode:${code}`);
-    if (!raw) throw AppError.unauthorized("Invalid or expired auth code");
-    await redis.del(`authcode:${code}`);
-
-    return c.json(JSON.parse(raw));
-  });
-
-  // ─── WebSocket: /auth (認証済み or ゲスト) ─────────────────
-  app.get("/auth",
-    upgradeWebSocket(async (c) => {
-      const token = c.req.query("token");
-      const sessionId = c.req.query("session_id");
+      let aborted = false;
+      res.onAborted(() => { aborted = true; });
 
       const auth = await resolveWsAuth(token, sessionId);
+      if (aborted) return;
 
-      if (auth) {
-        return createAuthenticatedWsHandler(auth.userId, auth.sessionId);
-      }
+      const userData: WsUserData = auth
+        ? { userId: auth.userId, sessionId: auth.sessionId, isGuest: false, promoted: false }
+        : { userId: "", sessionId: `guest_${crypto.randomUUID()}`, isGuest: true, promoted: false };
 
-      // ゲストセッション
-      return createGuestWsHandler();
-    }),
-  );
+      res.cork(() => {
+        res.upgrade(userData, secWsKey, secWsProtocol, secWsExtensions, context);
+      });
+    },
 
-  // ─── Health check ─────────────────────────────────────────
-  app.get("/health", (c) => {
-    return c.json({ status: "ok", timestamp: new Date().toISOString() });
+    open: (ws) => { handleWsOpen(ws); },
+    message: (ws, message) => { handleWsMessage(ws, message); },
+    close: (ws) => { handleWsClose(ws); },
   });
 
-  return { app, injectWebSocket };
+  // ── Auth REST: POST /api/auth/:action ───────────────────
+  app.post("/api/auth/:action", async (res, req) => {
+    const action = req.getParameter(0) ?? "";
+    const authHeader = req.getHeader("authorization") ?? "";
+    let aborted = false;
+    res.onAborted(() => { aborted = true; });
+
+    try {
+      const body = await readBody(res);
+      if (aborted) return;
+      const result = await handleAuthRoute(action, body, authHeader);
+      jsonResponse(res, result.status, result.data);
+    } catch (err) {
+      if (aborted) return;
+      const msg = (err as Error).message;
+      const status = msg.includes("Unauthorized") ? "401 Unauthorized"
+        : msg.includes("not found") ? "404 Not Found" : "400 Bad Request";
+      jsonResponse(res, status, { error: msg });
+    }
+  });
+
+  // ── Auth REST: GET /api/auth/me ─────────────────────────
+  app.get("/api/auth/me", async (res, req) => {
+    const authHeader = req.getHeader("authorization") ?? "";
+    let aborted = false;
+    res.onAborted(() => { aborted = true; });
+
+    try {
+      const result = await handleAuthRoute("me", "", authHeader);
+      if (aborted) return;
+      jsonResponse(res, result.status, result.data);
+    } catch (err) {
+      if (aborted) return;
+      jsonResponse(res, "401 Unauthorized", { error: (err as Error).message });
+    }
+  });
+
+  // ── OAuth callbacks ─────────────────────────────────────
+  app.get("/auth/github/login", (res, req) => handleOAuthRoute(res, req, "github", "login"));
+  app.get("/auth/github/callback", (res, req) => handleOAuthRoute(res, req, "github", "callback"));
+  app.get("/auth/google/login", (res, req) => handleOAuthRoute(res, req, "google", "login"));
+  app.get("/auth/google/callback", (res, req) => handleOAuthRoute(res, req, "google", "callback"));
+
+  // ── Health check ────────────────────────────────────────
+  app.get("/health", (res) => {
+    jsonResponse(res, "200 OK", { status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  // ── 404 ─────────────────────────────────────────────────
+  app.any("/*", (res) => {
+    jsonResponse(res, "404 Not Found", { error: "Not found" });
+  });
+
+  return app;
 }

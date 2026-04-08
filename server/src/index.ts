@@ -1,31 +1,31 @@
 /**
- * Cernere Server — エントリポイント
+ * Cernere Server — エントリポイント (uWebSockets.js)
  */
 
-import { serve } from "@hono/node-server";
 import { config } from "./config.js";
 import { createApp } from "./app.js";
 import { redis } from "./redis.js";
 import { runMigrations } from "./db/migrate.js";
 
 async function main() {
-  console.log("=== Cernere Server (TypeScript) ===");
+  console.log("=== Cernere Server (uWebSockets.js) ===");
   console.log(`  Environment: ${config.isProduction ? "production" : "development"}`);
 
-  // DB マイグレーション
   await runMigrations();
-
   await redis.connect();
 
-  const { app, injectWebSocket } = createApp();
+  const app = createApp();
 
-  const server = serve({ fetch: app.fetch, port: config.listenPort }, (info) => {
-    console.log(`[server] Listening on http://localhost:${info.port}`);
-    console.log(`[server] Frontend URL: ${config.frontendUrl}`);
+  app.listen(config.listenPort, (listenSocket) => {
+    if (listenSocket) {
+      console.log(`[server] Listening on http://localhost:${config.listenPort}`);
+      console.log(`[server] WebSocket: ws://localhost:${config.listenPort}/auth`);
+      console.log(`[server] Frontend URL: ${config.frontendUrl}`);
+    } else {
+      console.error(`[server] Failed to listen on port ${config.listenPort}`);
+      process.exit(1);
+    }
   });
-
-  injectWebSocket(server);
-  console.log("[server] WebSocket handler injected");
 }
 
 main().catch((err) => {
