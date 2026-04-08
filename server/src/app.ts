@@ -15,6 +15,7 @@ import {
   createAuthenticatedWsHandler,
   createGuestWsHandler,
 } from "./ws/handler.js";
+import { profileRoutes, publicProfileRoutes } from "./profile/routes.js";
 
 export function createApp() {
   const app = new Hono();
@@ -41,6 +42,10 @@ export function createApp() {
   // ─── OAuth routes ─────────────────────────────────────────
   app.route("/auth", googleOAuthRoutes);
   app.route("/auth", githubOAuthRoutes);
+
+  // ─── Profile REST routes ───────────────────────────────────
+  app.route("/api/profile", profileRoutes);
+  app.route("/api/users", publicProfileRoutes);
 
   // ─── Auth code exchange ───────────────────────────────────
   app.post("/api/auth/exchange", async (c) => {
