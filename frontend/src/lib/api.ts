@@ -344,31 +344,29 @@ export interface UpdateProfileBody {
   privacy?: ProfilePrivacy;
 }
 
+// ── Profile API (WS module_request 経由) ────────
+
+import { wsClient } from "./ws-client";
+
 export const profile = {
   async getMyProfile(): Promise<UserProfileData> {
-    return request<UserProfileData>("/api/profile");
+    return wsClient.sendCommand<UserProfileData>("profile", "get");
   },
 
   async updateMyProfile(body: UpdateProfileBody): Promise<UserProfileData> {
-    return request<UserProfileData>("/api/profile", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    });
+    return wsClient.sendCommand<UserProfileData>("profile", "update", body);
   },
 
   async updatePrivacy(privacy: ProfilePrivacy): Promise<void> {
-    await request("/api/profile/privacy", {
-      method: "PUT",
-      body: JSON.stringify(privacy),
-    });
+    await wsClient.sendCommand("profile", "update_privacy", { privacy });
   },
 
   async getPublicProfile(userId: string): Promise<PublicProfile> {
-    return request<PublicProfile>(`/api/users/${userId}/profile`);
+    return wsClient.sendCommand<PublicProfile>("user", "get_profile", { userId });
   },
 };
 
-// ── Data Opt-Out API ─────────────────────────────
+// ── Data Opt-Out API (WS module_request 経由) ───
 
 export interface DataOptOutItem {
   serviceId: string;
@@ -384,21 +382,20 @@ export interface OptOutRequest {
 
 export const optouts = {
   async list(): Promise<DataOptOutItem[]> {
-    return request<DataOptOutItem[]>("/api/profile/optouts");
+    return wsClient.sendCommand<DataOptOutItem[]>("profile", "list_optouts");
   },
 
   async create(body: OptOutRequest): Promise<{ message: string; optout: DataOptOutItem }> {
-    return request<{ message: string; optout: DataOptOutItem }>("/api/profile/optouts", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    await wsClient.sendCommand("profile", "optout", body);
+    return {
+      message: "Opt-out created",
+      optout: { serviceId: body.serviceId, categoryKey: body.categoryKey, optedOutAt: new Date().toISOString() },
+    };
   },
 
   async remove(body: OptOutRequest): Promise<{ message: string }> {
-    return request<{ message: string }>("/api/profile/optouts", {
-      method: "DELETE",
-      body: JSON.stringify(body),
-    });
+    await wsClient.sendCommand("profile", "remove_optout", body);
+    return { message: "Opt-out removed" };
   },
 };
 
