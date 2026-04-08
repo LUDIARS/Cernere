@@ -54,6 +54,9 @@ export function OrganizationsPage() {
   const [showAddMember, setShowAddMember] = useState(false);
   const [addUserId, setAddUserId] = useState("");
   const [addRole, setAddRole] = useState("member");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Array<{ id: string; login: string; displayName: string; avatarUrl: string | null; email: string | null }>>([]);
+  const [searching, setSearching] = useState(false);
 
   // Fetch orgs
   const fetchOrgs = useCallback(async () => {
@@ -121,9 +124,33 @@ export function OrganizationsPage() {
     }
   };
 
+  // Search users
+  const handleSearch = useCallback(async (query: string) => {
+    setSearchQuery(query);
+    if (query.length < 2) { setSearchResults([]); return; }
+    setSearching(true);
+    try {
+      const results = await wsClient.sendCommand<Array<{ id: string; login: string; displayName: string; avatarUrl: string | null; email: string | null }>>("user", "search", { query });
+      // 既存メンバーを除外
+      const memberIds = new Set(members.map((m) => m.userId));
+      setSearchResults(results.filter((u) => !memberIds.has(u.id)));
+    } catch {
+      setSearchResults([]);
+    } finally {
+      setSearching(false);
+    }
+  }, [members]);
+
+  // Select user from search results
+  const selectUser = (userId: string, displayName: string) => {
+    setAddUserId(userId);
+    setSearchQuery(displayName);
+    setSearchResults([]);
+  };
+
   // Add member
   const handleAddMember = async () => {
-    if (!selectedOrg) return;
+    if (!selectedOrg || !addUserId) return;
     setError(null);
     try {
       await wsClient.sendCommand("member", "add", {
@@ -132,7 +159,7 @@ export function OrganizationsPage() {
         role: addRole,
       });
       setShowAddMember(false);
-      setAddUserId(""); setAddRole("member");
+      setAddUserId(""); setAddRole("member"); setSearchQuery(""); setSearchResults([]);
       selectOrg(selectedOrg);
     } catch (err) {
       setError((err as Error).message);
@@ -255,19 +282,58 @@ export function OrganizationsPage() {
 
               {/* Add member form */}
               {showAddMember && (
-                <div style={{ marginBottom: "1rem", padding: "0.75rem", background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "4px", display: "flex", gap: "0.5rem", alignItems: "flex-end" }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={labelStyle}>User ID</label>
-                    <input value={addUserId} onChange={(e) => setAddUserId(e.target.value)} style={inputStyle} placeholder="UUID" />
+                <div style={{ marginBottom: "1rem", padding: "0.75rem", background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "4px" }}>
+                  <div style={{ display: "flex", gap: "0.5rem", alignItems: "flex-end" }}>
+                    <div style={{ flex: 1, position: "relative" }}>
+                      <label style={labelStyle}>ユーザー検索</label>
+                      <input
+                        value={searchQuery}
+                        onChange={(e) => handleSearch(e.target.value)}
+                        style={inputStyle}
+                        placeholder="名前・メール・ログインIDで検索..."
+                      />
+                      {/* 検索結果ドロップダウン */}
+                      {searchResults.length > 0 && (
+                        <div style={{
+                          position: "absolute", top: "100%", left: 0, right: 0, zIndex: 10,
+                          background: "var(--bg-surface)", border: "1px solid var(--border)",
+                          borderRadius: "0 0 4px 4px", maxHeight: 200, overflow: "auto",
+                          boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+                        }}>
+                          {searchResults.map((u) => (
+                            <div
+                              key={u.id}
+                              onClick={() => selectUser(u.id, u.displayName || u.login)}
+                              style={{
+                                padding: "0.5rem 0.75rem", cursor: "pointer",
+                                display: "flex", alignItems: "center", gap: "0.5rem",
+                                borderBottom: "1px solid var(--border)",
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover, rgba(255,255,255,0.05))")}
+                              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                            >
+                              {u.avatarUrl && <img src={u.avatarUrl} style={{ width: 24, height: 24, borderRadius: "50%" }} />}
+                              <div>
+                                <div style={{ fontSize: "0.85rem", fontWeight: 500 }}>{u.displayName || u.login}</div>
+                                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{u.email || u.login}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {searching && <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: 2 }}>検索中...</div>}
+                    </div>
+                    <div>
+                      <label style={labelStyle}>Role</label>
+                      <select value={addRole} onChange={(e) => setAddRole(e.target.value)} style={{ ...inputStyle, width: 130 }}>
+                        <option value="member">Member</option>
+                        <option value="maintainer">Maintainer</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </div>
+                    <button className="primary" onClick={handleAddMember} disabled={!addUserId} style={{ height: 34 }}>追加</button>
                   </div>
-                  <div>
-                    <label style={labelStyle}>Role</label>
-                    <select value={addRole} onChange={(e) => setAddRole(e.target.value)} style={{ ...inputStyle, width: 120 }}>
-                      <option value="member">Member</option>
-                      <option value="admin">Admin</option>
-                    </select>
-                  </div>
-                  <button className="primary" onClick={handleAddMember} style={{ height: 34 }}>Add</button>
+                  {addUserId && <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: 4 }}>選択: {addUserId.slice(0, 8)}...</div>}
                 </div>
               )}
 
@@ -308,6 +374,7 @@ export function OrganizationsPage() {
                         >
                           <option value="owner">Owner</option>
                           <option value="admin">Admin</option>
+                          <option value="maintainer">Maintainer</option>
                           <option value="member">Member</option>
                         </select>
                         {!isMe && m.role !== "owner" && (
