@@ -1,0 +1,66 @@
+# Cernere — All-in-One (PostgreSQL + Redis 込み)
+#
+# Infra を使わず単体で動かしたい場合に使用。
+#
+# Usage:
+#   docker compose -f docker-compose.yaml -f docker-compose.standalone.yaml up -d
+#   docker compose -f docker-compose.yaml -f docker-compose.standalone.yaml --profile dev up
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: cernere-postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cernere}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cernere}
+      POSTGRES_DB: ${POSTGRES_DB:-cernere}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cernere}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: cernere-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # backend / backend-dev の接続先を standalone の DB に向ける
+  backend:
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-cernere}:${POSTGRES_PASSWORD:-cernere}@postgres:5432/${POSTGRES_DB:-cernere}"
+      REDIS_URL: "redis://redis:6379"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  backend-dev:
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-cernere}:${POSTGRES_PASSWORD:-cernere}@postgres:5432/${POSTGRES_DB:-cernere}"
+      REDIS_URL: "redis://redis:6379"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pg-data:
+  redis-data:
