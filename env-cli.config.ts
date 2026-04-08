@@ -22,6 +22,7 @@ const config: EnvCliConfig = {
     REDIS_URL: "redis://127.0.0.1:6379",
     LISTEN_ADDR: "0.0.0.0:8080",
     FRONTEND_URL: "http://localhost:5173",
+    VITE_ALLOWED_HOSTS: "",
 
     // ─── JWT ───────────────────────────────────────────────
     JWT_SECRET: "cernere-dev-secret-change-in-production",
