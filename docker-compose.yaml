@@ -48,7 +48,7 @@ services:
   # ソースマウント + ホットリロード
 
   backend-dev:
-    image: node:22-alpine
+    image: node:22-slim
     container_name: cernere-backend-dev
     working_dir: /app/server
     ports:
@@ -64,7 +64,7 @@ services:
       FRONTEND_URL: "${FRONTEND_URL:-http://localhost:5173}"
       JWT_SECRET: "${JWT_SECRET:-}"
       NODE_ENV: "development"
-    command: sh -c "npm install && npx tsx watch src/index.ts"
+    command: sh -c "apt-get update -qq && apt-get install -y -qq git > /dev/null && npm i -g pnpm && pnpm install && npx tsx watch src/index.ts"
     profiles:
       - dev
 
