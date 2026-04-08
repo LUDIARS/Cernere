@@ -631,7 +631,7 @@ pub async fn google_callback(
     Ok((jar.remove(clear_csrf), Redirect::temporary(&url)))
 }
 
-// ── GitHub OAuth (Cookie ベース、Ars BFF 用) ─────────
+// ── GitHub OAuth (Cookie ベース) ──────────────────────
 
 #[derive(Debug, Deserialize)]
 pub struct OAuthCallbackQuery {
@@ -803,7 +803,7 @@ pub async fn github_callback(
         }
     };
 
-    // Create Redis session for Ars BFF
+    // Create Redis session for Cookie-based client
     let session = Session {
         id: Uuid::new_v4().to_string(),
         user_id: user.id,
@@ -974,7 +974,7 @@ pub async fn exchange_auth_code(
     Ok(Json(value))
 }
 
-// ── Cookie ベース認証 (Ars BFF 用) ──────────────────
+// ── Cookie ベース認証 ────────────────────────────────
 
 /// GET /auth/me (Cookie)
 pub async fn get_me(
