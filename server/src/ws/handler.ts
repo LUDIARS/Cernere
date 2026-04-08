@@ -1,16 +1,14 @@
 /**
- * WebSocket セッションハンドラ
+ * WebSocket ハンドラ (uWebSockets.js 版)
  *
- * - 認証済み: JWT/session_id で接続 → 全コマンド利用可能
- * - ゲスト: 認証情報なしで接続 → auth コマンドのみ → 認証後に昇格
+ * app.ts の ws<WsUserData> から呼ばれる open/message/close コールバック。
  */
 
-import type { WSContext, WSEvents } from "hono/ws";
-import { verifyToken } from "../auth/jwt.js";
-import { config } from "../config.js";
+import type uWS from "uWebSockets.js";
+import type { WsUserData } from "../app.js";
 import {
-  putSession, getSession, setUserState, updateUserStateField, updateLastPing,
-  SESSION_TTL_SECS, type UserFullState,
+  setUserState, updateLastPing, updateUserStateField,
+  putSession, SESSION_TTL_SECS, type UserFullState,
 } from "../redis.js";
 import { sessionRegistry } from "./session-registry.js";
 import { dispatch } from "../commands.js";
@@ -20,233 +18,135 @@ import type { ClientMessage, ServerMessage } from "./protocol.js";
 
 const PING_INTERVAL_MS = 30_000;
 
-function send(ws: WSContext, msg: ServerMessage): void {
+const pingTimers = new Map<string, ReturnType<typeof setInterval>>();
+
+function send(ws: uWS.WebSocket<WsUserData>, msg: ServerMessage): void {
   ws.send(JSON.stringify(msg));
 }
 
-// ── 認証済みセッション ──────────────────────────────────────
+// ── open ──────────────────────────────────────────────────
 
-export function createAuthenticatedWsHandler(userId: string, sessionId: string): WSEvents {
-  let pingTimer: ReturnType<typeof setInterval> | null = null;
+export async function handleWsOpen(ws: uWS.WebSocket<WsUserData>): Promise<void> {
+  const data = ws.getUserData();
 
-  return {
-    async onOpen(_evt, ws) {
-      sessionRegistry.register(sessionId, userId, ws);
+  if (data.isGuest) {
+    send(ws, { type: "guest_connected", session_id: data.sessionId });
+    return;
+  }
 
-      const now = Date.now();
-      const userState: UserFullState = {
-        userId,
-        sessionId,
-        state: "logged_in",
-        modules: [],
-        lastPingAt: Math.floor(now / 1000),
-      };
-      await setUserState(userState);
+  sessionRegistry.register(data.sessionId, data.userId, ws);
 
-      send(ws, { type: "connected", session_id: sessionId, user_state: userState });
-
-      // プレゼンス通知: online
-      notifyPresenceChange(userId, "online").catch(() => {});
-
-      pingTimer = setInterval(() => {
-        send(ws, { type: "ping", ts: Math.floor(Date.now() / 1000) });
-      }, PING_INTERVAL_MS);
-    },
-
-    async onMessage(evt, ws) {
-      let msg: ClientMessage;
-      try {
-        msg = JSON.parse(typeof evt.data === "string" ? evt.data : evt.data.toString());
-      } catch {
-        send(ws, { type: "error", code: "invalid_message", message: "Failed to parse message" });
-        return;
-      }
-
-      if (msg.type === "pong") {
-        await updateLastPing(userId, msg.ts);
-        return;
-      }
-
-      if (msg.type === "module_request") {
-        try {
-          const result = await dispatch(userId, sessionId, msg.module, msg.action, msg.payload);
-          send(ws, { type: "module_response", module: msg.module, action: msg.action, payload: result });
-        } catch (err) {
-          send(ws, { type: "error", code: "command_error", message: (err as Error).message });
-        }
-        return;
-      }
-
-      if (msg.type === "relay") {
-        sessionRegistry.relay(sessionId, userId, msg.target, msg.payload);
-        return;
-      }
-    },
-
-    async onClose() {
-      if (pingTimer) clearInterval(pingTimer);
-      sessionRegistry.unregister(sessionId);
-      await updateUserStateField(userId, "session_expired");
-
-      // プレゼンス通知: offline (他セッションがなければ)
-      if (!sessionRegistry.isOnline(userId)) {
-        notifyPresenceChange(userId, "offline").catch(() => {});
-      }
-    },
+  const now = Date.now();
+  const userState: UserFullState = {
+    userId: data.userId,
+    sessionId: data.sessionId,
+    state: "logged_in",
+    modules: [],
+    lastPingAt: Math.floor(now / 1000),
   };
+  await setUserState(userState);
+
+  send(ws, { type: "connected", session_id: data.sessionId, user_state: userState });
+  notifyPresenceChange(data.userId, "online").catch(() => {});
+
+  const timer = setInterval(() => {
+    send(ws, { type: "ping", ts: Math.floor(Date.now() / 1000) });
+  }, PING_INTERVAL_MS);
+  pingTimers.set(data.sessionId, timer);
 }
 
-// ── ゲストセッション ─────────────────────────────────────────
+// ── message ──────────────────────────────────────────────
 
-export function createGuestWsHandler(): WSEvents {
-  const guestSessionId = `guest_${crypto.randomUUID()}`;
-  let promoted = false;
-  let promotedUserId = "";
-  let promotedSessionId = "";
-  let pingTimer: ReturnType<typeof setInterval> | null = null;
+export async function handleWsMessage(
+  ws: uWS.WebSocket<WsUserData>,
+  message: ArrayBuffer,
+): Promise<void> {
+  const data = ws.getUserData();
 
-  return {
-    onOpen(_evt, ws) {
-      send(ws, { type: "guest_connected", session_id: guestSessionId });
-    },
+  let msg: ClientMessage;
+  try {
+    msg = JSON.parse(Buffer.from(message).toString());
+  } catch {
+    send(ws, { type: "error", code: "invalid_message", message: "Failed to parse message" });
+    return;
+  }
 
-    async onMessage(evt, ws) {
-      let msg: ClientMessage;
+  // ── ゲスト (未昇格) ──
+  if (data.isGuest && !data.promoted) {
+    if (msg.type === "pong") return;
+    if (msg.type === "relay") {
+      send(ws, { type: "error", code: "guest_restricted", message: "Guest sessions cannot use relay" });
+      return;
+    }
+    if (msg.type === "module_request") {
+      if (msg.module !== "auth") {
+        send(ws, { type: "error", code: "guest_restricted", message: `Guest sessions can only use 'auth' module. Got '${msg.module}'` });
+        return;
+      }
       try {
-        msg = JSON.parse(typeof evt.data === "string" ? evt.data : evt.data.toString());
-      } catch {
-        send(ws, { type: "error", code: "invalid_message", message: "Failed to parse message" });
-        return;
-      }
-
-      // 昇格済み → 認証済みとして処理
-      if (promoted) {
-        if (msg.type === "pong") {
-          await updateLastPing(promotedUserId, msg.ts);
-          return;
-        }
-        if (msg.type === "module_request") {
-          try {
-            const result = await dispatch(promotedUserId, promotedSessionId, msg.module, msg.action, msg.payload);
-            send(ws, { type: "module_response", module: msg.module, action: msg.action, payload: result });
-          } catch (err) {
-            send(ws, { type: "error", code: "command_error", message: (err as Error).message });
-          }
-          return;
-        }
-        if (msg.type === "relay") {
-          sessionRegistry.relay(promotedSessionId, promotedUserId, msg.target, msg.payload);
-          return;
-        }
-        return;
-      }
-
-      // ゲスト: auth モジュールのみ
-      if (msg.type === "pong") return;
-
-      if (msg.type === "relay") {
-        send(ws, { type: "error", code: "guest_restricted", message: "Guest sessions cannot use relay" });
-        return;
-      }
-
-      if (msg.type === "module_request") {
-        if (msg.module !== "auth") {
-          send(ws, {
-            type: "error",
-            code: "guest_restricted",
-            message: `Guest sessions can only use 'auth' module. Got '${msg.module}'`,
+        const result = await handleGuestAuthCommand(msg.action, msg.payload);
+        if (result.userId && result.accessToken && result.refreshToken) {
+          const newSessionId = crypto.randomUUID();
+          const now = Date.now();
+          await putSession({
+            id: newSessionId, userId: result.userId,
+            expiresAt: new Date(now + SESSION_TTL_SECS * 1000).toISOString(),
+            accessToken: result.accessToken,
           });
-          return;
+          data.userId = result.userId;
+          data.sessionId = newSessionId;
+          data.isGuest = false;
+          data.promoted = true;
+          sessionRegistry.register(newSessionId, result.userId, ws);
+          const userState: UserFullState = {
+            userId: result.userId, sessionId: newSessionId, state: "logged_in",
+            modules: [], lastPingAt: Math.floor(now / 1000),
+          };
+          await setUserState(userState);
+          send(ws, { type: "authenticated", session_id: newSessionId, user_state: userState, access_token: result.accessToken, refresh_token: result.refreshToken });
+          const timer = setInterval(() => { send(ws, { type: "ping", ts: Math.floor(Date.now() / 1000) }); }, PING_INTERVAL_MS);
+          pingTimers.set(newSessionId, timer);
+        } else {
+          send(ws, { type: "module_response", module: "auth", action: msg.action, payload: result });
         }
-
-        try {
-          const result = await handleGuestAuthCommand(msg.action, msg.payload);
-
-          // 昇格条件チェック
-          if (result.userId && result.accessToken && result.refreshToken) {
-            const newSessionId = crypto.randomUUID();
-            const now = Date.now();
-
-            await putSession({
-              id: newSessionId,
-              userId: result.userId,
-              expiresAt: new Date(now + SESSION_TTL_SECS * 1000).toISOString(),
-              accessToken: result.accessToken,
-            });
-
-            sessionRegistry.register(newSessionId, result.userId, ws);
-
-            const userState: UserFullState = {
-              userId: result.userId,
-              sessionId: newSessionId,
-              state: "logged_in",
-              modules: [],
-              lastPingAt: Math.floor(now / 1000),
-            };
-            await setUserState(userState);
-
-            send(ws, {
-              type: "authenticated",
-              session_id: newSessionId,
-              user_state: userState,
-              access_token: result.accessToken,
-              refresh_token: result.refreshToken,
-            });
-
-            promoted = true;
-            promotedUserId = result.userId;
-            promotedSessionId = newSessionId;
-
-            pingTimer = setInterval(() => {
-              send(ws, { type: "ping", ts: Math.floor(Date.now() / 1000) });
-            }, PING_INTERVAL_MS);
-          } else {
-            // MFA チャレンジ等
-            send(ws, { type: "module_response", module: "auth", action: msg.action, payload: result });
-          }
-        } catch (err) {
-          send(ws, { type: "error", code: "auth_error", message: (err as Error).message });
-        }
+      } catch (err) {
+        send(ws, { type: "error", code: "auth_error", message: (err as Error).message });
       }
-    },
+    }
+    return;
+  }
 
-    async onClose() {
-      if (pingTimer) clearInterval(pingTimer);
-      if (promoted) {
-        sessionRegistry.unregister(promotedSessionId);
-        await updateUserStateField(promotedUserId, "session_expired");
-      }
-    },
-  };
+  // ── 認証済み ──
+  if (msg.type === "pong") {
+    await updateLastPing(data.userId, msg.ts);
+    return;
+  }
+  if (msg.type === "module_request") {
+    try {
+      const result = await dispatch(data.userId, data.sessionId, msg.module, msg.action, msg.payload);
+      send(ws, { type: "module_response", module: msg.module, action: msg.action, payload: result });
+    } catch (err) {
+      send(ws, { type: "error", code: "command_error", message: (err as Error).message });
+    }
+    return;
+  }
+  if (msg.type === "relay") {
+    sessionRegistry.relay(data.sessionId, data.userId, msg.target, msg.payload);
+  }
 }
 
-// ── WS 接続認証判定 ──────────────────────────────────────────
+// ── close ─────────────────────────────────────────────────
 
-export async function resolveWsAuth(
-  token?: string, sessionId?: string,
-): Promise<{ userId: string; sessionId: string } | null> {
-  if (sessionId) {
-    const session = await getSession(sessionId);
-    if (session && new Date(session.expiresAt) > new Date()) {
-      return { userId: session.userId, sessionId: session.id };
+export async function handleWsClose(ws: uWS.WebSocket<WsUserData>): Promise<void> {
+  const data = ws.getUserData();
+  const timer = pingTimers.get(data.sessionId);
+  if (timer) { clearInterval(timer); pingTimers.delete(data.sessionId); }
+
+  if (!data.isGuest || data.promoted) {
+    sessionRegistry.unregister(data.sessionId);
+    await updateUserStateField(data.userId, "session_expired");
+    if (!sessionRegistry.isOnline(data.userId)) {
+      notifyPresenceChange(data.userId, "offline").catch(() => {});
     }
   }
-
-  if (token) {
-    try {
-      const claims = verifyToken(token);
-      const newSessionId = crypto.randomUUID();
-      await putSession({
-        id: newSessionId,
-        userId: claims.sub,
-        expiresAt: new Date(Date.now() + SESSION_TTL_SECS * 1000).toISOString(),
-        accessToken: token,
-      });
-      return { userId: claims.sub, sessionId: newSessionId };
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
 }
