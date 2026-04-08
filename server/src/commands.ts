@@ -147,7 +147,7 @@ async function memberCmd(userId: string, action: string, p?: Record<string, unkn
       const orgId = requireStr(p, "organizationId");
       const targetUserId = requireStr(p, "userId");
       const role = optStr(p, "role") ?? "member";
-      await requireOrgRole(userId, orgId, ["admin", "owner"]);
+      await requireOrgRole(userId, orgId, ["admin", "owner", "maintainer"]);
       await db.insert(schema.organizationMembers).values({
         organizationId: orgId, userId: targetUserId, role, joinedAt: new Date(),
       });
@@ -157,7 +157,7 @@ async function memberCmd(userId: string, action: string, p?: Record<string, unkn
       const orgId = requireStr(p, "organizationId");
       const targetUserId = requireStr(p, "userId");
       const role = requireStr(p, "role");
-      await requireOrgRole(userId, orgId, ["admin", "owner"]);
+      await requireOrgRole(userId, orgId, ["admin", "owner", "maintainer"]);
       await db.update(schema.organizationMembers).set({ role })
         .where(and(
           eq(schema.organizationMembers.organizationId, orgId),
@@ -169,7 +169,7 @@ async function memberCmd(userId: string, action: string, p?: Record<string, unkn
       const orgId = requireStr(p, "organizationId");
       const targetUserId = requireStr(p, "userId");
       if (targetUserId !== userId) {
-        await requireOrgRole(userId, orgId, ["admin", "owner"]);
+        await requireOrgRole(userId, orgId, ["admin", "owner", "maintainer"]);
       }
       await db.delete(schema.organizationMembers)
         .where(and(
@@ -245,7 +245,7 @@ async function orgProjectCmd(userId: string, action: string, p?: Record<string, 
     }
     case "enable": {
       const orgId = requireStr(p, "organizationId");
-      await requireOrgRole(userId, orgId, ["admin", "owner"]);
+      await requireOrgRole(userId, orgId, ["admin", "owner", "maintainer"]);
       await db.insert(schema.organizationProjects).values({
         organizationId: orgId,
         projectDefinitionId: requireStr(p, "projectDefinitionId"),
@@ -254,7 +254,7 @@ async function orgProjectCmd(userId: string, action: string, p?: Record<string, 
     }
     case "disable": {
       const orgId = requireStr(p, "organizationId");
-      await requireOrgRole(userId, orgId, ["admin", "owner"]);
+      await requireOrgRole(userId, orgId, ["admin", "owner", "maintainer"]);
       await db.delete(schema.organizationProjects).where(and(
         eq(schema.organizationProjects.organizationId, orgId),
         eq(schema.organizationProjects.projectDefinitionId, requireStr(p, "projectDefinitionId")),
@@ -279,6 +279,24 @@ async function userCmd(userId: string, action: string, p?: Record<string, unknow
         id: u.id, login: u.login, displayName: u.displayName,
         avatarUrl: u.avatarUrl, email: u.email, role: u.role,
       };
+    }
+    case "search": {
+      const query = requireStr(p, "query");
+      if (query.length < 2) throw AppError.badRequest("Query must be at least 2 characters");
+      const rows = await db.select({
+        id: schema.users.id,
+        login: schema.users.login,
+        displayName: schema.users.displayName,
+        avatarUrl: schema.users.avatarUrl,
+        email: schema.users.email,
+      }).from(schema.users)
+        .where(
+          sql`(${schema.users.login} ILIKE ${'%' + query + '%'}
+           OR ${schema.users.displayName} ILIKE ${'%' + query + '%'}
+           OR ${schema.users.email} ILIKE ${'%' + query + '%'})`
+        )
+        .limit(10);
+      return rows;
     }
     case "get_profile": {
       // 他ユーザーの公開プロフィール (privacy フィルタ付き)
