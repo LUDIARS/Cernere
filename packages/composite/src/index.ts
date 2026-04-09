@@ -1,31 +1,12 @@
-// Core
-export { CernereAuth } from "./client.js";
+export { CernereComposite } from "./composite.js";
 export type {
-  CernereAuthConfig,
-  CernereAuthResult,
+  CompositeConfig,
   CernereUser,
-  CernereTokens,
-  AuthStorage,
-  PopupOptions,
+  ExchangeResult,
 } from "./types.js";
 
-// Storage
-export {
-  createLocalStorage,
-  createSessionStorage,
-  createMemoryStorage,
-} from "./storage.js";
-
-// React (re-export for convenience)
-export {
-  CernereAuthProvider,
-  useCernereAuth,
-  LoginOverlay,
-  LoginPage,
-} from "./react/index.js";
+// service-adapter の型を re-export (利用側の便宜)
 export type {
-  CernereAuthProviderProps,
-  CernereAuthContextValue,
-  LoginOverlayProps,
-  LoginPageProps,
-} from "./react/index.js";
+  ServiceAdapterCallbacks,
+  AdmittedUser,
+} from "@ludiars/cernere-service-adapter";
