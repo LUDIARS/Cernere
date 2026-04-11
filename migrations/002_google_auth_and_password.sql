@@ -5,23 +5,23 @@
 ALTER TABLE users ALTER COLUMN github_id DROP NOT NULL;
 
 -- Google OAuth フィールド追加
-ALTER TABLE users ADD COLUMN google_id TEXT UNIQUE;
-ALTER TABLE users ADD COLUMN google_access_token TEXT;
-ALTER TABLE users ADD COLUMN google_refresh_token TEXT;
-ALTER TABLE users ADD COLUMN google_token_expires_at BIGINT;
-ALTER TABLE users ADD COLUMN google_scopes JSONB;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT UNIQUE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_access_token TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_refresh_token TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_token_expires_at BIGINT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_scopes JSONB;
 
 -- パスワード認証フィールド追加
-ALTER TABLE users ADD COLUMN password_hash TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
 
 -- メールのユニーク制約
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL;
 
 -- ロール (admin / general)
-ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'general';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'general';
 
 -- 最終ログイン
-ALTER TABLE users ADD COLUMN last_login_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
 
 -- JWT リフレッシュトークン管理 (Redis セッションと別管理)
 CREATE TABLE IF NOT EXISTS refresh_sessions (

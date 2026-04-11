@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "npm run env:gen && npx dotenv-cli -- concurrently -n api,web -c green,cyan \"cargo watch -x run\" \"npx dotenv-cli -- npm run dev --prefix frontend\"",
+    "dev:server": "npx dotenv-cli -- cargo watch -x run",
+    "dev:front": "npx dotenv-cli -- npm run dev --prefix frontend",
     "env:setup": "npx tsx packages/env-cli/src/cli.ts setup",
     "env:test": "npx tsx packages/env-cli/src/cli.ts test",
     "env:gen": "npx tsx packages/env-cli/src/cli.ts env",
@@ -17,6 +20,8 @@
     "env:up:fg": "npx tsx packages/env-cli/src/cli.ts up dev -- --abort-on-container-exit"
   },
   "devDependencies": {
+    "concurrently": "^9.2.1",
+    "dotenv-cli": "^11.0.0",
     "tsx": "^4.19.0",
     "typescript": "~5.9.3"
   }
