@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { wsClient } from "../lib/ws-client";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 interface ManagedProject {
   key: string;
@@ -34,6 +35,7 @@ interface RegisterResult {
 export function DashboardPage() {
   const { user, wsConnected } = useAuth();
   const isAdmin = user?.role === "admin";
+  const isMobile = useIsMobile();
 
   const [projects, setProjects] = useState<ManagedProject[]>([]);
   const [selected, setSelected] = useState<ProjectDetail | null>(null);
@@ -130,54 +132,86 @@ export function DashboardPage() {
     }
   };
 
-  return (
-    <div style={{ display: "flex", height: "100%" }}>
-        {/* Sidebar: project list */}
-        <div style={{
-          width: 280, borderRight: "1px solid var(--border)", background: "var(--bg-surface)",
-          display: "flex", flexDirection: "column",
-        }}>
-          <div style={{ padding: "0.75rem 1rem", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: "0.8rem", fontWeight: 600, textTransform: "uppercase", color: "var(--text-muted)" }}>Projects</span>
-            {isAdmin && (
-              <button onClick={() => setShowRegister(!showRegister)} style={{
-                padding: "0.15rem 0.5rem", fontSize: "0.75rem", borderRadius: "3px",
-                border: "1px solid var(--border)", background: "transparent", color: "var(--text)", cursor: "pointer",
-              }}>{showRegister ? "Cancel" : "+ Add"}</button>
-            )}
-          </div>
+  const projectPicker = (
+    <div style={{ display: "flex", gap: "0.5rem", padding: "0.75rem", borderBottom: "1px solid var(--border)", background: "var(--bg-surface)" }}>
+      <select
+        value={selected?.key ?? ""}
+        onChange={(e) => { if (e.target.value) selectProject(e.target.value); }}
+        style={{
+          flex: 1, padding: "0.4rem 0.5rem", fontSize: "0.85rem", borderRadius: "4px",
+          border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)",
+        }}
+      >
+        <option value="" disabled>
+          {loading ? "Loading..." : projects.length === 0 ? "No projects" : "-- Select a project --"}
+        </option>
+        {projects.map((p) => (
+          <option key={p.key} value={p.key}>
+            {p.name}{!p.isActive ? " (off)" : ""}
+          </option>
+        ))}
+      </select>
+      {isAdmin && (
+        <button onClick={() => setShowRegister(!showRegister)} style={{
+          padding: "0.25rem 0.6rem", fontSize: "0.8rem", borderRadius: "4px",
+          border: "1px solid var(--border)", background: "transparent", color: "var(--text)", cursor: "pointer",
+          whiteSpace: "nowrap",
+        }}>{showRegister ? "Cancel" : "+ Add"}</button>
+      )}
+    </div>
+  );
 
-          <div style={{ flex: 1, overflow: "auto", padding: "0.25rem" }}>
-            {loading ? (
-              <p style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>Loading...</p>
-            ) : projects.length === 0 ? (
-              <p style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>No projects</p>
-            ) : (
-              projects.map((p) => (
-                <div
-                  key={p.key}
-                  onClick={() => selectProject(p.key)}
-                  style={{
-                    padding: "0.5rem 0.75rem", borderRadius: "4px", cursor: "pointer",
-                    background: selected?.key === p.key ? "var(--bg-hover, rgba(255,255,255,0.05))" : "transparent",
-                    marginBottom: "2px",
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>{p.name}</span>
-                    {!p.isActive && (
-                      <span style={{ fontSize: "0.65rem", padding: "0 0.3rem", borderRadius: "2px", background: "var(--red, #f85149)", color: "#fff" }}>off</span>
-                    )}
-                  </div>
-                  <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{p.key}</div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+  const sidebar = (
+    <div style={{
+      width: 280, borderRight: "1px solid var(--border)", background: "var(--bg-surface)",
+      display: "flex", flexDirection: "column",
+    }}>
+      <div style={{ padding: "0.75rem 1rem", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: "0.8rem", fontWeight: 600, textTransform: "uppercase", color: "var(--text-muted)" }}>Projects</span>
+        {isAdmin && (
+          <button onClick={() => setShowRegister(!showRegister)} style={{
+            padding: "0.15rem 0.5rem", fontSize: "0.75rem", borderRadius: "3px",
+            border: "1px solid var(--border)", background: "transparent", color: "var(--text)", cursor: "pointer",
+          }}>{showRegister ? "Cancel" : "+ Add"}</button>
+        )}
+      </div>
+
+      <div style={{ flex: 1, overflow: "auto", padding: "0.25rem" }}>
+        {loading ? (
+          <p style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>Loading...</p>
+        ) : projects.length === 0 ? (
+          <p style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>No projects</p>
+        ) : (
+          projects.map((p) => (
+            <div
+              key={p.key}
+              onClick={() => selectProject(p.key)}
+              style={{
+                padding: "0.5rem 0.75rem", borderRadius: "4px", cursor: "pointer",
+                background: selected?.key === p.key ? "var(--bg-hover, rgba(255,255,255,0.05))" : "transparent",
+                marginBottom: "2px",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>{p.name}</span>
+                {!p.isActive && (
+                  <span style={{ fontSize: "0.65rem", padding: "0 0.3rem", borderRadius: "2px", background: "var(--red, #f85149)", color: "#fff" }}>off</span>
+                )}
+              </div>
+              <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{p.key}</div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", height: "100%", width: "100%" }}>
+        {isMobile ? projectPicker : sidebar}
 
         {/* Main content */}
-        <div style={{ flex: 1, overflow: "auto", padding: "1.5rem" }}>
+        <div style={{ flex: 1, overflow: "auto", padding: isMobile ? "1rem" : "1.5rem", width: "100%", minWidth: 0 }}>
           {error && (
             <div style={{ padding: "0.5rem 0.75rem", marginBottom: "1rem", borderRadius: "4px", background: "rgba(248,81,73,0.1)", border: "1px solid var(--red, #f85149)", fontSize: "0.85rem", color: "var(--red)" }}>
               {error}
@@ -259,7 +293,7 @@ export function DashboardPage() {
                 <p style={{ fontSize: "0.85rem", marginBottom: "1rem" }}>{selected.description}</p>
               )}
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "1rem" }}>
                 {/* Connection info */}
                 <div style={{ padding: "1rem", background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "6px" }}>
                   <h3 style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.5rem" }}>Connection</h3>

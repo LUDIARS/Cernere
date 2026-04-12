@@ -133,11 +133,12 @@ pub struct WsConnectQuery {
 /// - token あり → 認証済みセッション
 /// - session_id あり → 既存セッション復帰
 /// - どちらもなし → ゲストセッション（auth コマンドのみ利用可���）
-pub async fn ws_upgrade(
-    State(state): State<AppState>,
-    Query(query): Query<WsConnectQuery>,
+/// WebSocket アップグレード (auth_get から呼ばれる)
+pub async fn ws_upgrade_from(
+    state: AppState,
+    query: WsConnectQuery,
     ws: WebSocketUpgrade,
-) -> std::result::Result<impl IntoResponse, AppError> {
+) -> std::result::Result<axum::response::Response, AppError> {
     let auth_result = authenticate_ws(&state, &query).await;
 
     match auth_result {
@@ -145,13 +146,15 @@ pub async fn ws_upgrade(
             // 認証済みセッション
             Ok(ws
                 .max_message_size(MAX_MESSAGE_SIZE)
-                .on_upgrade(move |socket| handle_ws_session(state, socket, user_id, session_id)))
+                .on_upgrade(move |socket| handle_ws_session(state, socket, user_id, session_id))
+                .into_response())
         }
         Err(_) if query.token.is_none() && query.session_id.is_none() => {
             // ゲストセッション（認証情報なし）
             Ok(ws
                 .max_message_size(MAX_MESSAGE_SIZE)
-                .on_upgrade(move |socket| handle_guest_ws_session(state, socket)))
+                .on_upgrade(move |socket| handle_guest_ws_session(state, socket))
+                .into_response())
         }
         Err(e) => Err(e),
     }

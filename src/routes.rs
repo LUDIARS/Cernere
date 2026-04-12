@@ -1,5 +1,6 @@
+use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{Path, Query, State};
-use axum::response::Json;
+use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{delete, get, post, put};
 use axum::Router;
 use axum_extra::extract::cookie::CookieJar;
@@ -61,10 +62,19 @@ struct SettingsQuery {
 /// セッション情報がない場合 → ログイン/サインアップ画面遷移用情報
 /// セッションがある場合 → ユーザのステートを確認して返す
 async fn auth_get(
+    ws: Option<WebSocketUpgrade>,
     State(state): State<AppState>,
+    Query(query): Query<ws::WsConnectQuery>,
     jar: CookieJar,
     headers: axum::http::HeaderMap,
-) -> Result<Json<serde_json::Value>> {
+) -> Result<Response> {
+    // Upgrade: websocket ヘッダーがある場合は WebSocket にアップグレード
+    if let Some(upgrade) = ws {
+        return ws::ws_upgrade_from(state, query, upgrade)
+            .await
+            .map(IntoResponse::into_response);
+    }
+
     let config = env_auth::build_auth_config(&state);
 
     // セッション確認: Cookie ベース
@@ -78,7 +88,8 @@ async fn auth_get(
             "user": user.map(UserResponse::from),
             "userState": user_state.as_ref().map(|s| &s.state),
             "config": config,
-        })));
+        }))
+        .into_response());
     }
 
     // セッション確認: JWT Bearer
@@ -90,14 +101,16 @@ async fn auth_get(
             "user": UserResponse::from(user),
             "userState": user_state.as_ref().map(|s| &s.state),
             "config": config,
-        })));
+        }))
+        .into_response());
     }
 
     // 認証なし → ログイン/サインアップ情報を返す
     Ok(Json(serde_json::json!({
         "authenticated": false,
         "config": config,
-    })))
+    }))
+    .into_response())
 }
 
 /// GET /auth/state — ユーザステートの詳細取得
@@ -329,7 +342,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         // 統合認証エンドポイント (共通 /auth)
         // GET -> 認証状態取得, WS -> セッション接続
-        .route("/auth", get(auth_get).patch(ws::ws_upgrade))
+        .route("/auth", get(auth_get))
         .route("/auth/state", get(auth_state))
         // JWT Auth (password / Google OAuth)
         .route("/api/auth/register", post(auth::register))
