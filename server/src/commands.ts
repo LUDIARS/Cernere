@@ -400,6 +400,22 @@ async function profileCmd(userId: string, action: string, p?: Record<string, unk
       await db.insert(schema.userDataOptouts).values({
         userId, serviceId, categoryKey, optedOutAt: new Date(),
       }).onConflictDoNothing();
+
+      // 実データ削除 (core の personality カテゴリ)
+      if (serviceId === "core" && categoryKey === "personality") {
+        const existing = await db.select({ userId: schema.userProfiles.userId })
+          .from(schema.userProfiles).where(eq(schema.userProfiles.userId, userId)).limit(1);
+        if (existing.length > 0) {
+          await db.update(schema.userProfiles).set({
+            roleTitle: "",
+            bio: "",
+            expertise: [],
+            hobbies: [],
+            updatedAt: new Date(),
+          }).where(eq(schema.userProfiles.userId, userId));
+        }
+      }
+
       return { ok: true };
     }
     case "remove_optout": {

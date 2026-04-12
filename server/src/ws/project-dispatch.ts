@@ -6,7 +6,7 @@
  * ユーザーセッションの制約 (自分のデータのみ) は受けない。
  */
 
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 
@@ -88,6 +88,17 @@ async function updateUserProfile(p: ProfileUpdateParams): Promise<unknown> {
   const userId = requireStr(p as unknown as Record<string, unknown>, "userId");
   const now = new Date();
 
+  // オプトアウトチェック (core/personality)
+  // personality (roleTitle / bio / expertise / hobbies) への書き込みはブロック
+  const personalityOptout = await db.select({ userId: schema.userDataOptouts.userId })
+    .from(schema.userDataOptouts)
+    .where(and(
+      eq(schema.userDataOptouts.userId, userId),
+      eq(schema.userDataOptouts.serviceId, "core"),
+      eq(schema.userDataOptouts.categoryKey, "personality"),
+    )).limit(1);
+  const personalityBlocked = personalityOptout.length > 0;
+
   // users テーブル側の更新 (displayName / avatarUrl)
   const userUpdates: Record<string, unknown> = { updatedAt: now };
   if (typeof p.displayName === "string") userUpdates.displayName = p.displayName;
@@ -103,19 +114,22 @@ async function updateUserProfile(p: ProfileUpdateParams): Promise<unknown> {
   if (existing.length === 0) {
     await db.insert(schema.userProfiles).values({
       userId,
-      roleTitle: p.roleTitle ?? "",
-      bio: p.bio ?? "",
-      expertise: p.expertise ?? [],
-      hobbies: p.hobbies ?? [],
+      roleTitle: personalityBlocked ? "" : (p.roleTitle ?? ""),
+      bio: personalityBlocked ? "" : (p.bio ?? ""),
+      expertise: personalityBlocked ? [] : (p.expertise ?? []),
+      hobbies: personalityBlocked ? [] : (p.hobbies ?? []),
       privacy: { bio: true, roleTitle: true, expertise: true, hobbies: true },
       createdAt: now, updatedAt: now,
     });
   } else {
     const profileUpdates: Record<string, unknown> = { updatedAt: now };
-    if (p.roleTitle !== undefined) profileUpdates.roleTitle = p.roleTitle;
-    if (p.bio !== undefined) profileUpdates.bio = p.bio;
-    if (p.expertise !== undefined) profileUpdates.expertise = p.expertise;
-    if (p.hobbies !== undefined) profileUpdates.hobbies = p.hobbies;
+    // personality フィールドはオプトアウト時ブロック
+    if (!personalityBlocked) {
+      if (p.roleTitle !== undefined) profileUpdates.roleTitle = p.roleTitle;
+      if (p.bio !== undefined) profileUpdates.bio = p.bio;
+      if (p.expertise !== undefined) profileUpdates.expertise = p.expertise;
+      if (p.hobbies !== undefined) profileUpdates.hobbies = p.hobbies;
+    }
     if (Object.keys(profileUpdates).length > 1) {
       await db.update(schema.userProfiles).set(profileUpdates)
         .where(eq(schema.userProfiles.userId, userId));
