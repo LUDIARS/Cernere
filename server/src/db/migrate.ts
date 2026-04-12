@@ -73,13 +73,17 @@ export async function runMigrations(): Promise<void> {
             await sql.unsafe(stmt);
           } catch (err) {
             const code = (err as { code?: string }).code;
-            // 「既に存在する」系のエラーのみスキップ
-            // 42P01 (relation does not exist) はスキップしない — テーブル未作成の隠蔽を防ぐ
+            // 「既に存在する」系のエラーはスキップして続行 (冪等運用)
+            // 42P01 (relation does not exist) 等、構造不整合のエラーはスキップしない
+            //   — テーブル未作成を隠蔽するとデータ破損の原因になるため
             const ignorable = new Set([
-              "42P07",  // relation already exists
-              "42701",  // column already exists
-              "42710",  // object already exists
-              "23505",  // duplicate key (migration already recorded)
+              "42P07",  // duplicate_table (relation already exists)
+              "42701",  // duplicate_column
+              "42710",  // duplicate_object (index, type, etc.)
+              "42P06",  // duplicate_schema
+              "42P04",  // duplicate_database
+              "23505",  // unique_violation (duplicate key)
+              "42P16",  // invalid_table_definition (PK すでにある等、冪等ケース)
             ]);
             if (code && ignorable.has(code)) {
               console.log(`[migrate]   Skipped (${code}): ${stmt.slice(0, 80)}...`);
