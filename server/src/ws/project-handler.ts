@@ -27,6 +27,7 @@ export interface ProjectWsUserData {
 
 interface ClientMessage {
   type: string;
+  request_id?: string;
   module?: string;
   action?: string;
   payload?: Record<string, unknown>;
@@ -112,6 +113,7 @@ export async function handleProjectWsMessage(
       );
       send(ws, {
         type: "module_response",
+        request_id: msg.request_id,
         module: msg.module,
         action: msg.action,
         payload: result,
@@ -119,6 +121,7 @@ export async function handleProjectWsMessage(
     } catch (err) {
       send(ws, {
         type: "error",
+        request_id: msg.request_id,
         code: "command_error",
         message: (err as Error).message,
         module: msg.module,
