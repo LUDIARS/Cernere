@@ -24,6 +24,14 @@ export interface ToolJwtClaims {
   exp: number;
 }
 
+export interface ProjectJwtClaims {
+  sub: string;      // client_id
+  projectKey: string;
+  tokenType: "project";
+  iat: number;
+  exp: number;
+}
+
 export function generateAccessToken(userId: string, role: string): string {
   return jwt.sign(
     { sub: userId, role },
@@ -44,6 +52,26 @@ export function generateToolToken(toolClientId: string, ownerUserId: string, sco
     config.jwtSecret,
     { expiresIn: `${ACCESS_TOKEN_MINUTES}m` },
   );
+}
+
+export function generateProjectToken(clientId: string, projectKey: string): string {
+  return jwt.sign(
+    { sub: clientId, projectKey, tokenType: "project" },
+    config.jwtSecret,
+    { expiresIn: `${ACCESS_TOKEN_MINUTES}m` },
+  );
+}
+
+export function verifyProjectToken(token: string): ProjectJwtClaims {
+  try {
+    const claims = jwt.verify(token, config.jwtSecret) as ProjectJwtClaims;
+    if (claims.tokenType !== "project") {
+      throw AppError.unauthorized("Not a project token");
+    }
+    return claims;
+  } catch {
+    throw AppError.unauthorized("Invalid or expired project token");
+  }
 }
 
 export function generateMfaToken(userId: string, role: string): string {
