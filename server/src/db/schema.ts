@@ -156,7 +156,6 @@ export const userProfiles = pgTable("user_profiles", {
   bio: text("bio").notNull().default(""),
   expertise: jsonb("expertise").notNull().default([]),
   hobbies: jsonb("hobbies").notNull().default([]),
-  extra: jsonb("extra").notNull().default({}),
   privacy: jsonb("privacy").notNull().default({
     bio: true, roleTitle: true, expertise: true, hobbies: true,
   }),
