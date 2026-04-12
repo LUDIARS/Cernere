@@ -84,6 +84,7 @@ impl SessionRegistry {
             .collect()
     }
 
+    #[allow(dead_code)]
     pub fn active_session_count(&self) -> usize {
         self.sessions.len()
     }
@@ -93,7 +94,9 @@ impl SessionRegistry {
 
 /// Cernere に WebSocket 接続中のサービスのエントリ
 pub struct ServiceConnectionEntry {
+    #[allow(dead_code)]
     pub service_id: Uuid,
+    #[allow(dead_code)]
     pub service_code: String,
     pub sender: Arc<Mutex<SplitSink<WebSocket, Message>>>,
 }
@@ -143,6 +146,7 @@ impl ServiceConnectionRegistry {
         self.connections.get(service_code).map(|e| e.sender.clone())
     }
 
+    #[allow(dead_code)]
     pub fn connected_codes(&self) -> Vec<String> {
         self.connections.iter().map(|e| e.key().clone()).collect()
     }
@@ -166,6 +170,7 @@ impl ServiceConnectionRegistry {
     }
 
     /// 全接続サービスに user_revoke を送信
+    #[allow(dead_code)]
     pub async fn broadcast_revoke(&self, user_id: &Uuid) {
         let msg = ServiceServerMessage::UserRevoke {
             user_id: *user_id,

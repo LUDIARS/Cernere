@@ -9,7 +9,7 @@ pub struct User {
     pub github_id: Option<i64>,
     pub login: String,
     pub display_name: String,
-    pub avatar_url: String,
+    pub avatar_url: Option<String>,
     pub email: Option<String>,
     pub role: String,
     pub password_hash: Option<String>,
@@ -84,7 +84,7 @@ pub struct UserResponse {
     pub github_id: Option<i64>,
     pub login: String,
     pub display_name: String,
-    pub avatar_url: String,
+    pub avatar_url: Option<String>,
     pub email: Option<String>,
     pub role: String,
     pub has_google_auth: bool,
@@ -122,6 +122,7 @@ impl From<User> for UserResponse {
 }
 
 /// 検証コード (SMS / メール OTP)
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct VerificationCode {
     pub id: Uuid,
@@ -165,7 +166,7 @@ pub struct OrganizationMemberWithUser {
     pub joined_at: DateTime<Utc>,
     pub login: String,
     pub display_name: String,
-    pub avatar_url: String,
+    pub avatar_url: Option<String>,
     pub email: Option<String>,
     pub last_login_at: Option<DateTime<Utc>>,
 }
@@ -206,7 +207,7 @@ pub struct MemberResponse {
     pub joined_at: String,
     pub login: String,
     pub display_name: String,
-    pub avatar_url: String,
+    pub avatar_url: Option<String>,
     pub email: Option<String>,
     pub last_login_at: Option<String>,
 }
@@ -528,6 +529,7 @@ pub struct ServiceTicket {
 }
 
 /// サービスアクセスレスポンス (ブラウザに返す)
+#[allow(dead_code)]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceAccessResponse {

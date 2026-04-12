@@ -113,6 +113,7 @@ pub struct UserFullState {
 // ── Redis キー規約 ──────────────────────────────────
 
 const USER_STATE_PREFIX: &str = "ustate:";
+#[allow(dead_code)]
 const MODULE_STATE_PREFIX: &str = "mstate:";
 /// ユーザステートの TTL: セッション TTL と同じ 7 日
 const STATE_TTL_SECS: u64 = 7 * 24 * 60 * 60;
@@ -121,6 +122,7 @@ fn user_state_key(user_id: &Uuid) -> String {
     format!("{}{}", USER_STATE_PREFIX, user_id)
 }
 
+#[allow(dead_code)]
 fn module_state_key(user_id: &Uuid, module: &str) -> String {
     format!("{}{}:{}", MODULE_STATE_PREFIX, user_id, module)
 }
@@ -158,6 +160,7 @@ impl RedisClient {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn delete_user_state(&self, user_id: &Uuid) -> Result<()> {
         let mut conn = self.conn().clone();
         let key = user_state_key(user_id);
@@ -189,6 +192,7 @@ impl RedisClient {
 
     // ── モジュール Data State ───────────────────────
 
+    #[allow(dead_code)]
     pub async fn set_module_state(
         &self,
         user_id: &Uuid,
@@ -204,6 +208,7 @@ impl RedisClient {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn get_module_state(
         &self,
         user_id: &Uuid,
@@ -225,6 +230,7 @@ impl RedisClient {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn delete_module_state(&self, user_id: &Uuid, module: &str) -> Result<()> {
         let mut conn = self.conn().clone();
         let key = module_state_key(user_id, module);

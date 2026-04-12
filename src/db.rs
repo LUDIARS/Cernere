@@ -6,7 +6,7 @@ use crate::error::{AppError, Result};
 use crate::models::{
     DataOptOut, Organization, OrganizationMember, OrganizationMemberWithUser, Project,
     ProjectDefinition, ProjectSetting, ProjectSummary, RefreshSession, ToolClient, User,
-    UserProfile, VerificationCode,
+    UserProfile,
 };
 
 // ── User ────────────────────────────────────────────
@@ -221,6 +221,7 @@ pub async fn verify_code(
     Ok(result.rows_affected() > 0)
 }
 
+#[allow(dead_code)]
 pub async fn cleanup_expired_codes(pool: &PgPool) -> Result<u64> {
     let now = Utc::now();
     let result = sqlx::query("DELETE FROM verification_codes WHERE expires_at < $1 OR used = TRUE")
@@ -1146,6 +1147,7 @@ pub async fn create_service_ticket(
     Ok(ticket)
 }
 
+#[allow(dead_code)]
 pub async fn consume_service_ticket(pool: &PgPool, ticket_code: &str) -> Result<Option<ServiceTicket>> {
     let now = Utc::now();
     let ticket = sqlx::query_as::<_, ServiceTicket>(
@@ -1160,6 +1162,7 @@ pub async fn consume_service_ticket(pool: &PgPool, ticket_code: &str) -> Result<
     Ok(ticket)
 }
 
+#[allow(dead_code)]
 pub async fn cleanup_expired_tickets(pool: &PgPool) -> Result<u64> {
     let now = Utc::now();
     let result = sqlx::query("DELETE FROM service_tickets WHERE expires_at < $1 OR consumed = TRUE")
