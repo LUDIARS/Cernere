@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "npm run env:gen && npx dotenv-cli -- concurrently -n api,web -c green,cyan \"cargo watch -x run\" \"npx dotenv-cli -- npm run dev --prefix frontend\"",
-    "dev:server": "npx dotenv-cli -- cargo watch -x run",
+    "dev": "npm run env:gen && npx dotenv-cli -- concurrently -n api,web -c green,cyan \"npm run dev --prefix server\" \"npx dotenv-cli -- npm run dev --prefix frontend\"",
+    "dev:server": "npx dotenv-cli -- npm run dev --prefix server",
     "dev:front": "npx dotenv-cli -- npm run dev --prefix frontend",
     "env:setup": "npx tsx packages/env-cli/src/cli.ts setup",
     "env:test": "npx tsx packages/env-cli/src/cli.ts test",

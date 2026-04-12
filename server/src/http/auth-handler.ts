@@ -10,7 +10,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import {
-  generateTokenPair, generateToolToken, verifyToken, extractBearerToken, REFRESH_TOKEN_DAYS,
+  generateTokenPair, generateToolToken, generateProjectToken, verifyToken, verifyProjectToken, extractBearerToken, REFRESH_TOKEN_DAYS,
 } from "../auth/jwt.js";
 import { checkRateLimit, redis } from "../redis.js";
 
@@ -87,6 +87,10 @@ async function login(p: Record<string, unknown>): Promise<RouteResult> {
   if (p.grant_type === "client_credentials") {
     return toolLogin(p.client_id as string, p.client_secret as string);
   }
+  // Project login (managed_projects)
+  if (p.grant_type === "project_credentials") {
+    return projectLogin(p.client_id as string, p.client_secret as string);
+  }
 
   const email = p.email as string | undefined;
   const password = p.password as string | undefined;
@@ -155,8 +159,26 @@ async function logout(p: Record<string, unknown>): Promise<RouteResult> {
 }
 
 async function verify(p: Record<string, unknown>): Promise<RouteResult> {
+  const token = p.token as string;
+  // プロジェクトトークンとして検証
   try {
-    const claims = verifyToken(p.token as string);
+    const claims = verifyProjectToken(token);
+    const rows = await db.select().from(schema.managedProjects)
+      .where(eq(schema.managedProjects.clientId, claims.sub)).limit(1);
+    const project = rows[0];
+    if (!project || !project.isActive) return { status: "200 OK", data: { valid: false } };
+    return {
+      status: "200 OK",
+      data: {
+        valid: true,
+        tokenType: "project",
+        project: { key: project.key, name: project.name, clientId: project.clientId },
+      },
+    };
+  } catch { /* fall through to user token */ }
+  // ユーザートークンとして検証
+  try {
+    const claims = verifyToken(token);
     const rows = await db.select().from(schema.users)
       .where(eq(schema.users.id, claims.sub)).limit(1);
     if (!rows[0]) return { status: "200 OK", data: { valid: false } };
@@ -164,6 +186,7 @@ async function verify(p: Record<string, unknown>): Promise<RouteResult> {
       status: "200 OK",
       data: {
         valid: true,
+        tokenType: "user",
         user: { id: rows[0].id, name: rows[0].displayName, email: rows[0].email, role: rows[0].role },
       },
     };
@@ -214,5 +237,31 @@ async function toolLogin(clientId: string | undefined, clientSecret: string | un
   return {
     status: "200 OK",
     data: { tokenType: "tool", accessToken, expiresIn: 3600, client: { id: tc.id, name: tc.name, clientId: tc.clientId, ownerUserId: tc.ownerUserId, scopes, isActive: tc.isActive } },
+  };
+}
+
+async function projectLogin(clientId: string | undefined, clientSecret: string | undefined): Promise<RouteResult> {
+  if (!clientId || !clientSecret) throw new Error("client_id and client_secret are required");
+  await checkRateLimit(`project_login:${clientId}`, 10, 300);
+  const rows = await db.select().from(schema.managedProjects)
+    .where(eq(schema.managedProjects.clientId, clientId)).limit(1);
+  const project = rows[0];
+  if (!project || !project.isActive) throw new Error("Unauthorized: Invalid project credentials");
+  const valid = await bcrypt.compare(clientSecret, project.clientSecretHash);
+  if (!valid) throw new Error("Unauthorized: Invalid project credentials");
+  const accessToken = generateProjectToken(project.clientId, project.key);
+  return {
+    status: "200 OK",
+    data: {
+      tokenType: "project",
+      accessToken,
+      expiresIn: 3600,
+      project: {
+        key: project.key,
+        name: project.name,
+        clientId: project.clientId,
+        isActive: project.isActive,
+      },
+    },
   };
 }
