@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::app_state::AppState;
 use crate::error::{AppError, Result};
 use crate::models::{
-    JwtClaims, MfaChallengeResponse, Session, TokenResponse, ToolClientResponse, ToolJwtClaims,
+    JwtClaims, Session, TokenResponse, ToolClientResponse, ToolJwtClaims,
     User, UserResponse,
 };
 use crate::{db, SESSION_TTL_SECS};
@@ -175,7 +175,7 @@ pub async fn register(
         github_id: None,
         login: req.name.clone(),
         display_name: req.name,
-        avatar_url: String::new(),
+        avatar_url: None,
         email: Some(req.email),
         role: role.to_string(),
         password_hash: Some(password_hash),
@@ -571,7 +571,7 @@ pub async fn google_callback(
             existing.google_token_expires_at = Some(token_expires_at);
             existing.google_scopes = Some(serde_json::to_value(&scopes).unwrap());
             existing.display_name = user_info.name;
-            existing.avatar_url = user_info.picture.unwrap_or_default();
+            existing.avatar_url = user_info.picture.clone();
             existing.last_login_at = Some(now);
             existing.updated_at = now;
             db::upsert_user(&state.db, &existing).await?;
@@ -585,7 +585,7 @@ pub async fn google_callback(
                 github_id: None,
                 login: user_info.email.clone(),
                 display_name: user_info.name,
-                avatar_url: user_info.picture.unwrap_or_default(),
+                avatar_url: user_info.picture,
                 email: Some(user_info.email),
                 role: role.to_string(),
                 password_hash: None,
@@ -764,7 +764,7 @@ pub async fn github_callback(
         Some(mut existing) => {
             existing.login = gh_user.login;
             existing.display_name = gh_user.name.unwrap_or_else(|| existing.login.clone());
-            existing.avatar_url = gh_user.avatar_url;
+            existing.avatar_url = Some(gh_user.avatar_url);
             existing.email = gh_user.email;
             existing.last_login_at = Some(now);
             existing.updated_at = now;
@@ -779,7 +779,7 @@ pub async fn github_callback(
                 github_id: Some(gh_user.id),
                 login: gh_user.login.clone(),
                 display_name: gh_user.name.unwrap_or(gh_user.login),
-                avatar_url: gh_user.avatar_url,
+                avatar_url: Some(gh_user.avatar_url),
                 email: gh_user.email,
                 role: role.to_string(),
                 password_hash: None,

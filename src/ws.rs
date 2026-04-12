@@ -481,7 +481,7 @@ async fn handle_guest_auth_command(
                 github_id: None,
                 login: name.to_string(),
                 display_name: name.to_string(),
-                avatar_url: String::new(),
+                avatar_url: None,
                 email: Some(email.to_string()),
                 role: role.to_string(),
                 password_hash: Some(password_hash),
@@ -741,6 +741,7 @@ async fn send_message(
 
 #[derive(Debug, Deserialize)]
 pub struct ServiceWsQuery {
+    #[allow(dead_code)]
     pub service_code: Option<String>,
 }
 
@@ -772,6 +773,7 @@ async fn send_service_message(
 async fn handle_service_ws(state: AppState, socket: WebSocket) {
     let (sender, mut receiver) = socket.split();
     let sender = Arc::new(Mutex::new(sender));
+    #[allow(unused_assignments)]
     let mut authenticated_code: Option<String> = None;
 
     // 最初のメッセージで認証を待つ (10秒タイムアウト)

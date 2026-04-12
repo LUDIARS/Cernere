@@ -20,6 +20,7 @@ use crate::error::{AppError, Result};
 use crate::models::{MfaChallengeResponse, MfaClaims, TokenResponse, UserResponse};
 use crate::db;
 
+#[allow(dead_code)]
 const OTP_LENGTH: usize = 6;
 const OTP_EXPIRY_MINUTES: i64 = 5;
 const MFA_TOKEN_MINUTES: i64 = 10;
