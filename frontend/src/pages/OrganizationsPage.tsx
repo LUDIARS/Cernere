@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { wsClient } from "../lib/ws-client";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 interface Organization {
   id: string;
@@ -36,6 +37,7 @@ interface PresenceEvent {
 export function OrganizationsPage() {
   const { user, wsConnected } = useAuth();
   const isAdmin = user?.role === "admin";
+  const isMobile = useIsMobile();
 
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [selectedOrg, setSelectedOrg] = useState<Organization | null>(null);
@@ -196,45 +198,78 @@ export function OrganizationsPage() {
     }
   };
 
-  return (
-    <div style={{ display: "flex", height: "100%" }}>
-        {/* Sidebar: org list */}
-        <div style={{ width: 260, borderRight: "1px solid var(--border)", background: "var(--bg-surface)", overflow: "auto" }}>
-          <div style={{ padding: "0.75rem 1rem", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: "0.75rem", fontWeight: 600, textTransform: "uppercase", color: "var(--text-muted)" }}>
-              My Organizations
-            </span>
-            {isAdmin && (
-              <button className="primary" onClick={() => setShowCreate(!showCreate)} style={{ fontSize: "0.75rem", padding: "0.15rem 0.5rem" }}>
-                {showCreate ? "Cancel" : "+ Add"}
-              </button>
-            )}
+  const orgPicker = (
+    <div style={{ display: "flex", gap: "0.5rem", padding: "0.75rem", borderBottom: "1px solid var(--border)", background: "var(--bg-surface)" }}>
+      <select
+        value={selectedOrg?.id ?? ""}
+        onChange={(e) => {
+          const org = orgs.find((o) => o.id === e.target.value);
+          if (org) selectOrg(org);
+        }}
+        style={{
+          flex: 1, padding: "0.4rem 0.5rem", fontSize: "0.85rem", borderRadius: "4px",
+          border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)",
+        }}
+      >
+        <option value="" disabled>
+          {loading ? "Loading..." : orgs.length === 0 ? "No organizations" : "-- Select an organization --"}
+        </option>
+        {orgs.map((org) => (
+          <option key={org.id} value={org.id}>{org.name}</option>
+        ))}
+      </select>
+      {isAdmin && (
+        <button className="primary" onClick={() => setShowCreate(!showCreate)} style={{
+          fontSize: "0.8rem", padding: "0.25rem 0.6rem", whiteSpace: "nowrap",
+        }}>
+          {showCreate ? "Cancel" : "+ Add"}
+        </button>
+      )}
+    </div>
+  );
+
+  const sidebar = (
+    <div style={{ width: 260, borderRight: "1px solid var(--border)", background: "var(--bg-surface)", overflow: "auto" }}>
+      <div style={{ padding: "0.75rem 1rem", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: "0.75rem", fontWeight: 600, textTransform: "uppercase", color: "var(--text-muted)" }}>
+          My Organizations
+        </span>
+        {isAdmin && (
+          <button className="primary" onClick={() => setShowCreate(!showCreate)} style={{ fontSize: "0.75rem", padding: "0.15rem 0.5rem" }}>
+            {showCreate ? "Cancel" : "+ Add"}
+          </button>
+        )}
+      </div>
+      {loading ? (
+        <p style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>Loading...</p>
+      ) : orgs.length === 0 ? (
+        <p style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>
+          {isAdmin ? "Create your first organization" : "No organizations yet"}
+        </p>
+      ) : (
+        orgs.map((org) => (
+          <div
+            key={org.id}
+            onClick={() => selectOrg(org)}
+            style={{
+              padding: "0.5rem 1rem", cursor: "pointer",
+              background: selectedOrg?.id === org.id ? "var(--bg-hover, rgba(255,255,255,0.05))" : "transparent",
+            }}
+          >
+            <div style={{ fontSize: "0.85rem", fontWeight: 500 }}>{org.name}</div>
+            <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{org.slug}</div>
           </div>
-          {loading ? (
-            <p style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>Loading...</p>
-          ) : orgs.length === 0 ? (
-            <p style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>
-              {isAdmin ? "Create your first organization" : "No organizations yet"}
-            </p>
-          ) : (
-            orgs.map((org) => (
-              <div
-                key={org.id}
-                onClick={() => selectOrg(org)}
-                style={{
-                  padding: "0.5rem 1rem", cursor: "pointer",
-                  background: selectedOrg?.id === org.id ? "var(--bg-hover, rgba(255,255,255,0.05))" : "transparent",
-                }}
-              >
-                <div style={{ fontSize: "0.85rem", fontWeight: 500 }}>{org.name}</div>
-                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{org.slug}</div>
-              </div>
-            ))
-          )}
-        </div>
+        ))
+      )}
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", height: "100%", width: "100%" }}>
+        {isMobile ? orgPicker : sidebar}
 
         {/* Main */}
-        <div style={{ flex: 1, overflow: "auto", padding: "1.5rem" }}>
+        <div style={{ flex: 1, overflow: "auto", padding: isMobile ? "1rem" : "1.5rem", width: "100%", minWidth: 0 }}>
           {error && (
             <div style={{ padding: "0.5rem 0.75rem", marginBottom: "1rem", borderRadius: "4px", background: "rgba(248,81,73,0.1)", border: "1px solid var(--red)", fontSize: "0.85rem", color: "var(--red)" }}>
               {error}
@@ -245,7 +280,7 @@ export function OrganizationsPage() {
           {showCreate && isAdmin && (
             <div style={{ marginBottom: "1.5rem", padding: "1rem", background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "6px" }}>
               <h3 style={{ fontSize: "0.9rem", fontWeight: 600, marginBottom: "0.75rem" }}>New Organization</h3>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "0.75rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "0.75rem", marginBottom: "0.75rem" }}>
                 <div>
                   <label style={labelStyle}>Name</label>
                   <input value={newName} onChange={(e) => setNewName(e.target.value)} style={inputStyle} placeholder="My Organization" />
@@ -283,7 +318,7 @@ export function OrganizationsPage() {
               {/* Add member form */}
               {showAddMember && (
                 <div style={{ marginBottom: "1rem", padding: "0.75rem", background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "4px" }}>
-                  <div style={{ display: "flex", gap: "0.5rem", alignItems: "flex-end" }}>
+                  <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: "0.5rem", alignItems: isMobile ? "stretch" : "flex-end" }}>
                     <div style={{ flex: 1, position: "relative" }}>
                       <label style={labelStyle}>ユーザー検索</label>
                       <input
