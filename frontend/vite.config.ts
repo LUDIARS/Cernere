@@ -20,6 +20,11 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
       },
+      "/ws/project": {
+        target: backendUrl,
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
 });
