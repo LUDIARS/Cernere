@@ -16,6 +16,13 @@ import {
   handleWsClose,
 } from "./ws/handler.js";
 import { resolveWsAuth } from "./ws/auth.js";
+import {
+  handleProjectWsOpen,
+  handleProjectWsMessage,
+  handleProjectWsClose,
+  resolveProjectWsAuth,
+  type ProjectWsUserData,
+} from "./ws/project-handler.js";
 
 // ── uWS UserData (WS 接続ごとに保持) ──────────────────────
 
@@ -99,6 +106,49 @@ export function createApp() {
     open: (ws) => { handleWsOpen(ws); },
     message: (ws, message) => { handleWsMessage(ws, message); },
     close: (ws) => { handleWsClose(ws); },
+  });
+
+  // ── WebSocket: /ws/project (プロジェクト認証経由) ───────
+  app.ws<ProjectWsUserData>("/ws/project", {
+    maxPayloadLength: 16 * 1024 * 1024,
+    idleTimeout: 120,
+
+    upgrade: async (res, req, context) => {
+      const query = req.getQuery();
+      const params = new URLSearchParams(query);
+      const token = params.get("token") ?? undefined;
+
+      const secWsKey = req.getHeader("sec-websocket-key");
+      const secWsProtocol = req.getHeader("sec-websocket-protocol");
+      const secWsExtensions = req.getHeader("sec-websocket-extensions");
+
+      let aborted = false;
+      res.onAborted(() => { aborted = true; });
+
+      const claims = await resolveProjectWsAuth(token);
+      if (aborted) return;
+
+      if (!claims) {
+        res.cork(() => {
+          res.writeStatus("401 Unauthorized").end("Invalid project token");
+        });
+        return;
+      }
+
+      const userData: ProjectWsUserData = {
+        clientId: claims.sub,
+        projectKey: claims.projectKey,
+        connectionId: `proj_${crypto.randomUUID()}`,
+      };
+
+      res.cork(() => {
+        res.upgrade(userData, secWsKey, secWsProtocol, secWsExtensions, context);
+      });
+    },
+
+    open: (ws) => { handleProjectWsOpen(ws); },
+    message: (ws, message) => { handleProjectWsMessage(ws, message); },
+    close: (ws) => { handleProjectWsClose(ws); },
   });
 
   // ── Auth REST: POST /api/auth/:action ───────────────────
