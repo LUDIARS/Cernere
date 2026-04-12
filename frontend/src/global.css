@@ -6,6 +6,18 @@
   padding: 0;
 }
 
+html {
+  overflow-x: hidden;
+}
+
+html, body, #root {
+  width: 100%;
+  max-width: 100vw;
+  min-width: 320px;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
 :root {
   --bg: #0d1117;
   --bg-surface: #161b22;
@@ -29,7 +41,7 @@ body {
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 a {
