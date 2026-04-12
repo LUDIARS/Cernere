@@ -10,6 +10,7 @@ import { config } from "./config.js";
 import { handleAuthRoute } from "./http/auth-handler.js";
 import { handleCompositeRoute } from "./http/composite-handler.js";
 import { handleOAuthRoute } from "./http/oauth-handler.js";
+import { handleProfileRoute } from "./http/profile-handler.js";
 import {
   handleWsOpen,
   handleWsMessage,
@@ -155,6 +156,43 @@ export function createApp() {
     } catch (err) {
       if (aborted) return;
       jsonResponse(res, "401 Unauthorized", { error: (err as Error).message });
+    }
+  });
+
+  // ── Profile REST: GET /api/profile/me ───────────────────
+  app.get("/api/profile/me", async (res, req) => {
+    const authHeader = req.getHeader("authorization") ?? "";
+    let aborted = false;
+    res.onAborted(() => { aborted = true; });
+
+    try {
+      const result = await handleProfileRoute("get", "", authHeader);
+      if (aborted) return;
+      jsonResponse(res, result.status, result.data);
+    } catch (err) {
+      if (aborted) return;
+      const msg = (err as Error).message;
+      const status = msg.includes("Unauthorized") ? "401 Unauthorized" : "400 Bad Request";
+      jsonResponse(res, status, { error: msg });
+    }
+  });
+
+  // ── Profile REST: PUT /api/profile/me ───────────────────
+  app.put("/api/profile/me", async (res, req) => {
+    const authHeader = req.getHeader("authorization") ?? "";
+    let aborted = false;
+    res.onAborted(() => { aborted = true; });
+
+    try {
+      const body = await readBody(res);
+      if (aborted) return;
+      const result = await handleProfileRoute("update", body, authHeader);
+      jsonResponse(res, result.status, result.data);
+    } catch (err) {
+      if (aborted) return;
+      const msg = (err as Error).message;
+      const status = msg.includes("Unauthorized") ? "401 Unauthorized" : "400 Bad Request";
+      jsonResponse(res, status, { error: msg });
     }
   });
 
