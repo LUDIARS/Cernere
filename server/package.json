@@ -14,7 +14,7 @@
     "ioredis": "^5.10.0",
     "jsonwebtoken": "^9.0.3",
     "postgres": "^3.4.8",
-    "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.51.0",
+    "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.63.0",
     "uuid": "^13.0.0",
     "zod": "^4.3.6"
   },
