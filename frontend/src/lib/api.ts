@@ -382,11 +382,22 @@ export interface OptOutRequest {
 
 export const optouts = {
   async list(): Promise<DataOptOutItem[]> {
+    // profile.list_optouts は userDataOptouts から全 serviceId (core + プロジェクト)
+    // を横断して返す
     return wsClient.sendCommand<DataOptOutItem[]>("profile", "list_optouts");
   },
 
   async create(body: OptOutRequest): Promise<{ message: string; optout: DataOptOutItem }> {
-    await wsClient.sendCommand("profile", "optout", body);
+    // プロジェクトの category_key は "module:xxx" 形式
+    if (body.categoryKey.startsWith("module:")) {
+      const moduleKey = body.categoryKey.slice("module:".length);
+      await wsClient.sendCommand("managed_project", "optout", {
+        projectKey: body.serviceId,
+        moduleKey,
+      });
+    } else {
+      await wsClient.sendCommand("profile", "optout", body);
+    }
     return {
       message: "Opt-out created",
       optout: { serviceId: body.serviceId, categoryKey: body.categoryKey, optedOutAt: new Date().toISOString() },
@@ -394,8 +405,37 @@ export const optouts = {
   },
 
   async remove(body: OptOutRequest): Promise<{ message: string }> {
-    await wsClient.sendCommand("profile", "remove_optout", body);
+    if (body.categoryKey.startsWith("module:")) {
+      const moduleKey = body.categoryKey.slice("module:".length);
+      await wsClient.sendCommand("managed_project", "remove_optout", {
+        projectKey: body.serviceId,
+        moduleKey,
+      });
+    } else {
+      await wsClient.sendCommand("profile", "remove_optout", body);
+    }
     return { message: "Opt-out removed" };
+  },
+};
+
+// ── Managed Project データ API ──────────────────
+
+export interface UserProjectData {
+  projectKey: string;
+  projectName: string;
+  schema: Record<string, { type: string; module?: string; description?: string }>;
+  data: Record<string, unknown> | null;
+}
+
+export const managedProjects = {
+  async myData(projectKey: string): Promise<UserProjectData> {
+    return wsClient.sendCommand<UserProjectData>("managed_project", "my_data", { projectKey });
+  },
+  async myDataAll(): Promise<UserProjectData[]> {
+    return wsClient.sendCommand<UserProjectData[]>("managed_project", "my_data_all");
+  },
+  async myOptouts(projectKey: string): Promise<DataOptOutItem[]> {
+    return wsClient.sendCommand<DataOptOutItem[]>("managed_project", "list_optouts", { projectKey });
   },
 };
 

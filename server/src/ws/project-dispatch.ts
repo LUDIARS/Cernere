@@ -22,7 +22,6 @@ interface ProfileUpdateParams {
   roleTitle?: string;
   expertise?: string[];
   hobbies?: string[];
-  extra?: Record<string, unknown>;
 }
 
 function requireStr(obj: Record<string, unknown>, key: string): string {
@@ -72,7 +71,6 @@ async function getUserProfile(p: ProfileGetParams): Promise<unknown> {
     roleTitle: profile?.roleTitle ?? "",
     expertise: profile?.expertise ?? [],
     hobbies: profile?.hobbies ?? [],
-    extra: profile?.extra ?? {},
     privacy: profile?.privacy ?? {
       bio: true, roleTitle: true, expertise: true, hobbies: true,
     },
@@ -102,7 +100,6 @@ async function updateUserProfile(p: ProfileUpdateParams): Promise<unknown> {
       bio: p.bio ?? "",
       expertise: p.expertise ?? [],
       hobbies: p.hobbies ?? [],
-      extra: p.extra ?? {},
       privacy: { bio: true, roleTitle: true, expertise: true, hobbies: true },
       createdAt: now, updatedAt: now,
     });
@@ -112,7 +109,6 @@ async function updateUserProfile(p: ProfileUpdateParams): Promise<unknown> {
     if (p.bio !== undefined) profileUpdates.bio = p.bio;
     if (p.expertise !== undefined) profileUpdates.expertise = p.expertise;
     if (p.hobbies !== undefined) profileUpdates.hobbies = p.hobbies;
-    if (p.extra !== undefined) profileUpdates.extra = p.extra;
     if (Object.keys(profileUpdates).length > 1) {
       await db.update(schema.userProfiles).set(profileUpdates)
         .where(eq(schema.userProfiles.userId, userId));

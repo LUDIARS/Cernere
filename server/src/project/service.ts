@@ -288,3 +288,69 @@ export async function removeModuleOptout(userId: string, projectKey: string, mod
   ));
   return { message: "Opt-out removed", projectKey, moduleKey };
 }
+
+// ── User Data per Project ───────────────────────────────────
+
+/**
+ * プロジェクトに保存されている自分のデータを取得する。
+ * Data ページで「このプロジェクトが私のどんなデータを持っているか」を
+ * ユーザーが確認するために使う。
+ */
+export async function getUserProjectData(userId: string, projectKey: string): Promise<{
+  projectKey: string;
+  projectName: string;
+  schema: Record<string, { type: string; module?: string; description?: string }>;
+  data: Record<string, unknown> | null;
+}> {
+  const proj = await db.select().from(dbSchema.managedProjects)
+    .where(eq(dbSchema.managedProjects.key, projectKey)).limit(1);
+  if (proj.length === 0) throw AppError.notFound("Project not found");
+
+  const definition = proj[0].schemaDefinition as ProjectDefinition;
+  const columns = definition.user_data?.columns ?? {};
+
+  // 安全な識別子チェック (SQLインジェクション対策)
+  if (!/^[a-zA-Z0-9_]+$/.test(projectKey)) {
+    throw AppError.badRequest("Invalid project key");
+  }
+  const tableName = `project_data_${projectKey}`;
+
+  // テーブルに保存されている自分のデータを取得
+  let data: Record<string, unknown> | null = null;
+  try {
+    const rows = await db.execute(sql.raw(
+      `SELECT * FROM ${tableName} WHERE user_id = '${userId.replace(/'/g, "''")}' LIMIT 1`,
+    )) as unknown as Array<Record<string, unknown>> | { rows: Array<Record<string, unknown>> };
+    const rowList = Array.isArray(data) ? data : (rows as { rows: Array<Record<string, unknown>> }).rows ?? rows;
+    if (Array.isArray(rowList) && rowList.length > 0) {
+      data = rowList[0];
+    }
+  } catch {
+    // テーブル未作成等は無視して null を返す
+    data = null;
+  }
+
+  return {
+    projectKey: proj[0].key,
+    projectName: proj[0].name,
+    schema: columns,
+    data,
+  };
+}
+
+/** 自分が有効化しているすべてのプロジェクトについて保持データを取得 */
+export async function listAllUserProjectData(userId: string) {
+  const projects = await db.select().from(dbSchema.managedProjects)
+    .where(eq(dbSchema.managedProjects.isActive, true));
+
+  const result = [];
+  for (const proj of projects) {
+    try {
+      const data = await getUserProjectData(userId, proj.key);
+      result.push(data);
+    } catch {
+      // 個別プロジェクトの取得失敗はスキップ
+    }
+  }
+  return result;
+}

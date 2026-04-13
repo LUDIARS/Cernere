@@ -334,7 +334,7 @@ async function profileCmd(userId: string, action: string, p?: Record<string, unk
       if (rows.length === 0) {
         return {
           userId, roleTitle: "", bio: "", expertise: [], hobbies: [],
-          extra: {}, privacy: { bio: true, roleTitle: true, expertise: true, hobbies: true },
+          privacy: { bio: true, roleTitle: true, expertise: true, hobbies: true },
         };
       }
       return rows[0];
@@ -351,7 +351,6 @@ async function profileCmd(userId: string, action: string, p?: Record<string, unk
           bio: optStr(p, "bio") ?? "",
           expertise: (p?.expertise as string[]) ?? [],
           hobbies: (p?.hobbies as string[]) ?? [],
-          extra: (p?.extra as Record<string, unknown>) ?? {},
           privacy: { bio: true, roleTitle: true, expertise: true, hobbies: true },
           createdAt: now, updatedAt: now,
         });
@@ -361,7 +360,6 @@ async function profileCmd(userId: string, action: string, p?: Record<string, unk
         if (p?.bio !== undefined) updates.bio = p.bio;
         if (p?.expertise !== undefined) updates.expertise = p.expertise;
         if (p?.hobbies !== undefined) updates.hobbies = p.hobbies;
-        if (p?.extra !== undefined) updates.extra = p.extra;
         await db.update(schema.userProfiles).set(updates)
           .where(eq(schema.userProfiles.userId, userId));
       }
@@ -455,6 +453,10 @@ async function managedProjectCmd(userId: string, action: string, p?: Record<stri
     case "remove_optout": {
       return svc.removeModuleOptout(userId, requireStr(p, "projectKey"), requireStr(p, "moduleKey"));
     }
+    case "my_data":
+      return svc.getUserProjectData(userId, requireStr(p, "projectKey"));
+    case "my_data_all":
+      return svc.listAllUserProjectData(userId);
     default:
       throw AppError.badRequest(`Unknown managed_project action: ${action}`);
   }
