@@ -43,6 +43,13 @@ export async function dispatchProjectCommand(
       return getUserProfile(payload as ProfileGetParams);
     case "profile.update":
       return updateUserProfile(payload as ProfileUpdateParams);
+    // ─── auth (embedded SPA login for mobile; CORS-free via project WS) ───
+    case "auth.login":
+    case "auth.register":
+    case "auth.mfa-verify": {
+      const { executeCompositeAction } = await import("../http/composite-handler.js");
+      return executeCompositeAction(action as "login" | "register" | "mfa-verify", payload);
+    }
     default:
       throw new Error(`Unknown command: ${module}.${action} (project: ${projectKey})`);
   }
