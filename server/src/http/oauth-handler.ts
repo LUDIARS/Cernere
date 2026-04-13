@@ -12,6 +12,7 @@ import * as schema from "../db/schema.js";
 import { config } from "../config.js";
 import { generateTokenPair, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
 import { redis, SESSION_TTL_SECS } from "../redis.js";
+import { logAuthEvent } from "../logging/auth-logger.js";
 
 const CSRF_COOKIE = "cernere_csrf_state";
 const SESSION_COOKIE = "ars_session";
@@ -52,6 +53,14 @@ export function handleOAuthRoute(
 
   const query = req.getQuery();
   const cookieHeader = req.getHeader("cookie") ?? "";
+  const userAgent = req.getHeader("user-agent") ?? undefined;
+  let ip: string | undefined;
+  try {
+    ip = Buffer.from(res.getRemoteAddressAsText()).toString() || undefined;
+  } catch {
+    ip = undefined;
+  }
+  const ctx = { ip, userAgent };
 
   // Composite origin (外部サービスからの認証委譲時に指定される)
   const queryParams = new URLSearchParams(query);
@@ -63,15 +72,23 @@ export function handleOAuthRoute(
       if (provider === "github" && action === "login") {
         await githubLogin(res, aborted, compositeOrigin);
       } else if (provider === "github" && action === "callback") {
-        await githubCallback(res, query, cookieHeader, aborted);
+        await githubCallback(res, query, cookieHeader, aborted, ctx);
       } else if (provider === "google" && action === "login") {
         await googleLogin(res, aborted, compositeOrigin);
       } else if (provider === "google" && action === "callback") {
-        await googleCallback(res, query, cookieHeader, aborted);
+        await googleCallback(res, query, cookieHeader, aborted, ctx);
       }
     } catch (err) {
+      const message = (err as Error).message;
+      logAuthEvent({
+        event: "user.oauth.failed",
+        provider,
+        error: message,
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+      });
       if (aborted) return;
-      redirect(res, `${config.frontendUrl}?authError=${encodeURIComponent((err as Error).message)}`);
+      redirect(res, `${config.frontendUrl}?authError=${encodeURIComponent(message)}`);
     }
   })();
 }
@@ -97,7 +114,7 @@ async function githubLogin(res: uWS.HttpResponse, aborted: boolean, compositeOri
   ]);
 }
 
-async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader: string, aborted: boolean): Promise<void> {
+async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader: string, aborted: boolean, ctx: { ip?: string; userAgent?: string }): Promise<void> {
   const params = new URLSearchParams(query);
   const code = params.get("code");
   const stateParam = params.get("state");
@@ -149,6 +166,7 @@ async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader
     }
     await db.update(schema.users).set({ githubId: ghUser.id, updatedAt: now })
       .where(eq(schema.users.id, linkUserId));
+    logAuthEvent({ event: "user.oauth", userId: linkUserId, provider: "github", linked: true, ip: ctx.ip, userAgent: ctx.userAgent });
     if (aborted) return;
     redirect(res, `${frontend}?linked=github`);
     return;
@@ -192,6 +210,8 @@ async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader
       user: { id: userId, displayName: ghUser.name ?? ghUser.login, email: ghUser.email, role: userRole },
     }), "EX", 60);
 
+    logAuthEvent({ event: "user.oauth", userId, email: ghUser.email ?? undefined, provider: "github", composite: true, ip: ctx.ip, userAgent: ctx.userAgent });
+
     // composite:<origin>:<uuid> から origin を抽出
     const compositeOrigin = stateParam!.split(":").slice(1, -1).join(":");
     if (aborted) return;
@@ -207,6 +227,8 @@ async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader
     id: sessionId, userId, expiresAt: new Date(Date.now() + SESSION_TTL_SECS * 1000).toISOString(),
     accessToken: tokenData.access_token,
   }), "EX", SESSION_TTL_SECS);
+
+  logAuthEvent({ event: "user.oauth", userId, email: ghUser.email ?? undefined, provider: "github", ip: ctx.ip, userAgent: ctx.userAgent });
 
   if (aborted) return;
   redirect(res, "/", [
@@ -239,7 +261,7 @@ async function googleLogin(res: uWS.HttpResponse, aborted: boolean, compositeOri
   ]);
 }
 
-async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader: string, aborted: boolean): Promise<void> {
+async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader: string, aborted: boolean, ctx: { ip?: string; userAgent?: string }): Promise<void> {
   const params = new URLSearchParams(query);
   const code = params.get("code");
   const stateParam = params.get("state");
@@ -321,6 +343,8 @@ async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader
   await redis.set(`authcode:${authCode}`, JSON.stringify({
     accessToken, refreshToken, user: { id: userId, displayName: gUser.name, email: gUser.email, role: userRole },
   }), "EX", authCodeTtl);
+
+  logAuthEvent({ event: "user.oauth", userId, email: gUser.email, provider: "google", composite: isCompositeGoogle, ip: ctx.ip, userAgent: ctx.userAgent });
 
   if (aborted) return;
 

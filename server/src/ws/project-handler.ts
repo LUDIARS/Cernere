@@ -18,6 +18,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { verifyProjectToken, type ProjectJwtClaims } from "../auth/jwt.js";
+import { logProjectWsConnect, logProjectWsDisconnect } from "../logging/auth-logger.js";
 
 export interface ProjectWsUserData {
   clientId: string;
@@ -78,6 +79,7 @@ export function handleProjectWsOpen(ws: uWS.WebSocket<ProjectWsUserData>): void 
     project_key: data.projectKey,
     client_id: data.clientId,
   });
+  logProjectWsConnect(data.projectKey, data.clientId, data.connectionId);
 
   const timer = setInterval(() => {
     send(ws, { type: "ping", ts: Math.floor(Date.now() / 1000) });
@@ -140,4 +142,5 @@ export function handleProjectWsClose(ws: uWS.WebSocket<ProjectWsUserData>): void
     clearInterval(timer);
     pingTimers.delete(data.connectionId);
   }
+  logProjectWsDisconnect(data.projectKey, data.clientId, data.connectionId);
 }
