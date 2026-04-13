@@ -34,6 +34,18 @@ export async function handleCompositeRoute(
   }
 }
 
+/** project WS から呼ばれる auth コマンド用のエントリポイント (同じロジックを再利用) */
+export async function executeCompositeAction(
+  action: "login" | "register" | "mfa-verify",
+  payload: Record<string, unknown>,
+): Promise<unknown> {
+  switch (action) {
+    case "login":      return (await compositeLogin(payload)).data;
+    case "register":   return (await compositeRegister(payload)).data;
+    case "mfa-verify": return (await compositeMfaVerify(payload)).data;
+  }
+}
+
 function parseBody(body: string): Record<string, unknown> {
   if (!body) return {};
   try { return JSON.parse(body); } catch { return {}; }
