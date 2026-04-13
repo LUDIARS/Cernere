@@ -10,6 +10,7 @@ import bcrypt from "bcryptjs";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as dbSchema from "../db/schema.js";
+import { config } from "../config.js";
 import { AppError } from "../error.js";
 import { projectDefinitionSchema, type ProjectDefinition } from "./schema.js";
 import { migrateProjectSchema } from "./schema-migrator.js";
@@ -207,10 +208,15 @@ export async function updateProjectSchema(key: string, payload: unknown, userId?
   const oldColumns = oldDef?.user_data?.columns ?? {};
   const newColumns = definition.user_data?.columns ?? {};
 
+  // 新定義から消えたカラムは「論理削除」扱い (CLAUDE.md ルール: DROP しない)
+  // 旧定義をマージして _deleted: true フラグを立てる
   for (const colName of Object.keys(oldColumns)) {
     if (!(colName in newColumns)) {
       if (!definition.user_data) definition.user_data = { columns: {} };
-      definition.user_data.columns[colName] = oldColumns[colName];
+      definition.user_data.columns[colName] = {
+        ...oldColumns[colName],
+        _deleted: true,
+      };
     }
   }
 
@@ -268,15 +274,72 @@ export async function listModuleOptouts(userId: string, projectKey: string) {
     ));
 }
 
+/**
+ * プロジェクト・モジュール単位のオプトアウト。
+ * 1. userDataOptouts テーブルにレコード記録
+ * 2. project_data_{key} の該当モジュールのカラムを NULL にクリア
+ *    - 元の値は _deleted_columns JSONB に退避 (監査目的)
+ */
 export async function setModuleOptout(userId: string, projectKey: string, moduleKey: string) {
-  // category_key = "module:{moduleKey}" でモジュール単位のオプトアウトを記録
   const categoryKey = `module:${moduleKey}`;
+
+  // 1. オプトアウト記録
   await db.insert(dbSchema.userDataOptouts).values({
     userId,
     serviceId: projectKey,
     categoryKey,
   }).onConflictDoNothing();
-  return { message: "Opted out", projectKey, moduleKey };
+
+  // 2. 該当モジュールのデータを実削除 (NULL化 + _deleted_columns に退避)
+  const projRows = await db.select().from(dbSchema.managedProjects)
+    .where(eq(dbSchema.managedProjects.key, projectKey)).limit(1);
+  if (projRows.length === 0) {
+    return { message: "Opted out (no project)", projectKey, moduleKey };
+  }
+  const definition = projRows[0].schemaDefinition as ProjectDefinition;
+  const columns = definition.user_data?.columns ?? {};
+  const moduleCols = Object.entries(columns)
+    .filter(([, col]) => col.module === moduleKey && !col._deleted)
+    .map(([name]) => name);
+
+  if (moduleCols.length > 0 && /^[a-z][a-z0-9_]{1,62}$/.test(projectKey)) {
+    const tableName = `project_data_${projectKey}`;
+    const { default: postgres } = await import("postgres");
+    const sqlClient = postgres(config.databaseUrl, { max: 1 });
+    try {
+      // 既存の _deleted_columns をマージして、該当カラムの値を退避してから NULL 化
+      const selectCols = ["_deleted_columns", ...moduleCols]
+        .map((c) => `"${c}"`).join(", ");
+      const rows = await sqlClient.unsafe(
+        `SELECT ${selectCols} FROM "${tableName}" WHERE user_id = $1`,
+        [userId],
+      );
+      if (rows.length > 0) {
+        const current = (rows[0]._deleted_columns ?? {}) as Record<string, unknown>;
+        const backup: Record<string, unknown> = { ...current };
+        for (const c of moduleCols) {
+          if (rows[0][c] !== null && rows[0][c] !== undefined) {
+            backup[c] = rows[0][c];
+          }
+        }
+
+        // NULL 化 + _deleted_columns 更新
+        const setClauses = moduleCols.map((c, i) => `"${c}" = NULL`);
+        setClauses.push(`_deleted_columns = $${moduleCols.length + 1}`);
+        setClauses.push(`updated_at = NOW()`);
+        await sqlClient.unsafe(
+          `UPDATE "${tableName}" SET ${setClauses.join(", ")} WHERE user_id = $${moduleCols.length + 2}`,
+          [...moduleCols, JSON.stringify(backup), userId],
+        );
+      }
+    } catch (err) {
+      console.warn(`[optout] データ削除失敗 (${projectKey}/${moduleKey}):`, err);
+    } finally {
+      await sqlClient.end();
+    }
+  }
+
+  return { message: "Opted out", projectKey, moduleKey, deletedColumns: moduleCols };
 }
 
 export async function removeModuleOptout(userId: string, projectKey: string, moduleKey: string) {
@@ -286,6 +349,7 @@ export async function removeModuleOptout(userId: string, projectKey: string, mod
     eq(dbSchema.userDataOptouts.serviceId, projectKey),
     eq(dbSchema.userDataOptouts.categoryKey, categoryKey),
   ));
+  // 注: 削除済みのデータは復元しない (オプトアウト撤回後も以前のデータは戻らない)
   return { message: "Opt-out removed", projectKey, moduleKey };
 }
 
@@ -353,4 +417,16 @@ export async function listAllUserProjectData(userId: string) {
     }
   }
   return result;
+}
+
+/** ユーザーがオプトアウト中のモジュールか判定 */
+export async function isOptedOut(userId: string, projectKey: string, moduleKey: string): Promise<boolean> {
+  const rows = await db.select({ userId: dbSchema.userDataOptouts.userId })
+    .from(dbSchema.userDataOptouts)
+    .where(and(
+      eq(dbSchema.userDataOptouts.userId, userId),
+      eq(dbSchema.userDataOptouts.serviceId, projectKey),
+      eq(dbSchema.userDataOptouts.categoryKey, `module:${moduleKey}`),
+    )).limit(1);
+  return rows.length > 0;
 }
