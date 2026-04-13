@@ -13,20 +13,33 @@ import {
   generateTokenPair, generateToolToken, generateProjectToken, verifyToken, verifyProjectToken, extractBearerToken, REFRESH_TOKEN_DAYS,
 } from "../auth/jwt.js";
 import { checkRateLimit, redis } from "../redis.js";
+import {
+  logUserLogin,
+  logUserLoginFailed,
+  logUserRegister,
+  logProjectLogin,
+  logProjectLoginFailed,
+} from "../logging/auth-logger.js";
 
 interface RouteResult {
   status: string;
   data: unknown;
 }
 
+export interface RequestCtx {
+  ip?: string;
+  userAgent?: string;
+}
+
 export async function handleAuthRoute(
   action: string,
   body: string,
   authHeader: string,
+  ctx: RequestCtx = {},
 ): Promise<RouteResult> {
   switch (action) {
-    case "register": return register(parseBody(body));
-    case "login": return login(parseBody(body));
+    case "register": return register(parseBody(body), ctx);
+    case "login": return login(parseBody(body), ctx);
     case "refresh": return refresh(parseBody(body));
     case "logout": return logout(parseBody(body));
     case "verify": return verify(parseBody(body));
@@ -42,7 +55,7 @@ function parseBody(body: string): Record<string, unknown> {
   try { return JSON.parse(body); } catch { return {}; }
 }
 
-async function register(p: Record<string, unknown>): Promise<RouteResult> {
+async function register(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
   const name = p.name as string | undefined;
   const email = p.email as string | undefined;
   const password = p.password as string | undefined;
@@ -73,6 +86,8 @@ async function register(p: Record<string, unknown>): Promise<RouteResult> {
     id: crypto.randomUUID(), userId, refreshToken, expiresAt,
   });
 
+  logUserRegister(userId, email, "email", { ip: ctx.ip });
+
   return {
     status: "201 Created",
     data: {
@@ -82,29 +97,38 @@ async function register(p: Record<string, unknown>): Promise<RouteResult> {
   };
 }
 
-async function login(p: Record<string, unknown>): Promise<RouteResult> {
+async function login(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
   // Tool client login
   if (p.grant_type === "client_credentials") {
     return toolLogin(p.client_id as string, p.client_secret as string);
   }
   // Project login (managed_projects)
   if (p.grant_type === "project_credentials") {
-    return projectLogin(p.client_id as string, p.client_secret as string);
+    return projectLogin(p.client_id as string, p.client_secret as string, ctx);
   }
 
   const email = p.email as string | undefined;
   const password = p.password as string | undefined;
-  if (!email || !password) throw new Error("email and password are required");
+  if (!email || !password) {
+    logUserLoginFailed(email, "email", "missing credentials", ctx);
+    throw new Error("email and password are required");
+  }
 
   await checkRateLimit(`login:${email}`, 10, 900);
 
   const rows = await db.select().from(schema.users)
     .where(eq(schema.users.email, email)).limit(1);
   const user = rows[0];
-  if (!user || !user.passwordHash) throw new Error("Unauthorized: Invalid email or password");
+  if (!user || !user.passwordHash) {
+    logUserLoginFailed(email, "email", "invalid credentials", ctx);
+    throw new Error("Unauthorized: Invalid email or password");
+  }
 
   const valid = await bcrypt.compare(password, user.passwordHash);
-  if (!valid) throw new Error("Unauthorized: Invalid email or password");
+  if (!valid) {
+    logUserLoginFailed(email, "email", "invalid credentials", ctx);
+    throw new Error("Unauthorized: Invalid email or password");
+  }
 
   if (user.mfaEnabled) {
     return { status: "200 OK", data: { mfaRequired: true, mfaMethods: user.mfaMethods ?? [] } };
@@ -119,6 +143,8 @@ async function login(p: Record<string, unknown>): Promise<RouteResult> {
   await db.insert(schema.refreshSessions).values({
     id: crypto.randomUUID(), userId: user.id, refreshToken, expiresAt,
   });
+
+  logUserLogin(user.id, user.email, "email", ctx);
 
   return {
     status: "200 OK",
@@ -240,16 +266,26 @@ async function toolLogin(clientId: string | undefined, clientSecret: string | un
   };
 }
 
-async function projectLogin(clientId: string | undefined, clientSecret: string | undefined): Promise<RouteResult> {
-  if (!clientId || !clientSecret) throw new Error("client_id and client_secret are required");
+async function projectLogin(clientId: string | undefined, clientSecret: string | undefined, ctx: RequestCtx): Promise<RouteResult> {
+  if (!clientId || !clientSecret) {
+    logProjectLoginFailed(clientId, "missing credentials", ctx);
+    throw new Error("client_id and client_secret are required");
+  }
   await checkRateLimit(`project_login:${clientId}`, 10, 300);
   const rows = await db.select().from(schema.managedProjects)
     .where(eq(schema.managedProjects.clientId, clientId)).limit(1);
   const project = rows[0];
-  if (!project || !project.isActive) throw new Error("Unauthorized: Invalid project credentials");
+  if (!project || !project.isActive) {
+    logProjectLoginFailed(clientId, "invalid credentials or project inactive", ctx);
+    throw new Error("Unauthorized: Invalid project credentials");
+  }
   const valid = await bcrypt.compare(clientSecret, project.clientSecretHash);
-  if (!valid) throw new Error("Unauthorized: Invalid project credentials");
+  if (!valid) {
+    logProjectLoginFailed(clientId, "invalid credentials", ctx);
+    throw new Error("Unauthorized: Invalid project credentials");
+  }
   const accessToken = generateProjectToken(project.clientId, project.key);
+  logProjectLogin(project.key, project.clientId, ctx);
   return {
     status: "200 OK",
     data: {

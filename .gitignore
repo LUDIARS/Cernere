@@ -6,3 +6,5 @@ dist
 *.swp
 *.swo
 *.tsbuildinfo
+logs/
+*.log

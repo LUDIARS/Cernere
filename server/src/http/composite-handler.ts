@@ -12,6 +12,12 @@ import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { generateTokenPair, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
 import { checkRateLimit, redis } from "../redis.js";
+import {
+  logUserLogin,
+  logUserLoginFailed,
+  logUserRegister,
+  logAuthEvent,
+} from "../logging/auth-logger.js";
 
 const AUTH_CODE_TTL = 60; // seconds
 
@@ -20,15 +26,21 @@ interface RouteResult {
   data: unknown;
 }
 
+export interface CompositeCtx {
+  ip?: string;
+  userAgent?: string;
+}
+
 export async function handleCompositeRoute(
   action: string,
   body: string,
+  ctx: CompositeCtx = {},
 ): Promise<RouteResult> {
   const p = parseBody(body);
   switch (action) {
-    case "login": return compositeLogin(p);
-    case "register": return compositeRegister(p);
-    case "mfa-verify": return compositeMfaVerify(p);
+    case "login": return compositeLogin(p, ctx);
+    case "register": return compositeRegister(p, ctx);
+    case "mfa-verify": return compositeMfaVerify(p, ctx);
     default:
       return { status: "404 Not Found", data: { error: `Unknown composite action: ${action}` } };
   }
@@ -38,11 +50,12 @@ export async function handleCompositeRoute(
 export async function executeCompositeAction(
   action: "login" | "register" | "mfa-verify",
   payload: Record<string, unknown>,
+  ctx: CompositeCtx = {},
 ): Promise<unknown> {
   switch (action) {
-    case "login":      return (await compositeLogin(payload)).data;
-    case "register":   return (await compositeRegister(payload)).data;
-    case "mfa-verify": return (await compositeMfaVerify(payload)).data;
+    case "login":      return (await compositeLogin(payload, ctx)).data;
+    case "register":   return (await compositeRegister(payload, ctx)).data;
+    case "mfa-verify": return (await compositeMfaVerify(payload, ctx)).data;
   }
 }
 
@@ -72,22 +85,32 @@ async function issueAuthCode(userId: string, displayName: string, email: string 
   return authCode;
 }
 
-async function compositeLogin(p: Record<string, unknown>): Promise<RouteResult> {
+async function compositeLogin(p: Record<string, unknown>, ctx: CompositeCtx): Promise<RouteResult> {
   const email = p.email as string | undefined;
   const password = p.password as string | undefined;
-  if (!email || !password) throw new Error("email and password are required");
+  if (!email || !password) {
+    logUserLoginFailed(email, "composite", "missing credentials", ctx);
+    throw new Error("email and password are required");
+  }
 
   await checkRateLimit(`login:${email}`, 10, 900);
 
   const rows = await db.select().from(schema.users)
     .where(eq(schema.users.email, email)).limit(1);
   const user = rows[0];
-  if (!user || !user.passwordHash) throw new Error("Unauthorized: Invalid email or password");
+  if (!user || !user.passwordHash) {
+    logUserLoginFailed(email, "composite", "invalid credentials", ctx);
+    throw new Error("Unauthorized: Invalid email or password");
+  }
 
   const valid = await bcrypt.compare(password, user.passwordHash);
-  if (!valid) throw new Error("Unauthorized: Invalid email or password");
+  if (!valid) {
+    logUserLoginFailed(email, "composite", "invalid credentials", ctx);
+    throw new Error("Unauthorized: Invalid email or password");
+  }
 
   if (user.mfaEnabled) {
+    logAuthEvent({ event: "user.mfa.challenge", userId: user.id, email: user.email ?? undefined, provider: "composite", ip: ctx.ip, userAgent: ctx.userAgent });
     return {
       status: "200 OK",
       data: { mfaRequired: true, mfaMethods: user.mfaMethods ?? [] },
@@ -99,10 +122,11 @@ async function compositeLogin(p: Record<string, unknown>): Promise<RouteResult> 
     .where(eq(schema.users.id, user.id));
 
   const authCode = await issueAuthCode(user.id, user.displayName ?? "", user.email, user.role);
+  logUserLogin(user.id, user.email, "composite", ctx);
   return { status: "200 OK", data: { authCode } };
 }
 
-async function compositeRegister(p: Record<string, unknown>): Promise<RouteResult> {
+async function compositeRegister(p: Record<string, unknown>, ctx: CompositeCtx): Promise<RouteResult> {
   const name = p.name as string | undefined;
   const email = p.email as string | undefined;
   const password = p.password as string | undefined;
@@ -128,10 +152,11 @@ async function compositeRegister(p: Record<string, unknown>): Promise<RouteResul
   });
 
   const authCode = await issueAuthCode(userId, name, email, role);
+  logUserRegister(userId, email, "composite", { ip: ctx.ip });
   return { status: "201 Created", data: { authCode } };
 }
 
-async function compositeMfaVerify(p: Record<string, unknown>): Promise<RouteResult> {
+async function compositeMfaVerify(p: Record<string, unknown>, ctx: CompositeCtx): Promise<RouteResult> {
   const mfaToken = p.mfaToken as string | undefined;
   const method = p.method as string | undefined;
   const code = p.code as string | undefined;
@@ -159,5 +184,7 @@ async function compositeMfaVerify(p: Record<string, unknown>): Promise<RouteResu
     .where(eq(schema.users.id, user.id));
 
   const authCode = await issueAuthCode(user.id, user.displayName ?? "", user.email, user.role);
+  logAuthEvent({ event: "user.mfa.verified", userId: user.id, email: user.email ?? undefined, provider: "composite", ip: ctx.ip, userAgent: ctx.userAgent });
+  logUserLogin(user.id, user.email, "composite_mfa", ctx);
   return { status: "200 OK", data: { authCode } };
 }
