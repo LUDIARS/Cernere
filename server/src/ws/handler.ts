@@ -15,6 +15,7 @@ import { dispatch } from "../commands.js";
 import { handleGuestAuthCommand } from "./guest.js";
 import { notifyPresenceChange } from "./events.js";
 import type { ClientMessage, ServerMessage } from "./protocol.js";
+import { logUserWsConnect, logUserWsDisconnect } from "../logging/auth-logger.js";
 
 const PING_INTERVAL_MS = 30_000;
 
@@ -47,6 +48,7 @@ export async function handleWsOpen(ws: uWS.WebSocket<WsUserData>): Promise<void>
   await setUserState(userState);
 
   send(ws, { type: "connected", session_id: data.sessionId, user_state: userState });
+  logUserWsConnect(data.userId, data.sessionId);
   notifyPresenceChange(data.userId, "online").catch(() => {});
 
   const timer = setInterval(() => {
@@ -145,6 +147,7 @@ export async function handleWsClose(ws: uWS.WebSocket<WsUserData>): Promise<void
   if (!data.isGuest || data.promoted) {
     sessionRegistry.unregister(data.sessionId);
     await updateUserStateField(data.userId, "session_expired");
+    logUserWsDisconnect(data.userId, data.sessionId);
     if (!sessionRegistry.isOnline(data.userId)) {
       notifyPresenceChange(data.userId, "offline").catch(() => {});
     }

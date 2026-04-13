@@ -23,6 +23,7 @@ import {
   resolveProjectWsAuth,
   type ProjectWsUserData,
 } from "./ws/project-handler.js";
+import { logProjectWsRejected } from "./logging/auth-logger.js";
 
 // ── uWS UserData (WS 接続ごとに保持) ──────────────────────
 
@@ -34,6 +35,15 @@ export interface WsUserData {
 }
 
 // ── HTTP ヘルパー ──────────────────────────────────────────
+
+function getRemoteIp(res: uWS.HttpResponse): string | undefined {
+  try {
+    const text = Buffer.from(res.getRemoteAddressAsText()).toString();
+    return text || undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function readBody(res: uWS.HttpResponse): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -117,6 +127,7 @@ export function createApp() {
       const query = req.getQuery();
       const params = new URLSearchParams(query);
       const token = params.get("token") ?? undefined;
+      const ip = getRemoteIp(res);
 
       const secWsKey = req.getHeader("sec-websocket-key");
       const secWsProtocol = req.getHeader("sec-websocket-protocol");
@@ -129,6 +140,7 @@ export function createApp() {
       if (aborted) return;
 
       if (!claims) {
+        logProjectWsRejected(token ? "invalid or expired project token" : "missing project token", { ip });
         res.cork(() => {
           res.writeStatus("401 Unauthorized").end("Invalid project token");
         });
@@ -155,13 +167,15 @@ export function createApp() {
   app.post("/api/auth/:action", async (res, req) => {
     const action = req.getParameter(0) ?? "";
     const authHeader = req.getHeader("authorization") ?? "";
+    const userAgent = req.getHeader("user-agent") ?? undefined;
+    const ip = getRemoteIp(res);
     let aborted = false;
     res.onAborted(() => { aborted = true; });
 
     try {
       const body = await readBody(res);
       if (aborted) return;
-      const result = await handleAuthRoute(action, body, authHeader);
+      const result = await handleAuthRoute(action, body, authHeader, { ip, userAgent });
       jsonResponse(res, result.status, result.data);
     } catch (err) {
       if (aborted) return;
@@ -175,13 +189,15 @@ export function createApp() {
   // ── Composite Auth: POST /api/auth/composite/:action ────
   app.post("/api/auth/composite/:action", async (res, req) => {
     const action = req.getParameter(0) ?? "";
+    const userAgent = req.getHeader("user-agent") ?? undefined;
+    const ip = getRemoteIp(res);
     let aborted = false;
     res.onAborted(() => { aborted = true; });
 
     try {
       const body = await readBody(res);
       if (aborted) return;
-      const result = await handleCompositeRoute(action, body);
+      const result = await handleCompositeRoute(action, body, { ip, userAgent });
       jsonResponse(res, result.status, result.data);
     } catch (err) {
       if (aborted) return;
