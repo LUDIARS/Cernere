@@ -22,6 +22,7 @@ jobs:
           - id-service
           - service-adapter
           - env-cli
+          - composite
     steps:
       - uses: actions/checkout@v4
 
@@ -34,6 +35,8 @@ jobs:
 
       - name: Install dependencies
         working-directory: packages/${{ matrix.package }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -f package-lock.json ]; then
             npm ci
