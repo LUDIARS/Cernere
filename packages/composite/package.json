@@ -1,7 +1,7 @@
 {
   "name": "@ludiars/cernere-composite",
-  "version": "0.2.0",
-  "description": "Backend SDK for Cernere composite auth — service registration + auth_code exchange + service_token issuance",
+  "version": "0.3.0",
+  "description": "Cernere composite auth — backend SDK + embeddable React login UI",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,6 +9,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./ui": {
+      "import": "./dist/ui/index.js",
+      "types": "./dist/ui/index.d.ts"
     }
   },
   "files": ["dist", "src"],
@@ -19,8 +23,16 @@
   "dependencies": {
     "@ludiars/cernere-service-adapter": "file:../service-adapter"
   },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true }
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/react": "^19.2.0",
+    "react": "^19.2.0",
     "typescript": "^5.9.0"
   },
   "license": "MIT",
