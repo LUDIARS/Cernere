@@ -29,6 +29,8 @@ export const columnDefinitionSchema = z.object({
   nullable: z.boolean().optional().default(true),
   description: z.string().optional(),
   default_value: z.string().optional(),
+  /** 論理削除フラグ: true の場合、DB カラムは残すがスキーマ上は削除扱い */
+  _deleted: z.boolean().optional(),
 });
 export type ColumnDefinition = z.infer<typeof columnDefinitionSchema>;
 
