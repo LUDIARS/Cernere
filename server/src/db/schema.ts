@@ -69,6 +69,25 @@ export const verificationCodes = pgTable("verification_codes", {
   index("idx_verification_codes_user_id").on(t.userId),
 ]);
 
+// ── Trusted Devices (本人確認) ───────────────────────────────
+
+export const trustedDevices = pgTable("trusted_devices", {
+  id: uuid("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  deviceHash: text("device_hash").notNull(),
+  label: text("label").notNull(),
+  machineInfo: jsonb("machine_info").notNull().default({}),
+  browserInfo: jsonb("browser_info").notNull().default({}),
+  geoInfo: jsonb("geo_info").notNull().default({}),
+  lastIp: text("last_ip"),
+  firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+}, (t) => [
+  index("idx_trusted_devices_user").on(t.userId),
+  index("idx_trusted_devices_user_last_seen").on(t.userId, t.lastSeenAt),
+]);
+
 // ── Organizations ────────────────────────────────────────────
 
 export const organizations = pgTable("organizations", {
