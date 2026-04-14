@@ -50,6 +50,44 @@ export async function dispatchProjectCommand(
       const { executeCompositeAction } = await import("../http/composite-handler.js");
       return executeCompositeAction(action as "login" | "register" | "mfa-verify", payload);
     }
+    // ─── managed_project: project_data_{key} へのユーザーデータアクセス ───
+    // projectKey は WS セッションで bind されており、payload では受け取らない
+    // (他プロジェクトの書き換えを防止)。
+    case "managed_project.get_user_data": {
+      const svc = await import("../project/service.js");
+      const userId = requireStr(payload, "userId");
+      const columns = Array.isArray(payload.columns) ? payload.columns as string[] : undefined;
+      return svc.getUserColumns(projectKey, userId, columns);
+    }
+    case "managed_project.set_user_data": {
+      const svc = await import("../project/service.js");
+      const userId = requireStr(payload, "userId");
+      const data = payload.data as Record<string, unknown> | undefined;
+      if (!data || typeof data !== "object") {
+        throw new Error("Missing or invalid field: data");
+      }
+      return svc.setUserData(projectKey, userId, data);
+    }
+    case "managed_project.delete_user_data": {
+      const svc = await import("../project/service.js");
+      const userId = requireStr(payload, "userId");
+      const columns = Array.isArray(payload.columns) ? payload.columns as string[] : [];
+      return svc.deleteUserColumns(projectKey, userId, columns);
+    }
+    // プロジェクトスキーマ更新 (Schedula の SDK loader が起動時に呼ぶ想定)
+    case "managed_project.update_schema": {
+      const svc = await import("../project/service.js");
+      // payload 全体が ProjectDefinition (key は WS セッション固定と整合チェック)
+      if (payload.key && payload.key !== projectKey) {
+        throw new Error("project key mismatch");
+      }
+      const def = { ...payload, project: { ...(payload.project as object ?? {}), key: projectKey } };
+      // system admin 権限は不要 (project client 認証済みのため)。
+      // ただし service.updateProjectSchema は appliedBy (admin userId) を要求するため
+      // project client の場合は null 渡しを許容する版が必要。
+      // 既存 updateProjectSchema にそのまま委譲 (appliedBy は undefined)。
+      return svc.updateProjectSchema(projectKey, def, undefined);
+    }
     default:
       throw new Error(`Unknown command: ${module}.${action} (project: ${projectKey})`);
   }

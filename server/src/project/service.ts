@@ -419,6 +419,174 @@ export async function listAllUserProjectData(userId: string) {
   return result;
 }
 
+// ── プロジェクトクライアント向け User Data API ─────────────────
+// Schedula 等の外部サービスが /ws/project 経由で呼び出す想定。
+// 書き込みはカラム単位の opt-out 状況を判定し、オプトアウト中は拒否する。
+
+/** 安全なテーブル名チェック */
+function safeTableName(projectKey: string): string {
+  if (!/^[a-z][a-z0-9_]{1,62}$/.test(projectKey)) {
+    throw AppError.badRequest("Invalid project key");
+  }
+  return `project_data_${projectKey}`;
+}
+
+/** 安全なカラム名チェック */
+function assertSafeColumn(name: string): void {
+  if (!/^[a-z][a-z0-9_:]{0,127}$/i.test(name)) {
+    throw AppError.badRequest(`Invalid column name: ${name}`);
+  }
+}
+
+async function loadProjectColumns(
+  projectKey: string,
+): Promise<Record<string, { type: string; module?: string; _deleted?: boolean }>> {
+  const proj = await db.select().from(dbSchema.managedProjects)
+    .where(eq(dbSchema.managedProjects.key, projectKey)).limit(1);
+  if (proj.length === 0) throw AppError.notFound("Project not found");
+  const definition = proj[0].schemaDefinition as ProjectDefinition;
+  return (definition.user_data?.columns ?? {}) as Record<string, {
+    type: string; module?: string; _deleted?: boolean;
+  }>;
+}
+
+/**
+ * プロジェクトクライアント向け: 特定ユーザの指定カラムのみ取得。
+ * columns 未指定または空配列なら全カラム返す。
+ */
+export async function getUserColumns(
+  projectKey: string,
+  userId: string,
+  columns?: string[],
+): Promise<Record<string, unknown>> {
+  const tableName = safeTableName(projectKey);
+  const schemaColumns = await loadProjectColumns(projectKey);
+
+  const targetCols = (columns && columns.length > 0)
+    ? columns.filter((c) => c in schemaColumns && !schemaColumns[c]._deleted)
+    : Object.keys(schemaColumns).filter((c) => !schemaColumns[c]._deleted);
+
+  for (const c of targetCols) assertSafeColumn(c);
+
+  if (targetCols.length === 0) return {};
+
+  const { default: postgres } = await import("postgres");
+  const sqlClient = postgres(config.databaseUrl, { max: 1 });
+  try {
+    const selectCols = targetCols.map((c) => `"${c}"`).join(", ");
+    const rows = await sqlClient.unsafe(
+      `SELECT ${selectCols} FROM "${tableName}" WHERE user_id = $1 LIMIT 1`,
+      [userId],
+    );
+    if (rows.length === 0) {
+      // レコードなしなら全て null
+      const empty: Record<string, unknown> = {};
+      for (const c of targetCols) empty[c] = null;
+      return empty;
+    }
+    const result: Record<string, unknown> = {};
+    for (const c of targetCols) result[c] = rows[0][c] ?? null;
+    return result;
+  } catch (err) {
+    console.warn(`[project-data] getUserColumns failed (${projectKey}):`, err);
+    const empty: Record<string, unknown> = {};
+    for (const c of targetCols) empty[c] = null;
+    return empty;
+  } finally {
+    await sqlClient.end();
+  }
+}
+
+/**
+ * プロジェクトクライアント向け: 部分 upsert。
+ * オプトアウト中のモジュールに属するカラムは書き込み拒否 (エラー)。
+ */
+export async function setUserData(
+  projectKey: string,
+  userId: string,
+  data: Record<string, unknown>,
+): Promise<{ ok: true; updated: string[] }> {
+  const tableName = safeTableName(projectKey);
+  const schemaColumns = await loadProjectColumns(projectKey);
+
+  const targetCols = Object.keys(data).filter(
+    (c) => c in schemaColumns && !schemaColumns[c]._deleted,
+  );
+  if (targetCols.length === 0) {
+    throw AppError.badRequest("No valid columns to update");
+  }
+
+  // オプトアウトチェック: 各カラムの module が opt-out されていないか
+  for (const c of targetCols) {
+    const mod = schemaColumns[c].module;
+    if (!mod) continue;
+    if (await isOptedOut(userId, projectKey, mod)) {
+      throw AppError.badRequest(
+        `User has opted out of module "${mod}" for project "${projectKey}"`,
+      );
+    }
+  }
+
+  for (const c of targetCols) assertSafeColumn(c);
+
+  const { default: postgres } = await import("postgres");
+  const sqlClient = postgres(config.databaseUrl, { max: 1 });
+  try {
+    // INSERT ... ON CONFLICT DO UPDATE (upsert)
+    const colList = ["user_id", ...targetCols].map((c) => `"${c}"`).join(", ");
+    const placeholders = ["$1", ...targetCols.map((_, i) => `$${i + 2}`)].join(", ");
+    const updateClause = targetCols
+      .map((c) => `"${c}" = EXCLUDED."${c}"`)
+      .concat([`updated_at = NOW()`])
+      .join(", ");
+    const values = [userId, ...targetCols.map((c) => {
+      const v = data[c];
+      // JSON 型の場合は stringify
+      const isJson = schemaColumns[c].type === "json" || schemaColumns[c].type === "jsonb";
+      return isJson ? JSON.stringify(v) : v;
+    })];
+    await sqlClient.unsafe(
+      `INSERT INTO "${tableName}" (${colList}, created_at, updated_at)
+       VALUES (${placeholders}, NOW(), NOW())
+       ON CONFLICT (user_id) DO UPDATE SET ${updateClause}`,
+      values as never[],
+    );
+    return { ok: true, updated: targetCols };
+  } finally {
+    await sqlClient.end();
+  }
+}
+
+/** プロジェクトクライアント向け: 指定カラムを NULL にする (opt-out とは別) */
+export async function deleteUserColumns(
+  projectKey: string,
+  userId: string,
+  columns: string[],
+): Promise<{ ok: true; deleted: string[] }> {
+  const tableName = safeTableName(projectKey);
+  const schemaColumns = await loadProjectColumns(projectKey);
+  const targetCols = columns.filter(
+    (c) => c in schemaColumns && !schemaColumns[c]._deleted,
+  );
+  if (targetCols.length === 0) return { ok: true, deleted: [] };
+
+  for (const c of targetCols) assertSafeColumn(c);
+
+  const { default: postgres } = await import("postgres");
+  const sqlClient = postgres(config.databaseUrl, { max: 1 });
+  try {
+    const setClauses = targetCols.map((c) => `"${c}" = NULL`);
+    setClauses.push(`updated_at = NOW()`);
+    await sqlClient.unsafe(
+      `UPDATE "${tableName}" SET ${setClauses.join(", ")} WHERE user_id = $1`,
+      [userId],
+    );
+    return { ok: true, deleted: targetCols };
+  } finally {
+    await sqlClient.end();
+  }
+}
+
 /** ユーザーがオプトアウト中のモジュールか判定 */
 export async function isOptedOut(userId: string, projectKey: string, moduleKey: string): Promise<boolean> {
   const rows = await db.select({ userId: dbSchema.userDataOptouts.userId })
