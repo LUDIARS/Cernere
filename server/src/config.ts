@@ -54,6 +54,13 @@ export const config = {
   awsSesFromEmail: env("AWS_SES_FROM_EMAIL", "noreply@example.com"),
   appName: env("APP_NAME", "Cernere"),
 
+  // Mail (SMTP). SES が有効ならそちらを優先。
+  smtpHost: env("CERNERE_SMTP_HOST", "localhost"),
+  smtpPort: parseInt(env("CERNERE_SMTP_PORT", "1025"), 10),
+  smtpUser: env("CERNERE_SMTP_USER", ""),
+  smtpPass: env("CERNERE_SMTP_PASS", ""),
+  mailFrom: env("CERNERE_MAIL_FROM", "noreply@cernere.local"),
+
   isHttps: env("FRONTEND_URL", "http://localhost:5173").startsWith("https://"),
   isProduction: isProduction(),
 } as const;

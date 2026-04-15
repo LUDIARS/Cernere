@@ -83,6 +83,19 @@ services:
     profiles:
       - dev
 
+  # ── MailHog (dev SMTP キャッチャー) ─────────────────────
+  # 1025: SMTP / 8025: Web UI (http://localhost:8025)
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: cernere-mailhog
+    ports:
+      - "${MAILHOG_SMTP_PORT:-1025}:1025"
+      - "${MAILHOG_UI_PORT:-8025}:8025"
+    restart: unless-stopped
+    profiles:
+      - dev
+      - prod
+
 volumes:
   backend-node-modules:
   frontend-node-modules:

@@ -33,6 +33,7 @@ type AuthEventType =
   | "user.device.trusted"
   | "user.device.challenge"
   | "user.device.challenge.resent"
+  | "user.device.challenge.failed"
   | "user.device.verify.success"
   | "user.device.verify.failed";
 
