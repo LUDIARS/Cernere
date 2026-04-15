@@ -44,14 +44,14 @@ const config: EnvCliConfig = {
     AWS_SES_FROM_EMAIL: "noreply@example.com",
     APP_NAME: "Cernere",
 
-    // ─── Mail (SMTP / MailHog for dev, SES for prod) ──────
+    // ─── Mail (SMTP / SES) ────────────────────────────────
+    // dev: 共有インフラの MailHog (../infra → localhost:1025 / UI: localhost:8025)
+    // prod: AWS_SES_ENABLED=true なら SES、それ以外は任意の SMTP
     CERNERE_SMTP_HOST: "localhost",
     CERNERE_SMTP_PORT: "1025",
     CERNERE_SMTP_USER: "",
     CERNERE_SMTP_PASS: "",
     CERNERE_MAIL_FROM: "noreply@cernere.local",
-    MAILHOG_SMTP_PORT: "1025",
-    MAILHOG_UI_PORT: "8025",
   },
 
   defaultSiteUrl: "https://app.infisical.com",

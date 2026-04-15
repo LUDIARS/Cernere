@@ -83,18 +83,8 @@ services:
     profiles:
       - dev
 
-  # ── MailHog (dev SMTP キャッチャー) ─────────────────────
-  # 1025: SMTP / 8025: Web UI (http://localhost:8025)
-  mailhog:
-    image: mailhog/mailhog:latest
-    container_name: cernere-mailhog
-    ports:
-      - "${MAILHOG_SMTP_PORT:-1025}:1025"
-      - "${MAILHOG_UI_PORT:-8025}:8025"
-    restart: unless-stopped
-    profiles:
-      - dev
-      - prod
+# MailHog (dev SMTP) は共有インフラ (../infra/docker-compose.yaml) で提供される。
+# infra を起動していない場合は CERNERE_SMTP_HOST を任意の SMTP に向けること。
 
 volumes:
   backend-node-modules:
