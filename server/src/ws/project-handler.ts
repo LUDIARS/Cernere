@@ -24,6 +24,8 @@ export interface ProjectWsUserData {
   clientId: string;
   projectKey: string;
   connectionId: string;
+  /** close 後の send を防ぐフラグ (uWS は閉じたソケット操作で throw) */
+  closed: boolean;
 }
 
 interface ClientMessage {
@@ -44,7 +46,18 @@ const PING_INTERVAL_MS = 30_000;
 const pingTimers = new Map<string, ReturnType<typeof setInterval>>();
 
 function send(ws: uWS.WebSocket<ProjectWsUserData>, msg: ServerMessage): void {
-  ws.send(JSON.stringify(msg));
+  let data: ProjectWsUserData | undefined;
+  try {
+    data = ws.getUserData();
+  } catch {
+    return;
+  }
+  if (data.closed) return;
+  try {
+    ws.send(JSON.stringify(msg));
+  } catch {
+    data.closed = true;
+  }
 }
 
 /**
@@ -137,6 +150,8 @@ export async function handleProjectWsMessage(
 
 export function handleProjectWsClose(ws: uWS.WebSocket<ProjectWsUserData>): void {
   const data = ws.getUserData();
+  // 同期的にフラグを立てる (send() が走るレースを防ぐ)
+  data.closed = true;
   const timer = pingTimers.get(data.connectionId);
   if (timer) {
     clearInterval(timer);

@@ -32,6 +32,12 @@ export interface WsUserData {
   sessionId: string;
   isGuest: boolean;
   promoted: boolean;
+  /**
+   * close 後に send() するレースを防ぐフラグ。close ハンドラで即 true にする。
+   * uWS は閉じた WebSocket を触ると例外を投げるため、async の await 挟み後の
+   * send は必ず closed チェックが必要。
+   */
+  closed: boolean;
 }
 
 // ── HTTP ヘルパー ──────────────────────────────────────────
@@ -105,8 +111,8 @@ export function createApp() {
       if (aborted) return;
 
       const userData: WsUserData = auth
-        ? { userId: auth.userId, sessionId: auth.sessionId, isGuest: false, promoted: false }
-        : { userId: "", sessionId: `guest_${crypto.randomUUID()}`, isGuest: true, promoted: false };
+        ? { userId: auth.userId, sessionId: auth.sessionId, isGuest: false, promoted: false, closed: false }
+        : { userId: "", sessionId: `guest_${crypto.randomUUID()}`, isGuest: true, promoted: false, closed: false };
 
       res.cork(() => {
         res.upgrade(userData, secWsKey, secWsProtocol, secWsExtensions, context);
@@ -151,6 +157,7 @@ export function createApp() {
         clientId: claims.sub,
         projectKey: claims.projectKey,
         connectionId: `proj_${crypto.randomUUID()}`,
+        closed: false,
       };
 
       res.cork(() => {
