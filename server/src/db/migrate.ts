@@ -162,10 +162,30 @@ async function importFromSqlx(sql: postgres.Sql): Promise<void> {
 
 /**
  * SQL テキストをステートメントに分割
+ *
+ * - `;` で分割
+ * - 各ステートメント先頭の `-- コメント行` を除去 (trim 後の最初の非空行が
+ *   コメントだったら読み飛ばす)
+ * - 実行可能な本体が残らなければステートメントとして扱わない
  */
 function splitStatements(sqlText: string): string[] {
   return sqlText
     .split(";")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0 && !s.startsWith("--"));
+    .map(stripLeadingComments)
+    .filter((s) => s.length > 0);
+}
+
+/** ステートメント先頭の `-- コメント行` と空行を除去 */
+function stripLeadingComments(raw: string): string {
+  const lines = raw.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const trimmed = lines[i].trim();
+    if (trimmed === "" || trimmed.startsWith("--")) {
+      i++;
+      continue;
+    }
+    break;
+  }
+  return lines.slice(i).join("\n").trim();
 }
