@@ -23,6 +23,13 @@ import {
   resolveProjectWsAuth,
   type ProjectWsUserData,
 } from "./ws/project-handler.js";
+import {
+  handleCompositeAuthOpen,
+  handleCompositeAuthMessage,
+  handleCompositeAuthClose,
+  resolveCompositeTicket,
+  type CompositeWsUserData,
+} from "./ws/composite-auth.js";
 import { logProjectWsRejected } from "./logging/auth-logger.js";
 
 // ── uWS UserData (WS 接続ごとに保持) ──────────────────────
@@ -168,6 +175,51 @@ export function createApp() {
     open: (ws) => { handleProjectWsOpen(ws); },
     message: (ws, message) => { handleProjectWsMessage(ws, message); },
     close: (ws) => { handleProjectWsClose(ws); },
+  });
+
+  // ── WebSocket: /auth/composite-ws (ticket 認証) ─────────
+  // 資格情報検証済みセッションのチケットでアップグレード。
+  // デバイス fingerprint / 本人確認コードのやり取りを担う。
+  app.ws<CompositeWsUserData>("/auth/composite-ws", {
+    maxPayloadLength: 1 * 1024 * 1024,
+    idleTimeout: 60,
+
+    upgrade: async (res, req, context) => {
+      const query = req.getQuery();
+      const params = new URLSearchParams(query);
+      const ticket = params.get("ticket") ?? undefined;
+
+      const secWsKey = req.getHeader("sec-websocket-key");
+      const secWsProtocol = req.getHeader("sec-websocket-protocol");
+      const secWsExtensions = req.getHeader("sec-websocket-extensions");
+
+      let aborted = false;
+      res.onAborted(() => { aborted = true; });
+
+      const session = await resolveCompositeTicket(ticket);
+      if (aborted) return;
+
+      if (!session) {
+        res.cork(() => {
+          res.writeStatus("401 Unauthorized").end("Invalid or expired ticket");
+        });
+        return;
+      }
+
+      const userData: CompositeWsUserData = {
+        ticket: session.ticket,
+        userId: session.user.userId,
+        closed: false,
+      };
+
+      res.cork(() => {
+        res.upgrade(userData, secWsKey, secWsProtocol, secWsExtensions, context);
+      });
+    },
+
+    open: (ws) => { void handleCompositeAuthOpen(ws); },
+    message: (ws, message) => { void handleCompositeAuthMessage(ws, message); },
+    close: (ws) => { handleCompositeAuthClose(ws); },
   });
 
   // ── Auth REST: POST /api/auth/:action ───────────────────

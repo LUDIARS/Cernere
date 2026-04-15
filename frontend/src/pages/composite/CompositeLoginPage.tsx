@@ -5,19 +5,22 @@
  * アプリシェル (サイドバー等) なしで、認証成功後に
  * postMessage で auth_code を親ウィンドウに返すか、redirect_uri にリダイレクトする。
  *
- * 本人確認: 普段と異なる環境からのログインを検知した場合、
- * メールで送信された 6 桁コードの入力を対話的に要求する。
+ * フロー:
+ *   1. POST /api/auth/composite/login (or register) で資格情報検証
+ *      → { ticket, wsPath } を取得
+ *   2. WS `/auth/composite-ws?ticket=...` に接続
+ *   3. ブラウザが fingerprint (Geolocation 含む) を収集 → WS から送信
+ *      → パーミッションが取れるまで何度でも再試行可能
+ *   4. サーバーから state / authenticated / error メッセージを受信
+ *   5. authenticated を受け取ったら auth_code を親ウィンドウに返す
  *
  * Query params:
  *   origin       - postMessage 送信先 (popup モード)
  *   redirect_uri - リダイレクト先 (redirect モード)
  */
 
-import { useEffect, useState } from "react";
-import {
-  collectDeviceFingerprint,
-  type DeviceFingerprint,
-} from "../../lib/device-fingerprint";
+import { useEffect, useRef, useState } from "react";
+import { collectDeviceFingerprint } from "../../lib/device-fingerprint";
 
 const API_BASE = "";
 
@@ -29,26 +32,35 @@ type Anomaly =
   | "new_ip"
   | "missing_fingerprint";
 
-interface DeviceChallenge {
-  deviceToken: string;
-  emailMasked?: string;
-  anomalies: Anomaly[];
-  codeChannel?: "email" | "console";
-  deviceLabel?: string;
-}
+type WsState =
+  | "pending_device"
+  | "challenge_pending"
+  | "authenticated"
+  | "expired";
 
-interface CompositeAuthResponseShape {
-  authCode?: string;
-  mfaRequired?: boolean;
-  deviceVerificationRequired?: boolean;
+interface ChallengeInfo {
   deviceToken?: string;
   emailMasked?: string;
   anomalies?: Anomaly[];
   codeChannel?: "email" | "console";
   deviceLabel?: string;
+  error?: string;
   remainingAttempts?: number;
+  resent?: boolean;
+}
+
+interface LoginResponseShape {
+  ticket?: string;
+  wsPath?: string;
+  mfaRequired?: boolean;
   error?: string;
 }
+
+type ServerMessage =
+  | { type: "state"; state: WsState; data?: ChallengeInfo }
+  | { type: "authenticated"; authCode: string }
+  | { type: "error"; retryable: boolean; reason: string }
+  | { type: "ping"; ts: number };
 
 const ANOMALY_LABELS: Record<Anomaly, string> = {
   new_device: "新しいデバイス",
@@ -59,6 +71,13 @@ const ANOMALY_LABELS: Record<Anomaly, string> = {
   missing_fingerprint: "デバイス情報を取得できませんでした",
 };
 
+/** WS の URL を構築する (HTTPS → wss, HTTP → ws) */
+function buildWsUrl(wsPath: string): string {
+  const proto = window.location.protocol === "https:" ? "wss" : "ws";
+  // 開発時 Vite proxy の下で動くため location.host を使用
+  return `${proto}://${window.location.host}${wsPath}`;
+}
+
 export function CompositeLoginPage() {
   const params = new URLSearchParams(window.location.search);
   const origin = params.get("origin");
@@ -68,66 +87,167 @@ export function CompositeLoginPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [device, setDevice] = useState<DeviceChallenge | null>(null);
+  const [challenge, setChallenge] = useState<ChallengeInfo | null>(null);
   const [deviceCode, setDeviceCode] = useState("");
   const [info, setInfo] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [fingerprintStatus, setFingerprintStatus] =
+    useState<"idle" | "collecting" | "sent" | "failed">("idle");
 
-  // ── マウント時にフィンガープリントを収集 ──
-  const [fingerprint, setFingerprint] = useState<DeviceFingerprint | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const retryTimerRef = useRef<number | null>(null);
+
+  // ── アンマウント時の掃除 ──
   useEffect(() => {
-    let cancelled = false;
-    collectDeviceFingerprint({ requestGeo: true, geoTimeoutMs: 5000 })
-      .then((fp) => { if (!cancelled) setFingerprint(fp); })
-      .catch(() => { if (!cancelled) setFingerprint(null); });
-    return () => { cancelled = true; };
+    return () => {
+      if (wsRef.current) {
+        try { wsRef.current.close(); } catch { /* ignore */ }
+      }
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+      }
+    };
   }, []);
 
   const completeAuth = (authCode: string) => {
     if (origin && window.opener) {
-      // Popup モード: postMessage で auth_code を送信
       window.opener.postMessage({ type: "cernere:auth", authCode }, origin);
       window.close();
     } else if (redirectUri) {
-      // Redirect モード: redirect_uri に auth_code を付与してリダイレクト
       const url = new URL(redirectUri);
       url.searchParams.set("code", authCode);
       window.location.href = url.toString();
     }
   };
 
-  const callApi = async (action: string, body: Record<string, unknown>): Promise<CompositeAuthResponseShape> => {
+  /** fingerprint を収集して WS に送信。失敗時は setTimeout で再試行。 */
+  const collectAndSendFingerprint = async (ws: WebSocket) => {
+    setFingerprintStatus("collecting");
+    try {
+      // パーミッションを強制的に要求しながら収集
+      const fp = await collectDeviceFingerprint({ requestGeo: true, geoTimeoutMs: 15000 });
+      const hasSomething = !!(fp.machine || fp.browser || fp.geo);
+      if (!hasSomething) {
+        throw new Error("empty fingerprint");
+      }
+      if (ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: "device", payload: fp }));
+      setFingerprintStatus("sent");
+    } catch (err: unknown) {
+      setFingerprintStatus("failed");
+      const msg = err instanceof Error ? err.message : "fingerprint collection failed";
+      setError(`デバイス情報の取得に失敗しました: ${msg}。再試行します…`);
+      // 3秒後に再試行 (パーミッションダイアログ / ネットワーク復旧を待つ)
+      retryTimerRef.current = window.setTimeout(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          void collectAndSendFingerprint(ws);
+        }
+      }, 3000);
+    }
+  };
+
+  /** サーバーメッセージを処理 */
+  const handleServerMessage = (ws: WebSocket, msg: ServerMessage) => {
+    switch (msg.type) {
+      case "state":
+        if (msg.state === "pending_device") {
+          // fingerprint 未送信なら収集して送信
+          if (fingerprintStatus !== "sent") {
+            void collectAndSendFingerprint(ws);
+          }
+        } else if (msg.state === "challenge_pending") {
+          setChallenge(msg.data ?? {});
+          if (msg.data?.resent) {
+            setInfo("確認コードを再送しました。");
+            setError("");
+          } else if (msg.data?.error) {
+            setError(
+              msg.data.remainingAttempts !== undefined
+                ? `${msg.data.error}（残り ${msg.data.remainingAttempts} 回）`
+                : msg.data.error,
+            );
+          } else {
+            setError("");
+            setInfo("");
+          }
+          setMode("device");
+          setLoading(false);
+        } else if (msg.state === "authenticated") {
+          // 次の "authenticated" メッセージで authCode が届く
+        } else if (msg.state === "expired") {
+          setError("認証セッションが期限切れです。最初からやり直してください。");
+          setLoading(false);
+          try { ws.close(); } catch { /* ignore */ }
+          wsRef.current = null;
+        }
+        return;
+      case "authenticated":
+        completeAuth(msg.authCode);
+        return;
+      case "error":
+        if (msg.retryable) {
+          // retryable はクライアント側で自動回復できることが多い
+          setError(`通信エラー (再試行中): ${msg.reason}`);
+          if (msg.reason.includes("fingerprint") && fingerprintStatus !== "sent") {
+            // fingerprint 空エラーなら直ちに再収集
+            retryTimerRef.current = window.setTimeout(() => {
+              if (ws.readyState === WebSocket.OPEN) {
+                void collectAndSendFingerprint(ws);
+              }
+            }, 500);
+          }
+        } else {
+          setError(msg.reason);
+          setLoading(false);
+          try { ws.close(); } catch { /* ignore */ }
+          wsRef.current = null;
+        }
+        return;
+      case "ping":
+        try {
+          ws.send(JSON.stringify({ type: "pong", ts: msg.ts }));
+        } catch { /* ignore */ }
+        return;
+    }
+  };
+
+  /** WS を開いて fingerprint フローを開始 */
+  const startWsFlow = (wsPath: string) => {
+    const url = buildWsUrl(wsPath);
+    const ws = new WebSocket(url);
+    wsRef.current = ws;
+    setFingerprintStatus("idle");
+
+    ws.onopen = () => {
+      // fingerprint 送信は open 時ではなく "state: pending_device" を待ってから。
+    };
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data as string) as ServerMessage;
+        handleServerMessage(ws, msg);
+      } catch {
+        /* ignore malformed */
+      }
+    };
+    ws.onerror = () => {
+      setError("WebSocket 接続エラーが発生しました。");
+      setLoading(false);
+    };
+    ws.onclose = () => {
+      wsRef.current = null;
+    };
+  };
+
+  const callApi = async (action: string, body: Record<string, unknown>): Promise<LoginResponseShape> => {
     const res = await fetch(`${API_BASE}/api/auth/composite/${action}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    const data = await res.json() as CompositeAuthResponseShape & { error?: string };
+    const data = await res.json() as LoginResponseShape;
     if (!res.ok) throw new Error(data.error ?? "Authentication failed");
     return data;
-  };
-
-  const handleResponse = (data: CompositeAuthResponseShape) => {
-    if (data.mfaRequired) {
-      setError("MFA is required but not yet supported in composite mode.");
-      return;
-    }
-    if (data.deviceVerificationRequired && data.deviceToken) {
-      setDevice({
-        deviceToken: data.deviceToken,
-        emailMasked: data.emailMasked,
-        anomalies: data.anomalies ?? [],
-        codeChannel: data.codeChannel,
-        deviceLabel: data.deviceLabel,
-      });
-      setDeviceCode("");
-      setMode("device");
-      return;
-    }
-    if (data.authCode) {
-      completeAuth(data.authCode);
-    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -135,48 +255,48 @@ export function CompositeLoginPage() {
     setError("");
     setInfo("");
     setLoading(true);
+
     try {
       if (mode === "device") {
-        if (!device) throw new Error("No active device challenge");
-        const data = await callApi("device-verify", {
-          deviceToken: device.deviceToken,
-          code: deviceCode.trim(),
-        });
-        if (data.error) {
-          const remaining = typeof data.remainingAttempts === "number"
-            ? `（残り ${data.remainingAttempts} 回）`
-            : "";
-          throw new Error(`${data.error}${remaining}`);
+        // 本人確認コードの送信は WS で
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          throw new Error("接続が切断されました。最初からやり直してください。");
         }
-        handleResponse(data);
+        ws.send(JSON.stringify({ type: "verify_code", code: deviceCode.trim() }));
+        // 結果は onmessage → state で処理
       } else {
         const action = mode === "register" ? "register" : "login";
         const body = mode === "register"
-          ? { name, email, password, device: fingerprint ?? undefined }
-          : { email, password, device: fingerprint ?? undefined };
+          ? { name, email, password }
+          : { email, password };
         const data = await callApi(action, body);
-        handleResponse(data);
+        if (data.mfaRequired) {
+          setError("MFA is required but not yet supported in composite mode.");
+          setLoading(false);
+          return;
+        }
+        if (!data.wsPath) {
+          throw new Error("Missing wsPath in login response");
+        }
+        startWsFlow(data.wsPath);
+        // fingerprint 送信と以降は WS で。loading は state 受信時に解除。
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Authentication failed");
-    } finally {
       setLoading(false);
     }
   };
 
-  const handleResend = async () => {
-    if (!device) return;
+  const handleResend = () => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      setError("接続が切断されました。最初からやり直してください。");
+      return;
+    }
     setError("");
     setInfo("");
-    setLoading(true);
-    try {
-      await callApi("device-resend", { deviceToken: device.deviceToken });
-      setInfo("確認コードを再送しました。");
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Resend failed");
-    } finally {
-      setLoading(false);
-    }
+    ws.send(JSON.stringify({ type: "resend" }));
   };
 
   // OAuth URL にcomposite_origin を付与
@@ -320,26 +440,26 @@ export function CompositeLoginPage() {
             </>
           )}
 
-          {mode === "device" && device && (
+          {mode === "device" && challenge && (
             <div style={{ marginBottom: "0.75rem" }}>
               <p style={{ fontSize: "0.9rem", marginBottom: "0.25rem" }}>
                 普段と異なる環境からのアクセスを検知しました。
               </p>
               <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "0.75rem" }}>
-                {device.emailMasked
-                  ? `${device.emailMasked} に確認コードを送信しました。`
+                {challenge.emailMasked
+                  ? `${challenge.emailMasked} に確認コードを送信しました。`
                   : "確認コードを送信しました。"}
               </p>
 
-              {device.deviceLabel && (
+              {challenge.deviceLabel && (
                 <p style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginBottom: "0.5rem" }}>
-                  <strong>デバイス:</strong> {device.deviceLabel}
+                  <strong>デバイス:</strong> {challenge.deviceLabel}
                 </p>
               )}
 
-              {device.anomalies.length > 0 && (
+              {challenge.anomalies && challenge.anomalies.length > 0 && (
                 <div style={{ marginBottom: "0.75rem", display: "flex", flexWrap: "wrap", gap: "0.25rem" }}>
-                  {device.anomalies.map((a) => (
+                  {challenge.anomalies.map((a) => (
                     <span
                       key={a}
                       style={{
@@ -417,9 +537,9 @@ export function CompositeLoginPage() {
             </button>
           )}
 
-          {mode !== "device" && !fingerprint && (
+          {mode !== "device" && fingerprintStatus === "collecting" && (
             <p style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "0.5rem", textAlign: "center" }}>
-              デバイス情報を収集中...
+              デバイス情報を収集中... (位置情報の許可が必要です)
             </p>
           )}
         </form>

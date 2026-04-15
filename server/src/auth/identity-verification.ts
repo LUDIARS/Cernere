@@ -21,6 +21,7 @@ import * as schema from "../db/schema.js";
 import { redis } from "../redis.js";
 import { logAuthEvent } from "../logging/auth-logger.js";
 import { config } from "../config.js";
+import { sendMail } from "./mailer.js";
 
 // ── 公開型 ────────────────────────────────────────────────────
 
@@ -383,19 +384,6 @@ async function registerTrustedDevice(stored: StoredChallenge): Promise<void> {
   });
 }
 
-// ── 公開: チャレンジ情報のピーク ─────────────────────────────
-
-/**
- * チャレンジが有効であるかを確認し、ユーザー ID を返す (検証はしない)。
- * 主に composite-handler が「device-verify 後の authCode 発行」のために利用する。
- */
-export async function peekChallenge(deviceToken: string): Promise<{ userId: string } | null> {
-  const raw = await redis.get(`device_challenge:${deviceToken}`);
-  if (!raw) return null;
-  const stored = JSON.parse(raw) as StoredChallenge;
-  return { userId: stored.userId };
-}
-
 /**
  * 確認コードを再送する (Rate limit は呼び出し側で行う)。
  */
@@ -437,8 +425,8 @@ function maskEmail(email: string | null | undefined): string | undefined {
 
 /**
  * 確認コードを送信する。
- * 現状は AWS SES 等が無効な開発環境ではコンソールに出力する。
- * 本番では SES / SendGrid 等の実装を差し込む想定。
+ * SES/SMTP どちらも mailer 経由。宛先が無い場合のみコンソールにフォールバックする。
+ * 送信失敗は throw。
  */
 async function sendVerificationCode(
   email: string | null,
@@ -458,21 +446,25 @@ async function sendVerificationCode(
     "このサインインに心当たりがない場合は、ただちにパスワードを変更してください。",
     "コードの有効期限は 10 分です。",
   ];
+  const text = lines.join("\n");
 
-  if (config.awsSesEnabled && email) {
-    // 実装は MFA で使われている SES クライアントに合わせる想定。
-    // 本リポジトリの SES 連携が拡張されたタイミングで差し込む。
-    // Fall through to console を保つことで開発環境の可観測性を維持する。
-    console.log(`[identity] (SES enabled placeholder) to=${email} subject=${subject}`);
+  if (!email) {
+    // 宛先不明 — テスト容易性のためコンソールに出す
+    console.log(
+      `[identity] verification code generated (no email)\n` +
+      `  subject:  ${subject}\n` +
+      lines.map((l) => `  body:     ${l}`).join("\n"),
+    );
+    return "console";
   }
 
-  // 開発環境 / SES 未設定時はコンソールに出す (テスト容易性のため)
-  console.log(
-    `[identity] verification code generated\n` +
-    `  to:       ${email ?? "(no email)"}\n` +
-    `  subject:  ${subject}\n` +
-    lines.map((l) => `  body:     ${l}`).join("\n"),
-  );
-
-  return email && config.awsSesEnabled ? "email" : "console";
+  try {
+    const result = await sendMail({ to: email, subject, text });
+    console.log(`[identity] verification code sent via ${result.channel} to=${email} messageId=${result.messageId ?? "(none)"}`);
+    return "email";
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[identity] failed to send verification code to=${email}: ${msg}`);
+    throw new Error(`Failed to send verification email: ${msg}`);
+  }
 }
