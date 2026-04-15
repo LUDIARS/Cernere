@@ -598,3 +598,149 @@ export async function isOptedOut(userId: string, projectKey: string, moduleKey: 
     )).limit(1);
   return rows.length > 0;
 }
+
+// ═══ OAuth Token Storage (project-owned) ══════════════════════════════
+// 各プロジェクトは OAuth トークンを自前で保管せず Cernere に預ける。
+// personal data rule (Schedula CLAUDE.md §個人データ保管禁止) の準拠基盤。
+
+export interface OAuthTokenInput {
+  provider: string;
+  accessToken?: string | null;
+  refreshToken?: string | null;
+  expiresAt?: string | null;  // ISO 8601
+  tokenType?: string | null;
+  scope?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface OAuthTokenRecord {
+  provider: string;
+  accessToken: string | null;
+  refreshToken: string | null;
+  expiresAt: string | null;
+  tokenType: string | null;
+  scope: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function storeOAuthToken(
+  projectKey: string,
+  userId: string,
+  input: OAuthTokenInput,
+): Promise<{ ok: true; provider: string }> {
+  if (!input.provider) throw AppError.badRequest("provider is required");
+
+  const expiresAt = input.expiresAt ? new Date(input.expiresAt) : null;
+  const now = new Date();
+
+  const existing = await db.select()
+    .from(dbSchema.projectOauthTokens)
+    .where(and(
+      eq(dbSchema.projectOauthTokens.projectKey, projectKey),
+      eq(dbSchema.projectOauthTokens.userId, userId),
+      eq(dbSchema.projectOauthTokens.provider, input.provider),
+    )).limit(1);
+
+  if (existing.length > 0) {
+    await db.update(dbSchema.projectOauthTokens)
+      .set({
+        accessToken: input.accessToken ?? existing[0].accessToken,
+        refreshToken: input.refreshToken ?? existing[0].refreshToken,
+        expiresAt: expiresAt ?? existing[0].expiresAt,
+        tokenType: input.tokenType ?? existing[0].tokenType,
+        scope: input.scope ?? existing[0].scope,
+        metadata: input.metadata ?? (existing[0].metadata as Record<string, unknown>),
+        updatedAt: now,
+      })
+      .where(eq(dbSchema.projectOauthTokens.id, existing[0].id));
+  } else {
+    await db.insert(dbSchema.projectOauthTokens).values({
+      projectKey,
+      userId,
+      provider: input.provider,
+      accessToken: input.accessToken ?? null,
+      refreshToken: input.refreshToken ?? null,
+      expiresAt,
+      tokenType: input.tokenType ?? null,
+      scope: input.scope ?? null,
+      metadata: (input.metadata ?? {}) as Record<string, unknown>,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  return { ok: true, provider: input.provider };
+}
+
+export async function getOAuthToken(
+  projectKey: string,
+  userId: string,
+  provider: string,
+): Promise<OAuthTokenRecord | null> {
+  if (!provider) throw AppError.badRequest("provider is required");
+
+  const rows = await db.select()
+    .from(dbSchema.projectOauthTokens)
+    .where(and(
+      eq(dbSchema.projectOauthTokens.projectKey, projectKey),
+      eq(dbSchema.projectOauthTokens.userId, userId),
+      eq(dbSchema.projectOauthTokens.provider, provider),
+    )).limit(1);
+
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  return {
+    provider: r.provider,
+    accessToken: r.accessToken,
+    refreshToken: r.refreshToken,
+    expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null,
+    tokenType: r.tokenType,
+    scope: r.scope,
+    metadata: (r.metadata ?? {}) as Record<string, unknown>,
+    createdAt: r.createdAt.toISOString(),
+    updatedAt: r.updatedAt.toISOString(),
+  };
+}
+
+export async function listOAuthTokens(
+  projectKey: string,
+  userId: string,
+): Promise<OAuthTokenRecord[]> {
+  const rows = await db.select()
+    .from(dbSchema.projectOauthTokens)
+    .where(and(
+      eq(dbSchema.projectOauthTokens.projectKey, projectKey),
+      eq(dbSchema.projectOauthTokens.userId, userId),
+    ));
+
+  return rows.map((r) => ({
+    provider: r.provider,
+    accessToken: r.accessToken,
+    refreshToken: r.refreshToken,
+    expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null,
+    tokenType: r.tokenType,
+    scope: r.scope,
+    metadata: (r.metadata ?? {}) as Record<string, unknown>,
+    createdAt: r.createdAt.toISOString(),
+    updatedAt: r.updatedAt.toISOString(),
+  }));
+}
+
+export async function deleteOAuthToken(
+  projectKey: string,
+  userId: string,
+  provider: string,
+): Promise<{ ok: true; deleted: boolean }> {
+  if (!provider) throw AppError.badRequest("provider is required");
+
+  await db.delete(dbSchema.projectOauthTokens)
+    .where(and(
+      eq(dbSchema.projectOauthTokens.projectKey, projectKey),
+      eq(dbSchema.projectOauthTokens.userId, userId),
+      eq(dbSchema.projectOauthTokens.provider, provider),
+    ));
+
+  return { ok: true, deleted: true };
+}
