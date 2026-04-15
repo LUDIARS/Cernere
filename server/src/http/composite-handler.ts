@@ -18,8 +18,15 @@ import {
   logUserRegister,
   logAuthEvent,
 } from "../logging/auth-logger.js";
+import {
+  checkDevice,
+  verifyChallenge,
+  resendChallengeCode,
+  type DeviceFingerprint,
+} from "../auth/identity-verification.js";
 
 const AUTH_CODE_TTL = 60; // seconds
+const PENDING_AUTH_TTL = 10 * 60; // 10 分: 本人確認待ちの間保持
 
 interface RouteResult {
   status: string;
@@ -41,6 +48,8 @@ export async function handleCompositeRoute(
     case "login": return compositeLogin(p, ctx);
     case "register": return compositeRegister(p, ctx);
     case "mfa-verify": return compositeMfaVerify(p, ctx);
+    case "device-verify": return compositeDeviceVerify(p, ctx);
+    case "device-resend": return compositeDeviceResend(p, ctx);
     default:
       return { status: "404 Not Found", data: { error: `Unknown composite action: ${action}` } };
   }
@@ -48,14 +57,16 @@ export async function handleCompositeRoute(
 
 /** project WS から呼ばれる auth コマンド用のエントリポイント (同じロジックを再利用) */
 export async function executeCompositeAction(
-  action: "login" | "register" | "mfa-verify",
+  action: "login" | "register" | "mfa-verify" | "device-verify" | "device-resend",
   payload: Record<string, unknown>,
   ctx: CompositeCtx = {},
 ): Promise<unknown> {
   switch (action) {
-    case "login":      return (await compositeLogin(payload, ctx)).data;
-    case "register":   return (await compositeRegister(payload, ctx)).data;
-    case "mfa-verify": return (await compositeMfaVerify(payload, ctx)).data;
+    case "login":         return (await compositeLogin(payload, ctx)).data;
+    case "register":      return (await compositeRegister(payload, ctx)).data;
+    case "mfa-verify":    return (await compositeMfaVerify(payload, ctx)).data;
+    case "device-verify": return (await compositeDeviceVerify(payload, ctx)).data;
+    case "device-resend": return (await compositeDeviceResend(payload, ctx)).data;
   }
 }
 
@@ -83,6 +94,87 @@ async function issueAuthCode(userId: string, displayName: string, email: string 
   }), "EX", AUTH_CODE_TTL);
 
   return authCode;
+}
+
+/** 本人確認待ちの間、ユーザー基本情報を deviceToken に紐付けて保持 */
+interface PendingUserInfo {
+  userId: string;
+  displayName: string;
+  email: string | null;
+  role: string;
+}
+
+async function storePendingAuth(deviceToken: string, info: PendingUserInfo): Promise<void> {
+  await redis.set(`pending_auth:${deviceToken}`, JSON.stringify(info), "EX", PENDING_AUTH_TTL);
+}
+
+async function loadPendingAuth(deviceToken: string): Promise<PendingUserInfo | null> {
+  const raw = await redis.get(`pending_auth:${deviceToken}`);
+  if (!raw) return null;
+  return JSON.parse(raw) as PendingUserInfo;
+}
+
+async function clearPendingAuth(deviceToken: string): Promise<void> {
+  await redis.del(`pending_auth:${deviceToken}`);
+}
+
+/** payload.device を DeviceFingerprint に正規化 */
+function extractFingerprint(p: Record<string, unknown>): DeviceFingerprint | undefined {
+  const d = p.device;
+  if (!d || typeof d !== "object") return undefined;
+  const obj = d as Record<string, unknown>;
+  return {
+    machine: (obj.machine as Record<string, unknown> | undefined) ?? undefined,
+    browser: (obj.browser as Record<string, unknown> | undefined) ?? undefined,
+    geo: (obj.geo as Record<string, unknown> | undefined) ?? undefined,
+  };
+}
+
+/**
+ * デバイスチェックを実行し、結果に応じて authCode を返すか
+ * 本人確認チャレンジを返す。
+ */
+async function gateAuth(
+  user: { id: string; displayName: string; email: string | null; role: string },
+  fp: DeviceFingerprint | undefined,
+  ctx: CompositeCtx,
+): Promise<RouteResult> {
+  const check = await checkDevice(
+    { id: user.id, email: user.email },
+    fp,
+    ctx,
+  );
+
+  if (check.trusted) {
+    const now = new Date();
+    await db.update(schema.users).set({ lastLoginAt: now, updatedAt: now })
+      .where(eq(schema.users.id, user.id));
+    const authCode = await issueAuthCode(user.id, user.displayName, user.email, user.role);
+    return { status: "200 OK", data: { authCode } };
+  }
+
+  // 本人確認が必要 — ユーザー情報を pending として保持
+  if (!check.deviceToken) {
+    throw new Error("Device verification could not be initialized");
+  }
+  await storePendingAuth(check.deviceToken, {
+    userId: user.id,
+    displayName: user.displayName,
+    email: user.email,
+    role: user.role,
+  });
+
+  return {
+    status: "200 OK",
+    data: {
+      deviceVerificationRequired: true,
+      deviceToken: check.deviceToken,
+      anomalies: check.anomalies,
+      emailMasked: check.emailMasked,
+      codeChannel: check.codeChannel,
+      deviceLabel: check.label,
+    },
+  };
 }
 
 async function compositeLogin(p: Record<string, unknown>, ctx: CompositeCtx): Promise<RouteResult> {
@@ -117,13 +209,12 @@ async function compositeLogin(p: Record<string, unknown>, ctx: CompositeCtx): Pr
     };
   }
 
-  const now = new Date();
-  await db.update(schema.users).set({ lastLoginAt: now, updatedAt: now })
-    .where(eq(schema.users.id, user.id));
-
-  const authCode = await issueAuthCode(user.id, user.displayName ?? "", user.email, user.role);
   logUserLogin(user.id, user.email, "composite", ctx);
-  return { status: "200 OK", data: { authCode } };
+  return gateAuth(
+    { id: user.id, displayName: user.displayName ?? "", email: user.email, role: user.role },
+    extractFingerprint(p),
+    ctx,
+  );
 }
 
 async function compositeRegister(p: Record<string, unknown>, ctx: CompositeCtx): Promise<RouteResult> {
@@ -151,9 +242,13 @@ async function compositeRegister(p: Record<string, unknown>, ctx: CompositeCtx):
     createdAt: now, updatedAt: now,
   });
 
-  const authCode = await issueAuthCode(userId, name, email, role);
   logUserRegister(userId, email, "composite", { ip: ctx.ip });
-  return { status: "201 Created", data: { authCode } };
+  // 新規登録時は当該デバイスを必ず確認 (他人による不正登録の検知も兼ねる)
+  return gateAuth(
+    { id: userId, displayName: name, email, role },
+    extractFingerprint(p),
+    ctx,
+  );
 }
 
 async function compositeMfaVerify(p: Record<string, unknown>, ctx: CompositeCtx): Promise<RouteResult> {
@@ -179,12 +274,78 @@ async function compositeMfaVerify(p: Record<string, unknown>, ctx: CompositeCtx)
 
   await redis.del(`mfa:${mfaToken}`);
 
-  const now = new Date();
-  await db.update(schema.users).set({ lastLoginAt: now, updatedAt: now })
-    .where(eq(schema.users.id, user.id));
-
-  const authCode = await issueAuthCode(user.id, user.displayName ?? "", user.email, user.role);
   logAuthEvent({ event: "user.mfa.verified", userId: user.id, email: user.email ?? undefined, provider: "composite", ip: ctx.ip, userAgent: ctx.userAgent });
   logUserLogin(user.id, user.email, "composite_mfa", ctx);
+
+  return gateAuth(
+    { id: user.id, displayName: user.displayName ?? "", email: user.email, role: user.role },
+    extractFingerprint(p),
+    ctx,
+  );
+}
+
+/**
+ * デバイス本人確認: ユーザーが入力したコードを検証し、信頼済みデバイスに登録する。
+ * 検証成功時は authCode を発行する。
+ */
+async function compositeDeviceVerify(p: Record<string, unknown>, ctx: CompositeCtx): Promise<RouteResult> {
+  const deviceToken = p.deviceToken as string | undefined;
+  const code = p.code as string | undefined;
+  if (!deviceToken || !code) throw new Error("deviceToken and code are required");
+
+  await checkRateLimit(`device_verify:${deviceToken}`, 10, 600);
+
+  const result = await verifyChallenge(deviceToken, code);
+  if (!result.ok) {
+    if (result.remainingAttempts !== undefined) {
+      return {
+        status: "200 OK",
+        data: { error: result.error, remainingAttempts: result.remainingAttempts },
+      };
+    }
+    throw new Error(`Unauthorized: ${result.error ?? "Verification failed"}`);
+  }
+
+  const pending = await loadPendingAuth(deviceToken);
+  if (!pending) {
+    throw new Error("Unauthorized: Pending authentication expired");
+  }
+  await clearPendingAuth(deviceToken);
+
+  const now = new Date();
+  await db.update(schema.users).set({ lastLoginAt: now, updatedAt: now })
+    .where(eq(schema.users.id, pending.userId));
+
+  const authCode = await issueAuthCode(pending.userId, pending.displayName, pending.email, pending.role);
+  logAuthEvent({
+    event: "user.login",
+    userId: pending.userId,
+    email: pending.email ?? undefined,
+    provider: "composite_device_verified",
+    ip: ctx.ip,
+    userAgent: ctx.userAgent,
+  });
   return { status: "200 OK", data: { authCode } };
+}
+
+/**
+ * 確認コードの再送 (ユーザーが受け取れなかった場合のフォールバック)。
+ */
+async function compositeDeviceResend(p: Record<string, unknown>, ctx: CompositeCtx): Promise<RouteResult> {
+  const deviceToken = p.deviceToken as string | undefined;
+  if (!deviceToken) throw new Error("deviceToken is required");
+
+  await checkRateLimit(`device_resend:${deviceToken}`, 3, 300);
+
+  const ok = await resendChallengeCode(deviceToken);
+  if (!ok) {
+    throw new Error("Unauthorized: Verification token expired");
+  }
+  logAuthEvent({
+    event: "user.device.challenge.resent",
+    deviceToken,
+    ip: ctx.ip,
+    userAgent: ctx.userAgent,
+  });
+  return { status: "200 OK", data: { ok: true } };
 }
