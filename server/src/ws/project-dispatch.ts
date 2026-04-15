@@ -88,6 +88,38 @@ export async function dispatchProjectCommand(
       // 既存 updateProjectSchema にそのまま委譲 (appliedBy は undefined)。
       return svc.updateProjectSchema(projectKey, def, undefined);
     }
+    // ─── OAuth token storage (個人データ保管禁止ルールの基盤) ───
+    case "managed_project.store_oauth_token": {
+      const svc = await import("../project/service.js");
+      const userId = requireStr(payload, "userId");
+      const provider = requireStr(payload, "provider");
+      return svc.storeOAuthToken(projectKey, userId, {
+        provider,
+        accessToken: (payload.accessToken ?? null) as string | null,
+        refreshToken: (payload.refreshToken ?? null) as string | null,
+        expiresAt: (payload.expiresAt ?? null) as string | null,
+        tokenType: (payload.tokenType ?? null) as string | null,
+        scope: (payload.scope ?? null) as string | null,
+        metadata: (payload.metadata ?? {}) as Record<string, unknown>,
+      });
+    }
+    case "managed_project.get_oauth_token": {
+      const svc = await import("../project/service.js");
+      const userId = requireStr(payload, "userId");
+      const provider = requireStr(payload, "provider");
+      return svc.getOAuthToken(projectKey, userId, provider);
+    }
+    case "managed_project.list_oauth_tokens": {
+      const svc = await import("../project/service.js");
+      const userId = requireStr(payload, "userId");
+      return svc.listOAuthTokens(projectKey, userId);
+    }
+    case "managed_project.delete_oauth_token": {
+      const svc = await import("../project/service.js");
+      const userId = requireStr(payload, "userId");
+      const provider = requireStr(payload, "provider");
+      return svc.deleteOAuthToken(projectKey, userId, provider);
+    }
     default:
       throw new Error(`Unknown command: ${module}.${action} (project: ${projectKey})`);
   }

@@ -272,3 +272,26 @@ export const projectDefinitionHistory = pgTable("project_definition_history", {
 }, (t) => [
   index("idx_project_def_history_key").on(t.projectKey),
 ]);
+
+// ── Project OAuth Tokens (プロジェクト別 OAuth トークンストレージ) ──
+// Cernere を個人データの単一情報源とするため、各プロジェクトは
+// OAuth refresh/access token を自前で保管せず Cernere に預ける。
+
+export const projectOauthTokens = pgTable("project_oauth_tokens", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectKey: text("project_key").notNull(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(),
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  tokenType: text("token_type"),
+  scope: text("scope"),
+  metadata: jsonb("metadata").notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("idx_oauth_tokens_project_user_provider").on(t.projectKey, t.userId, t.provider),
+  index("idx_oauth_tokens_project_user").on(t.projectKey, t.userId),
+  index("idx_oauth_tokens_project_provider").on(t.projectKey, t.provider),
+]);
