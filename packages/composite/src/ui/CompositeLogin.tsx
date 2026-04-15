@@ -9,22 +9,49 @@
  *   <CompositeLogin authApi={myAuthApi} onAuthCode={(code) => ...} />
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { collectDeviceFingerprint, type DeviceFingerprint } from "./device-fingerprint.js";
+
+export type DeviceAnomaly =
+  | "new_device"
+  | "new_os"
+  | "new_browser"
+  | "new_location"
+  | "new_ip"
+  | "missing_fingerprint";
 
 export interface CompositeAuthResponse {
   authCode?: string;
   mfaRequired?: boolean;
   mfaMethods?: string[];
   mfaToken?: string;
+  /** 本人確認 (デバイス検証) が必要 */
+  deviceVerificationRequired?: boolean;
+  deviceToken?: string;
+  /** 確認コード送信先のマスクされたメール (例: u***@example.com) */
+  emailMasked?: string;
+  /** 検出された差分の一覧 */
+  anomalies?: DeviceAnomaly[];
+  /** 確認コードの送信チャネル */
+  codeChannel?: "email" | "console";
+  /** デバイスラベル (例: "macOS · Chrome 124 · Tokyo, JP") */
+  deviceLabel?: string;
+  /** 残り試行回数 (失敗応答時) */
+  remainingAttempts?: number;
+  error?: string;
 }
 
 export interface CompositeAuthApi {
-  /** Email / パスワードでログイン */
-  login(params: { email: string; password: string }): Promise<CompositeAuthResponse>;
+  /** Email / パスワードでログイン (device は本人確認用フィンガープリント) */
+  login(params: { email: string; password: string; device?: DeviceFingerprint }): Promise<CompositeAuthResponse>;
   /** 新規ユーザー登録 */
-  register(params: { name: string; email: string; password: string }): Promise<CompositeAuthResponse>;
+  register(params: { name: string; email: string; password: string; device?: DeviceFingerprint }): Promise<CompositeAuthResponse>;
   /** MFA チャレンジ応答 (任意) */
-  mfaVerify?(params: { mfaToken: string; method: string; code: string }): Promise<CompositeAuthResponse>;
+  mfaVerify?(params: { mfaToken: string; method: string; code: string; device?: DeviceFingerprint }): Promise<CompositeAuthResponse>;
+  /** デバイス本人確認: 確認コードを検証し authCode を取得する */
+  deviceVerify?(params: { deviceToken: string; code: string }): Promise<CompositeAuthResponse>;
+  /** 確認コードを再送する */
+  deviceResend?(params: { deviceToken: string }): Promise<CompositeAuthResponse>;
 }
 
 export interface CompositeLoginProps {
@@ -61,6 +88,23 @@ interface Labels {
   mfaTitle: string;
   mfaCode: string;
   submitMfa: string;
+  // ── デバイス本人確認 ──────────────
+  deviceTitle: string;
+  deviceSubtitle: string;
+  deviceCode: string;
+  deviceCodePlaceholder: string;
+  deviceSubmit: string;
+  deviceResend: string;
+  deviceResent: string;
+  collectingFingerprint: string;
+  geoRequest: string;
+  anomalyNewDevice: string;
+  anomalyNewOs: string;
+  anomalyNewBrowser: string;
+  anomalyNewLocation: string;
+  anomalyNewIp: string;
+  anomalyMissing: string;
+  remainingAttempts: string;
 }
 
 const DEFAULT_LABELS: Labels = {
@@ -80,9 +124,45 @@ const DEFAULT_LABELS: Labels = {
   mfaTitle: "MFA Verification",
   mfaCode: "Code",
   submitMfa: "Verify",
+  deviceTitle: "Verify it's you",
+  deviceSubtitle: "We sent a 6-digit verification code to {email}.",
+  deviceCode: "Verification code",
+  deviceCodePlaceholder: "123456",
+  deviceSubmit: "Verify device",
+  deviceResend: "Resend code",
+  deviceResent: "Code re-sent.",
+  collectingFingerprint: "Collecting device information...",
+  geoRequest: "We will request your location to verify it's really you.",
+  anomalyNewDevice: "New device",
+  anomalyNewOs: "New OS",
+  anomalyNewBrowser: "New browser",
+  anomalyNewLocation: "Different location",
+  anomalyNewIp: "Different network",
+  anomalyMissing: "Could not collect device information",
+  remainingAttempts: "{n} attempts remaining",
 };
 
-type Mode = "login" | "register" | "mfa";
+type Mode = "login" | "register" | "mfa" | "device";
+
+interface DeviceChallenge {
+  deviceToken: string;
+  emailMasked?: string;
+  anomalies: DeviceAnomaly[];
+  codeChannel?: "email" | "console";
+  deviceLabel?: string;
+}
+
+function anomalyLabel(a: DeviceAnomaly, l: Labels): string {
+  switch (a) {
+    case "new_device": return l.anomalyNewDevice;
+    case "new_os": return l.anomalyNewOs;
+    case "new_browser": return l.anomalyNewBrowser;
+    case "new_location": return l.anomalyNewLocation;
+    case "new_ip": return l.anomalyNewIp;
+    case "missing_fingerprint": return l.anomalyMissing;
+    default: return a;
+  }
+}
 
 export function CompositeLogin(props: CompositeLoginProps) {
   const l: Labels = { ...DEFAULT_LABELS, ...props.labels };
@@ -95,14 +175,41 @@ export function CompositeLogin(props: CompositeLoginProps) {
   const [mfaToken, setMfaToken] = useState("");
   const [mfaMethod, setMfaMethod] = useState("totp");
   const [mfaCode, setMfaCode] = useState("");
+  const [device, setDevice] = useState<DeviceChallenge | null>(null);
+  const [deviceCode, setDeviceCode] = useState("");
+  const [info, setInfo] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // ── マウント時にフィンガープリント収集 (geo はユーザー操作不要) ──
+  // ※ Geolocation API はユーザー許可を求めるが、拒否されてもフォールバックする
+  const [fingerprint, setFingerprint] = useState<DeviceFingerprint | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    collectDeviceFingerprint({ requestGeo: true, geoTimeoutMs: 5000 })
+      .then((fp) => { if (!cancelled) setFingerprint(fp); })
+      .catch(() => { if (!cancelled) setFingerprint(null); });
+    return () => { cancelled = true; };
+  }, []);
+
   const handleResponse = (r: CompositeAuthResponse) => {
+    setInfo("");
     if (r.mfaRequired) {
       setMfaToken(r.mfaToken ?? "");
       setMfaMethod(r.mfaMethods?.[0] ?? "totp");
       setMode("mfa");
+      return;
+    }
+    if (r.deviceVerificationRequired && r.deviceToken) {
+      setDevice({
+        deviceToken: r.deviceToken,
+        emailMasked: r.emailMasked,
+        anomalies: r.anomalies ?? [],
+        codeChannel: r.codeChannel,
+        deviceLabel: r.deviceLabel,
+      });
+      setDeviceCode("");
+      setMode("device");
       return;
     }
     if (r.authCode) {
@@ -110,18 +217,51 @@ export function CompositeLogin(props: CompositeLoginProps) {
     }
   };
 
+  const submitDeviceVerify = async () => {
+    if (!authApi.deviceVerify || !device) {
+      throw new Error("Device verification is not supported");
+    }
+    const r = await authApi.deviceVerify({ deviceToken: device.deviceToken, code: deviceCode.trim() });
+    if (r.error) {
+      const remaining = typeof r.remainingAttempts === "number"
+        ? l.remainingAttempts.replace("{n}", String(r.remainingAttempts))
+        : "";
+      throw new Error(remaining ? `${r.error} (${remaining})` : r.error);
+    }
+    handleResponse(r);
+  };
+
+  const handleResend = async () => {
+    if (!authApi.deviceResend || !device) return;
+    setError("");
+    setInfo("");
+    setLoading(true);
+    try {
+      await authApi.deviceResend({ deviceToken: device.deviceToken });
+      setInfo(l.deviceResent);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Resend failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setInfo("");
     setLoading(true);
     try {
+      const fp = fingerprint ?? undefined;
       if (mode === "login") {
-        handleResponse(await authApi.login({ email, password }));
+        handleResponse(await authApi.login({ email, password, device: fp }));
       } else if (mode === "register") {
-        handleResponse(await authApi.register({ name, email, password }));
+        handleResponse(await authApi.register({ name, email, password, device: fp }));
       } else if (mode === "mfa") {
         if (!authApi.mfaVerify) throw new Error("MFA is not supported");
-        handleResponse(await authApi.mfaVerify({ mfaToken, method: mfaMethod, code: mfaCode }));
+        handleResponse(await authApi.mfaVerify({ mfaToken, method: mfaMethod, code: mfaCode, device: fp }));
+      } else if (mode === "device") {
+        await submitDeviceVerify();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Authentication failed");
@@ -149,7 +289,7 @@ export function CompositeLogin(props: CompositeLoginProps) {
         <p style={{ color: "var(--text-muted, #888)", fontSize: "0.85rem" }}>{l.subtitle}</p>
       </div>
 
-      {mode !== "mfa" && (
+      {mode !== "mfa" && mode !== "device" && (
         <div
           style={{
             display: "flex",
@@ -176,6 +316,22 @@ export function CompositeLogin(props: CompositeLoginProps) {
               {m === "login" ? l.loginTab : l.registerTab}
             </button>
           ))}
+        </div>
+      )}
+
+      {info && (
+        <div
+          style={{
+            background: "rgba(34, 197, 94, 0.1)",
+            border: "1px solid var(--green, #22c55e)",
+            borderRadius: "4px",
+            padding: "0.5rem 0.75rem",
+            marginBottom: "1rem",
+            fontSize: "0.85rem",
+            color: "var(--green, #16a34a)",
+          }}
+        >
+          {info}
         </div>
       )}
 
@@ -254,6 +410,56 @@ export function CompositeLogin(props: CompositeLoginProps) {
           </div>
         )}
 
+        {mode === "device" && device && (
+          <div style={{ marginBottom: "0.75rem" }}>
+            <p style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.25rem" }}>{l.deviceTitle}</p>
+            <p style={{ fontSize: "0.85rem", color: "var(--text-muted, #888)", marginBottom: "0.75rem" }}>
+              {l.deviceSubtitle.replace("{email}", device.emailMasked ?? l.email)}
+            </p>
+
+            {device.deviceLabel && (
+              <p style={{ fontSize: "0.8rem", color: "var(--text-muted, #888)", marginBottom: "0.5rem" }}>
+                <strong>Device:</strong> {device.deviceLabel}
+              </p>
+            )}
+
+            {device.anomalies.length > 0 && (
+              <div style={{ marginBottom: "0.75rem", display: "flex", flexWrap: "wrap", gap: "0.25rem" }}>
+                {device.anomalies.map((a) => (
+                  <span
+                    key={a}
+                    style={{
+                      fontSize: "0.7rem",
+                      padding: "0.15rem 0.5rem",
+                      borderRadius: "999px",
+                      background: "rgba(245, 158, 11, 0.15)",
+                      border: "1px solid var(--amber, #f59e0b)",
+                      color: "var(--amber, #b45309)",
+                    }}
+                  >
+                    {anomalyLabel(a, l)}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <label style={labelStyle}>{l.deviceCode}</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={deviceCode}
+              onChange={(e) => setDeviceCode(e.target.value.replace(/\D/g, ""))}
+              placeholder={l.deviceCodePlaceholder}
+              required
+              style={{ ...inputStyle, fontFamily: "monospace", letterSpacing: "0.25em", textAlign: "center", fontSize: "1.1rem" }}
+              autoFocus
+            />
+          </div>
+        )}
+
         <button
           type="submit"
           disabled={loading}
@@ -275,11 +481,40 @@ export function CompositeLogin(props: CompositeLoginProps) {
               ? l.submitLogin
               : mode === "register"
                 ? l.submitRegister
-                : l.submitMfa}
+                : mode === "device"
+                  ? l.deviceSubmit
+                  : l.submitMfa}
         </button>
+
+        {mode === "device" && authApi.deviceResend && (
+          <button
+            type="button"
+            onClick={handleResend}
+            disabled={loading}
+            style={{
+              width: "100%",
+              marginTop: "0.5rem",
+              padding: "0.4rem",
+              background: "transparent",
+              color: "var(--accent, #4f46e5)",
+              border: "none",
+              fontSize: "0.85rem",
+              cursor: loading ? "wait" : "pointer",
+              textDecoration: "underline",
+            }}
+          >
+            {l.deviceResend}
+          </button>
+        )}
+
+        {(mode === "login" || mode === "register") && !fingerprint && (
+          <p style={{ fontSize: "0.7rem", color: "var(--text-muted, #888)", marginTop: "0.5rem", textAlign: "center" }}>
+            {l.collectingFingerprint}
+          </p>
+        )}
       </form>
 
-      {mode !== "mfa" && oauth && (oauth.googleUrl || oauth.githubUrl) && (
+      {mode !== "mfa" && mode !== "device" && oauth && (oauth.googleUrl || oauth.githubUrl) && (
         <>
           <div
             style={{

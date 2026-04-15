@@ -29,7 +29,12 @@ type AuthEventType =
   | "project.login.failed"
   | "project.ws.connect"
   | "project.ws.disconnect"
-  | "project.ws.rejected";
+  | "project.ws.rejected"
+  | "user.device.trusted"
+  | "user.device.challenge"
+  | "user.device.challenge.resent"
+  | "user.device.verify.success"
+  | "user.device.verify.failed";
 
 interface AuthEventBase {
   event: AuthEventType;
