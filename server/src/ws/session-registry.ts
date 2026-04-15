@@ -54,8 +54,23 @@ class SessionRegistry {
     return [...this.userSessions.keys()];
   }
 
+  /**
+   * close 後のソケットに uWS.send を呼ぶと例外が投げられるため、userData.closed
+   * を確認 + try/catch で二重に防御する (handler.ts の send と同方針)。
+   */
   private send(ws: uWS.WebSocket<WsUserData>, msg: ServerMessage): void {
-    ws.send(JSON.stringify(msg));
+    let data: WsUserData | undefined;
+    try {
+      data = ws.getUserData();
+    } catch {
+      return;
+    }
+    if (data.closed) return;
+    try {
+      ws.send(JSON.stringify(msg));
+    } catch {
+      data.closed = true;
+    }
   }
 
   sendTo(sessionId: string, msg: ServerMessage): void {

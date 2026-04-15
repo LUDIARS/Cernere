@@ -21,8 +21,26 @@ const PING_INTERVAL_MS = 30_000;
 
 const pingTimers = new Map<string, ReturnType<typeof setInterval>>();
 
+/**
+ * Safe send — close 後のソケットに触ると uWS は throw するので、
+ * userData.closed フラグで早期リターン + try/catch で二重防御する。
+ * この関数は例外を投げない (logging のみ)。
+ */
 function send(ws: uWS.WebSocket<WsUserData>, msg: ServerMessage): void {
-  ws.send(JSON.stringify(msg));
+  let data: WsUserData | undefined;
+  try {
+    data = ws.getUserData();
+  } catch {
+    // 既に破棄された WebSocket
+    return;
+  }
+  if (data.closed) return;
+  try {
+    ws.send(JSON.stringify(msg));
+  } catch {
+    // close と send のレース。以降の send をブロックするため closed を立てる
+    data.closed = true;
+  }
 }
 
 // ── open ──────────────────────────────────────────────────
@@ -141,6 +159,9 @@ export async function handleWsMessage(
 
 export async function handleWsClose(ws: uWS.WebSocket<WsUserData>): Promise<void> {
   const data = ws.getUserData();
+  // 最優先: send() が走らないよう同期的にフラグを立てる。
+  // これ以降の await 内で別経路 (setInterval 等) が send を試みても握り潰される。
+  data.closed = true;
   const timer = pingTimers.get(data.sessionId);
   if (timer) { clearInterval(timer); pingTimers.delete(data.sessionId); }
 
