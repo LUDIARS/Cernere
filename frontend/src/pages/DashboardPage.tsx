@@ -150,6 +150,16 @@ export function DashboardPage() {
     }
   };
 
+  const handleOpen = async (key: string) => {
+    setError(null);
+    try {
+      const { url } = await wsClient.sendCommand<{ url: string }>("managed_project", "open_url", { key });
+      window.open(url, "_blank", "noopener");
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
   const projectList = (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
@@ -180,17 +190,15 @@ export function DashboardPage() {
             return (
               <div
                 key={p.key}
-                onClick={() => selectProject(p.key)}
                 style={{
                   padding: "0.75rem 1rem",
                   borderRadius: "6px",
-                  cursor: "pointer",
                   background: "var(--bg-surface)",
                   border: "1px solid var(--border)",
-                  transition: "border-color 0.15s",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "0.5rem",
                 }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "var(--text-muted)"; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border)"; }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
                   <span style={{ fontSize: "0.95rem", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
@@ -215,12 +223,33 @@ export function DashboardPage() {
                     )}
                   </div>
                 </div>
-                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "0.15rem" }}>{p.key}</div>
+                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{p.key}</div>
                 {p.description && (
-                  <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: "0.4rem", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                  <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", flex: 1 }}>
                     {p.description}
                   </div>
                 )}
+                <div style={{ display: "flex", gap: "0.5rem", marginTop: "auto" }}>
+                  <button
+                    onClick={() => selectProject(p.key)}
+                    style={{
+                      flex: 1, padding: "0.35rem 0.5rem", fontSize: "0.8rem", borderRadius: "4px",
+                      border: "1px solid var(--border)", background: "transparent", color: "var(--text)", cursor: "pointer",
+                    }}
+                  >詳細</button>
+                  <button
+                    onClick={() => handleOpen(p.key)}
+                    disabled={!p.isActive}
+                    style={{
+                      flex: 1, padding: "0.35rem 0.5rem", fontSize: "0.8rem", borderRadius: "4px",
+                      border: "1px solid var(--green, #2ea043)",
+                      background: p.isActive ? "var(--green, #2ea043)" : "transparent",
+                      color: p.isActive ? "#fff" : "var(--text-muted)",
+                      cursor: p.isActive ? "pointer" : "not-allowed",
+                      opacity: p.isActive ? 1 : 0.5,
+                    }}
+                  >開く</button>
+                </div>
               </div>
             );
           })}
