@@ -37,8 +37,7 @@ import {
   resendChallengeCode,
   type DeviceFingerprint,
 } from "../auth/identity-verification.js";
-import { generateTokenPair, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
-import { redis } from "../redis.js";
+import { issueAuthCode as sharedIssueAuthCode } from "../auth/auth-code.js";
 import { logAuthEvent } from "../logging/auth-logger.js";
 
 // ── uWS UserData ──────────────────────────────────────────
@@ -63,7 +62,6 @@ type ServerMessage =
   | { type: "error"; retryable: boolean; reason: string }
   | { type: "ping"; ts: number };
 
-const AUTH_CODE_TTL = 60;
 const PING_INTERVAL_MS = 30_000;
 
 const pingTimers = new Map<string, ReturnType<typeof setInterval>>();
@@ -93,29 +91,15 @@ export async function resolveCompositeTicket(
   return session;
 }
 
-// ── authCode 発行 (内部) ──────────────────────────────────
+// ── authCode 発行 (auth-code.ts に共通化) ────────────────
 
 async function issueAuthCode(user: AuthSessionUser): Promise<string> {
-  const { accessToken, refreshToken } = generateTokenPair(user.userId, user.role);
-  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
-  await db.insert(schema.refreshSessions).values({
-    id: crypto.randomUUID(),
+  return sharedIssueAuthCode({
     userId: user.userId,
-    refreshToken,
-    expiresAt,
+    displayName: user.displayName,
+    email: user.email,
+    role: user.role,
   });
-  const authCode = crypto.randomUUID();
-  await redis.set(`authcode:${authCode}`, JSON.stringify({
-    accessToken,
-    refreshToken,
-    user: {
-      id: user.userId,
-      displayName: user.displayName,
-      email: user.email,
-      role: user.role,
-    },
-  }), "EX", AUTH_CODE_TTL);
-  return authCode;
 }
 
 // ── open ──────────────────────────────────────────────────

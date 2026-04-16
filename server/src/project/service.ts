@@ -429,6 +429,30 @@ export interface UserProjectOverview {
   inUse: boolean;
 }
 
+/**
+ * 認証済みユーザー向けに、プロジェクトのフロントエンド URL と
+ * authCode を発行する。フロントから別タブで開き、遷移先で
+ * `/api/auth/exchange { code }` を叩いて accessToken に交換する想定。
+ */
+export async function issueProjectOpenUrl(userId: string, projectKey: string): Promise<{ url: string }> {
+  const proj = await db.select().from(dbSchema.managedProjects)
+    .where(eq(dbSchema.managedProjects.key, projectKey)).limit(1);
+  if (proj.length === 0) throw AppError.notFound("Project not found");
+  if (!proj[0].isActive) throw AppError.badRequest("Project is inactive");
+
+  const def = proj[0].schemaDefinition as ProjectDefinition;
+  const frontendUrl = def?.endpoint?.frontend_url;
+  if (!frontendUrl) throw AppError.badRequest("Project has no frontend_url configured");
+
+  const { issueAuthCodeForUserId } = await import("../auth/auth-code.js");
+  const authCode = await issueAuthCodeForUserId(userId);
+  if (!authCode) throw AppError.forbidden("User not found");
+
+  const separator = frontendUrl.includes("?") ? "&" : "?";
+  const url = `${frontendUrl}${separator}code=${encodeURIComponent(authCode)}`;
+  return { url };
+}
+
 export async function listUserProjectsOverview(userId: string): Promise<UserProjectOverview[]> {
   const projects = await db.select().from(dbSchema.managedProjects)
     .where(eq(dbSchema.managedProjects.isActive, true));
