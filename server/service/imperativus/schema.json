@@ -1,0 +1,106 @@
+{
+  "project": {
+    "key": "imperativus",
+    "name": "Imperativus",
+    "description": "音声コマンドルーター + Voice Assistant プラットフォーム"
+  },
+
+  "endpoint": {
+    "url": "http://localhost:5963",
+    "frontend_url": "http://localhost:5963",
+    "same_server": true,
+    "bridge_path": "/imperativus"
+  },
+
+  "data_sharing": [
+    {
+      "project_key": "nuntius",
+      "modules": ["alexa"],
+      "access": "readwrite",
+      "description": "音声チャネル (Alexa) 配信のため Nuntius と alexa_user_id を共有"
+    }
+  ],
+
+  "user_data": {
+    "columns": {
+      "stt_language": {
+        "type": "text",
+        "module": "stt",
+        "nullable": true,
+        "description": "STT 認識言語コード (ja / en / zh ...)"
+      },
+      "stt_model": {
+        "type": "text",
+        "module": "stt",
+        "nullable": true,
+        "description": "STT モデルサイズ (tiny / base / small / medium / large-v3)"
+      },
+      "stt_device": {
+        "type": "text",
+        "module": "stt",
+        "nullable": true,
+        "description": "STT 推論デバイス (auto / cpu / cuda)"
+      },
+      "voice_auto_listen": {
+        "type": "boolean",
+        "module": "voice",
+        "nullable": true,
+        "description": "起動時に自動で音声入力を開始するか"
+      },
+      "voice_show_transcript": {
+        "type": "boolean",
+        "module": "voice",
+        "nullable": true,
+        "description": "UI に文字起こしを表示するか"
+      },
+      "voice_silence_timeout_ms": {
+        "type": "integer",
+        "module": "voice",
+        "nullable": true,
+        "description": "発話区切り判定の沈黙時間 (ms)"
+      },
+      "ui_theme": {
+        "type": "text",
+        "module": "ui",
+        "nullable": true,
+        "description": "UI テーマ (system / light / dark)"
+      },
+      "claude_working_directory": {
+        "type": "text",
+        "module": "claude",
+        "nullable": true,
+        "description": "Claude Code の作業ディレクトリ既定値"
+      },
+      "claude_timeout_secs": {
+        "type": "integer",
+        "module": "claude",
+        "nullable": true,
+        "description": "Claude Code 実行のタイムアウト (秒)"
+      },
+      "enabled_plugins": {
+        "type": "json",
+        "module": "plugins",
+        "nullable": true,
+        "description": "有効化したプラグイン名の配列"
+      },
+      "disabled_plugins": {
+        "type": "json",
+        "module": "plugins",
+        "nullable": true,
+        "description": "無効化したプラグイン名の配列"
+      },
+      "custom_voice_templates": {
+        "type": "json",
+        "module": "templates",
+        "nullable": true,
+        "description": "ユーザー定義の音声テンプレート ({ name, body, intent } の配列)"
+      },
+      "alexa_user_id": {
+        "type": "text",
+        "module": "alexa",
+        "nullable": true,
+        "description": "Alexa ユーザー ID (Alexa Skill 連携時の紐付け)"
+      }
+    }
+  }
+}
