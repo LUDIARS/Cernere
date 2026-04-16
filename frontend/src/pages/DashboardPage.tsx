@@ -150,61 +150,31 @@ export function DashboardPage() {
     }
   };
 
-  const projectPicker = (
-    <div style={{ display: "flex", gap: "0.5rem", padding: "0.75rem", borderBottom: "1px solid var(--border)", background: "var(--bg-surface)" }}>
-      <select
-        value={selected?.key ?? ""}
-        onChange={(e) => { if (e.target.value) selectProject(e.target.value); }}
-        style={{
-          flex: 1, padding: "0.4rem 0.5rem", fontSize: "0.85rem", borderRadius: "4px",
-          border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)",
-        }}
-      >
-        <option value="" disabled>
-          {loading ? "Loading..." : projects.length === 0 ? "No projects" : "-- Select a project --"}
-        </option>
-        {projects.map((p) => {
-          const ov = overviews[p.key];
-          const badge = !p.isActive ? " (off)" : ov ? (ov.inUse ? " ・利用中" : " ・未使用") : "";
-          return (
-            <option key={p.key} value={p.key}>
-              {p.name}{badge}
-            </option>
-          );
-        })}
-      </select>
-      {isAdmin && (
-        <button onClick={() => setShowRegister(!showRegister)} style={{
-          padding: "0.25rem 0.6rem", fontSize: "0.8rem", borderRadius: "4px",
-          border: "1px solid var(--border)", background: "transparent", color: "var(--text)", cursor: "pointer",
-          whiteSpace: "nowrap",
-        }}>{showRegister ? "Cancel" : "+ Add"}</button>
-      )}
-    </div>
-  );
-
-  const sidebar = (
-    <div style={{
-      width: 280, borderRight: "1px solid var(--border)", background: "var(--bg-surface)",
-      display: "flex", flexDirection: "column",
-    }}>
-      <div style={{ padding: "0.75rem 1rem", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: "0.8rem", fontWeight: 600, textTransform: "uppercase", color: "var(--text-muted)" }}>Projects</span>
+  const projectList = (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+        <h2 style={{ fontSize: "1.1rem", fontWeight: 600, margin: 0 }}>Projects</h2>
         {isAdmin && (
           <button onClick={() => setShowRegister(!showRegister)} style={{
-            padding: "0.15rem 0.5rem", fontSize: "0.75rem", borderRadius: "3px",
+            padding: "0.3rem 0.75rem", fontSize: "0.8rem", borderRadius: "4px",
             border: "1px solid var(--border)", background: "transparent", color: "var(--text)", cursor: "pointer",
           }}>{showRegister ? "Cancel" : "+ Add"}</button>
         )}
       </div>
 
-      <div style={{ flex: 1, overflow: "auto", padding: "0.25rem" }}>
-        {loading ? (
-          <p style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>Loading...</p>
-        ) : projects.length === 0 ? (
-          <p style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>No projects</p>
-        ) : (
-          projects.map((p) => {
+      {loading ? (
+        <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>Loading...</p>
+      ) : projects.length === 0 ? (
+        <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
+          {isAdmin ? "Register your first project with + Add" : "No projects available"}
+        </p>
+      ) : (
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(280px, 1fr))",
+          gap: "0.75rem",
+        }}>
+          {projects.map((p) => {
             const ov = overviews[p.key];
             const hasUserData = ov !== undefined;
             return (
@@ -212,25 +182,30 @@ export function DashboardPage() {
                 key={p.key}
                 onClick={() => selectProject(p.key)}
                 style={{
-                  padding: "0.5rem 0.75rem", borderRadius: "4px", cursor: "pointer",
-                  background: selected?.key === p.key ? "var(--bg-hover, rgba(255,255,255,0.05))" : "transparent",
-                  marginBottom: "2px",
+                  padding: "0.75rem 1rem",
+                  borderRadius: "6px",
+                  cursor: "pointer",
+                  background: "var(--bg-surface)",
+                  border: "1px solid var(--border)",
+                  transition: "border-color 0.15s",
                 }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "var(--text-muted)"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border)"; }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.3rem" }}>
-                  <span style={{ fontSize: "0.85rem", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
+                  <span style={{ fontSize: "0.95rem", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
                   <div style={{ display: "flex", gap: "0.25rem", flexShrink: 0 }}>
                     {!p.isActive && (
-                      <span style={{ fontSize: "0.65rem", padding: "0 0.3rem", borderRadius: "2px", background: "var(--red, #f85149)", color: "#fff" }}>off</span>
+                      <span style={{ fontSize: "0.65rem", padding: "0.1rem 0.35rem", borderRadius: "2px", background: "var(--red, #f85149)", color: "#fff" }}>off</span>
                     )}
                     {p.isActive && hasUserData && (
                       <span
                         title={`${ov.filledColumns}/${ov.totalColumns} columns filled`}
                         style={{
                           fontSize: "0.65rem",
-                          padding: "0 0.35rem",
+                          padding: "0.1rem 0.4rem",
                           borderRadius: "2px",
-                          background: ov.inUse ? "var(--green, #2ea043)" : "var(--bg, rgba(255,255,255,0.08))",
+                          background: ov.inUse ? "var(--green, #2ea043)" : "transparent",
                           color: ov.inUse ? "#fff" : "var(--text-muted)",
                           border: ov.inUse ? "none" : "1px solid var(--border)",
                         }}
@@ -240,21 +215,23 @@ export function DashboardPage() {
                     )}
                   </div>
                 </div>
-                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{p.key}</div>
+                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "0.15rem" }}>{p.key}</div>
+                {p.description && (
+                  <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: "0.4rem", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                    {p.description}
+                  </div>
+                )}
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
     </div>
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", height: "100%", width: "100%" }}>
-        {isMobile ? projectPicker : sidebar}
-
-        {/* Main content */}
-        <div style={{ flex: 1, overflow: "auto", padding: isMobile ? "1rem" : "1.5rem", width: "100%", minWidth: 0 }}>
+    <div style={{ height: "100%", width: "100%", overflow: "auto" }}>
+        <div style={{ padding: isMobile ? "1rem" : "1.5rem", width: "100%", minWidth: 0, maxWidth: "1200px", margin: "0 auto" }}>
           {error && (
             <div style={{ padding: "0.5rem 0.75rem", marginBottom: "1rem", borderRadius: "4px", background: "rgba(248,81,73,0.1)", border: "1px solid var(--red, #f85149)", fontSize: "0.85rem", color: "var(--red)" }}>
               {error}
@@ -314,9 +291,18 @@ export function DashboardPage() {
             </div>
           )}
 
-          {/* Project detail */}
+          {/* Project detail or list */}
           {selected ? (
             <div>
+              <button
+                onClick={() => setSelected(null)}
+                style={{
+                  padding: "0.3rem 0.75rem", fontSize: "0.8rem", borderRadius: "4px",
+                  border: "1px solid var(--border)", background: "transparent", color: "var(--text)",
+                  cursor: "pointer", marginBottom: "1rem",
+                }}
+              >← Back to projects</button>
+
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "1rem" }}>
                 <div>
                   <h2 style={{ fontSize: "1.25rem", fontWeight: 600, margin: 0 }}>{selected.name}</h2>
@@ -376,9 +362,7 @@ export function DashboardPage() {
               </div>
             </div>
           ) : (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text-muted)", fontSize: "0.9rem" }}>
-              {projects.length > 0 ? "Select a project from the sidebar" : isAdmin ? "Register your first project with + Add" : "No projects available"}
-            </div>
+            projectList
           )}
         </div>
       </div>
