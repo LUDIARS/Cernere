@@ -32,12 +32,23 @@ interface RegisterResult {
   clientSecret: string;
 }
 
+interface UserProjectOverview {
+  key: string;
+  name: string;
+  description: string;
+  isActive: boolean;
+  totalColumns: number;
+  filledColumns: number;
+  inUse: boolean;
+}
+
 export function DashboardPage() {
   const { user, wsConnected } = useAuth();
   const isAdmin = user?.role === "admin";
   const isMobile = useIsMobile();
 
   const [projects, setProjects] = useState<ManagedProject[]>([]);
+  const [overviews, setOverviews] = useState<Record<string, UserProjectOverview>>({});
   const [selected, setSelected] = useState<ProjectDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -49,13 +60,20 @@ export function DashboardPage() {
   const [templates, setTemplates] = useState<Array<{ key: string; name: string; description: string }>>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
 
-  // Fetch projects
+  // Fetch projects + user data overview (利用中/未使用 判定)
   const fetchProjects = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const result = await wsClient.sendCommand<ManagedProject[]>("managed_project", "list");
-      setProjects(result);
+      const [list, ov] = await Promise.all([
+        wsClient.sendCommand<ManagedProject[]>("managed_project", "list"),
+        wsClient.sendCommand<UserProjectOverview[]>("managed_project", "overview")
+          .catch(() => [] as UserProjectOverview[]),
+      ]);
+      setProjects(list);
+      const map: Record<string, UserProjectOverview> = {};
+      for (const o of ov) map[o.key] = o;
+      setOverviews(map);
     } catch (err) {
       console.error("[Dashboard] Failed to fetch projects:", err);
       setError((err as Error).message);
@@ -145,11 +163,15 @@ export function DashboardPage() {
         <option value="" disabled>
           {loading ? "Loading..." : projects.length === 0 ? "No projects" : "-- Select a project --"}
         </option>
-        {projects.map((p) => (
-          <option key={p.key} value={p.key}>
-            {p.name}{!p.isActive ? " (off)" : ""}
-          </option>
-        ))}
+        {projects.map((p) => {
+          const ov = overviews[p.key];
+          const badge = !p.isActive ? " (off)" : ov ? (ov.inUse ? " ・利用中" : " ・未使用") : "";
+          return (
+            <option key={p.key} value={p.key}>
+              {p.name}{badge}
+            </option>
+          );
+        })}
       </select>
       {isAdmin && (
         <button onClick={() => setShowRegister(!showRegister)} style={{
@@ -182,25 +204,46 @@ export function DashboardPage() {
         ) : projects.length === 0 ? (
           <p style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>No projects</p>
         ) : (
-          projects.map((p) => (
-            <div
-              key={p.key}
-              onClick={() => selectProject(p.key)}
-              style={{
-                padding: "0.5rem 0.75rem", borderRadius: "4px", cursor: "pointer",
-                background: selected?.key === p.key ? "var(--bg-hover, rgba(255,255,255,0.05))" : "transparent",
-                marginBottom: "2px",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>{p.name}</span>
-                {!p.isActive && (
-                  <span style={{ fontSize: "0.65rem", padding: "0 0.3rem", borderRadius: "2px", background: "var(--red, #f85149)", color: "#fff" }}>off</span>
-                )}
+          projects.map((p) => {
+            const ov = overviews[p.key];
+            const hasUserData = ov !== undefined;
+            return (
+              <div
+                key={p.key}
+                onClick={() => selectProject(p.key)}
+                style={{
+                  padding: "0.5rem 0.75rem", borderRadius: "4px", cursor: "pointer",
+                  background: selected?.key === p.key ? "var(--bg-hover, rgba(255,255,255,0.05))" : "transparent",
+                  marginBottom: "2px",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.3rem" }}>
+                  <span style={{ fontSize: "0.85rem", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                  <div style={{ display: "flex", gap: "0.25rem", flexShrink: 0 }}>
+                    {!p.isActive && (
+                      <span style={{ fontSize: "0.65rem", padding: "0 0.3rem", borderRadius: "2px", background: "var(--red, #f85149)", color: "#fff" }}>off</span>
+                    )}
+                    {p.isActive && hasUserData && (
+                      <span
+                        title={`${ov.filledColumns}/${ov.totalColumns} columns filled`}
+                        style={{
+                          fontSize: "0.65rem",
+                          padding: "0 0.35rem",
+                          borderRadius: "2px",
+                          background: ov.inUse ? "var(--green, #2ea043)" : "var(--bg, rgba(255,255,255,0.08))",
+                          color: ov.inUse ? "#fff" : "var(--text-muted)",
+                          border: ov.inUse ? "none" : "1px solid var(--border)",
+                        }}
+                      >
+                        {ov.inUse ? "利用中" : "未使用"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{p.key}</div>
               </div>
-              <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{p.key}</div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>

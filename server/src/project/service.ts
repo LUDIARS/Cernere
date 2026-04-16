@@ -14,6 +14,7 @@ import { config } from "../config.js";
 import { AppError } from "../error.js";
 import { projectDefinitionSchema, type ProjectDefinition } from "./schema.js";
 import { migrateProjectSchema } from "./schema-migrator.js";
+import * as cache from "./user-data-cache.js";
 
 // ── Service Templates ────────────────────────────────────────
 
@@ -228,6 +229,7 @@ export async function updateProjectSchema(key: string, payload: unknown, userId?
   }).where(eq(dbSchema.managedProjects.key, key));
 
   await saveDefinitionHistory(key, definition, userId);
+  await cache.invalidateProject(key);
 
   return { message: "Schema updated", key, columnsAdded: result.columnsAdded };
 }
@@ -339,6 +341,7 @@ export async function setModuleOptout(userId: string, projectKey: string, module
     }
   }
 
+  await cache.invalidate(userId, projectKey);
   return { message: "Opted out", projectKey, moduleKey, deletedColumns: moduleCols };
 }
 
@@ -360,12 +363,17 @@ export async function removeModuleOptout(userId: string, projectKey: string, mod
  * Data ページで「このプロジェクトが私のどんなデータを持っているか」を
  * ユーザーが確認するために使う。
  */
-export async function getUserProjectData(userId: string, projectKey: string): Promise<{
+export interface UserProjectData {
   projectKey: string;
   projectName: string;
   schema: Record<string, { type: string; module?: string; description?: string }>;
   data: Record<string, unknown> | null;
-}> {
+}
+
+export async function getUserProjectData(userId: string, projectKey: string): Promise<UserProjectData> {
+  const cached = await cache.getCached<UserProjectData>(userId, projectKey);
+  if (cached) return cached;
+
   const proj = await db.select().from(dbSchema.managedProjects)
     .where(eq(dbSchema.managedProjects.key, projectKey)).limit(1);
   if (proj.length === 0) throw AppError.notFound("Project not found");
@@ -394,12 +402,70 @@ export async function getUserProjectData(userId: string, projectKey: string): Pr
     data = null;
   }
 
-  return {
+  const result: UserProjectData = {
     projectKey: proj[0].key,
     projectName: proj[0].name,
     schema: columns,
     data,
   };
+  await cache.setCached(userId, projectKey, result);
+  return result;
+}
+
+/**
+ * ユーザーダッシュボード向け: ユーザーデータスキーマを持つプロジェクトの
+ * 一覧を返す。"利用中" (inUse) はユーザーが 1 カラム以上の値を持つかで判定する。
+ */
+export interface UserProjectOverview {
+  key: string;
+  name: string;
+  description: string;
+  isActive: boolean;
+  /** ユーザーデータカラム総数 (論理削除除く) */
+  totalColumns: number;
+  /** うち値がセットされているカラム数 */
+  filledColumns: number;
+  /** 利用中か (filledColumns > 0) */
+  inUse: boolean;
+}
+
+export async function listUserProjectsOverview(userId: string): Promise<UserProjectOverview[]> {
+  const projects = await db.select().from(dbSchema.managedProjects)
+    .where(eq(dbSchema.managedProjects.isActive, true));
+
+  const overviews: UserProjectOverview[] = [];
+  for (const proj of projects) {
+    const definition = proj.schemaDefinition as ProjectDefinition;
+    const columns = definition?.user_data?.columns ?? {};
+    const activeColumns = Object.entries(columns).filter(([, col]) => !col._deleted);
+
+    // ユーザーデータスキーマを持たないプロジェクトは表示対象外
+    if (activeColumns.length === 0) continue;
+
+    let filled = 0;
+    try {
+      const ud = await getUserProjectData(userId, proj.key);
+      if (ud.data) {
+        for (const [colName] of activeColumns) {
+          const v = ud.data[colName];
+          if (v !== null && v !== undefined && v !== "") filled++;
+        }
+      }
+    } catch {
+      // 個別プロジェクトの取得失敗はスキップ扱い
+    }
+
+    overviews.push({
+      key: proj.key,
+      name: proj.name,
+      description: proj.description,
+      isActive: proj.isActive,
+      totalColumns: activeColumns.length,
+      filledColumns: filled,
+      inUse: filled > 0,
+    });
+  }
+  return overviews;
 }
 
 /** 自分が有効化しているすべてのプロジェクトについて保持データを取得 */
@@ -551,6 +617,7 @@ export async function setUserData(
        ON CONFLICT (user_id) DO UPDATE SET ${updateClause}`,
       values as never[],
     );
+    await cache.invalidate(userId, projectKey);
     return { ok: true, updated: targetCols };
   } finally {
     await sqlClient.end();
@@ -581,6 +648,7 @@ export async function deleteUserColumns(
       `UPDATE "${tableName}" SET ${setClauses.join(", ")} WHERE user_id = $1`,
       [userId],
     );
+    await cache.invalidate(userId, projectKey);
     return { ok: true, deleted: targetCols };
   } finally {
     await sqlClient.end();
