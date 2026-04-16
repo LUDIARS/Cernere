@@ -1,0 +1,136 @@
+{
+  "project": {
+    "key": "nuntius",
+    "name": "Nuntius",
+    "description": "LUDIARS 統合通知・メッセージング基盤 (SQS/SNS 的)"
+  },
+
+  "endpoint": {
+    "url": "http://localhost:3100",
+    "frontend_url": "http://localhost:5175",
+    "same_server": false,
+    "bridge_path": "/nuntius"
+  },
+
+  "data_sharing": [
+    {
+      "project_key": "schedula",
+      "modules": ["notification", "reminder"],
+      "access": "read",
+      "description": "Schedula の通知/リマインダー設定を参照して配信ポリシーを決定"
+    },
+    {
+      "project_key": "imperativus",
+      "modules": ["voice"],
+      "access": "read",
+      "description": "Imperativus 経由の音声チャネル配信 (Alexa / voice assistant)"
+    }
+  ],
+
+  "user_data": {
+    "columns": {
+      "preferred_channel": {
+        "type": "text",
+        "module": "core",
+        "nullable": true,
+        "description": "デフォルト配信チャネル (slack / discord / line / email / sms / web / alexa / voice)"
+      },
+      "locale": {
+        "type": "text",
+        "module": "core",
+        "nullable": true,
+        "description": "通知本文のロケール (ja / en ...)"
+      },
+      "timezone": {
+        "type": "text",
+        "module": "core",
+        "nullable": true,
+        "description": "通知のタイムゾーン (IANA 形式、例: Asia/Tokyo)"
+      },
+      "do_not_disturb": {
+        "type": "boolean",
+        "module": "core",
+        "nullable": true,
+        "description": "一時的に全通知を停止するフラグ"
+      },
+      "quiet_hours": {
+        "type": "json",
+        "module": "core",
+        "nullable": true,
+        "description": "静寂時間設定 ({ start: 'HH:MM', end: 'HH:MM', timezone, channels? })"
+      },
+      "channel_preferences": {
+        "type": "json",
+        "module": "core",
+        "nullable": true,
+        "description": "チャネル毎の有効/無効・優先度 ({ slack: { enabled, priority }, ... })"
+      },
+      "slack_user_id": {
+        "type": "text",
+        "module": "slack",
+        "nullable": true,
+        "description": "Slack ユーザー ID (ダイレクトメッセージ送信先)"
+      },
+      "slack_webhook_url": {
+        "type": "text",
+        "module": "slack",
+        "nullable": true,
+        "description": "個人用 Slack Incoming Webhook URL"
+      },
+      "discord_user_id": {
+        "type": "text",
+        "module": "discord",
+        "nullable": true,
+        "description": "Discord ユーザー ID (ダイレクトメッセージ送信先)"
+      },
+      "discord_webhook_url": {
+        "type": "text",
+        "module": "discord",
+        "nullable": true,
+        "description": "個人用 Discord Webhook URL"
+      },
+      "line_user_id": {
+        "type": "text",
+        "module": "line",
+        "nullable": true,
+        "description": "LINE Messaging API の userId"
+      },
+      "email_override": {
+        "type": "text",
+        "module": "email",
+        "nullable": true,
+        "description": "通知専用メールアドレス (Cernere primary email と異なる場合のみ)"
+      },
+      "phone_number": {
+        "type": "text",
+        "module": "sms",
+        "nullable": true,
+        "description": "SMS 通知先電話番号 (E.164 形式)"
+      },
+      "alexa_user_id": {
+        "type": "text",
+        "module": "alexa",
+        "nullable": true,
+        "description": "Alexa ユーザー ID (Alexa チャネル配信先)"
+      },
+      "webhook_url": {
+        "type": "text",
+        "module": "webhook",
+        "nullable": true,
+        "description": "個人用 generic webhook URL (カスタム連携)"
+      },
+      "web_push_subscription": {
+        "type": "json",
+        "module": "web",
+        "nullable": true,
+        "description": "Web Push API の PushSubscription オブジェクト (endpoint/keys)"
+      },
+      "unsubscribed_topics": {
+        "type": "json",
+        "module": "subscription",
+        "nullable": true,
+        "description": "購読解除したトピックの配列 (例: ['schedula.group.42.events'])"
+      }
+    }
+  }
+}

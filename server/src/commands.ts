@@ -473,6 +473,8 @@ async function managedProjectCmd(userId: string, action: string, p?: Record<stri
       return svc.getUserProjectData(userId, requireStr(p, "projectKey"));
     case "my_data_all":
       return svc.listAllUserProjectData(userId);
+    case "overview":
+      return svc.listUserProjectsOverview(userId);
     default:
       throw AppError.badRequest(`Unknown managed_project action: ${action}`);
   }
