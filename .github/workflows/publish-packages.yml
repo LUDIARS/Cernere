@@ -6,6 +6,12 @@ on:
     paths:
       - 'packages/*/package.json'
       - 'packages/*/src/**'
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Publish only this package (optional)"
+        required: false
+        type: string
 
 permissions:
   contents: read
