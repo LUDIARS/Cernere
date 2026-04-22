@@ -1,6 +1,6 @@
 {
   "name": "@ludiars/cernere-service-adapter",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Cernere service adapter — user admission + peer backend-to-backend WS (common SDK for LUDIARS services)",
   "type": "module",
   "main": "dist/index.js",

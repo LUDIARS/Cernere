@@ -102,6 +102,8 @@ export class PeerAdapter {
   private handlers     = new Map<string, PeerHandler>();
   /** projectKey → channel (outbound). 再利用されるまで保持. */
   private outbound     = new Map<string, PeerChannel>();
+  /** inbound で upgrade した WS. stop() 時に全部閉じる. */
+  private inbound      = new Set<WebSocket>();
   private stopped      = false;
 
   constructor(config: PeerAdapterConfig) {
@@ -159,13 +161,26 @@ export class PeerAdapter {
     }
     this.outbound.clear();
 
+    // inbound 側も強制切断 — これをやらないと httpServer.close() が
+    // 既存接続の drain を待ってハングする.
+    for (const ws of this.inbound) {
+      try { ws.terminate(); } catch { /* ignore */ }
+    }
+    this.inbound.clear();
+
     if (this.session) {
       try { await this.session.call("managed_relay", "unregister_endpoint", {}); } catch { /* ignore */ }
       await this.session.stop();
       this.session = null;
     }
     if (this.wsServer)   { await new Promise<void>((r) => this.wsServer!.close(() => r())); this.wsServer = null; }
-    if (this.httpServer) { await new Promise<void>((r) => this.httpServer!.close(() => r())); this.httpServer = null; }
+    if (this.httpServer) {
+      // Node 18.2+ の closeAllConnections でアイドル keep-alive も切る.
+      const h = this.httpServer;
+      (h as unknown as { closeAllConnections?: () => void }).closeAllConnections?.();
+      await new Promise<void>((r) => h.close(() => r()));
+      this.httpServer = null;
+    }
   }
 
   // ── 公開 API ────────────────────────────────────────
@@ -313,6 +328,8 @@ export class PeerAdapter {
     // upgrade OK
     wsServer.handleUpgrade(req, socket, head, (ws) => {
       const caller = { projectKey: claims.projectKey, clientId: claims.sub };
+      this.inbound.add(ws);
+      ws.on("close", () => this.inbound.delete(ws));
       this.wireIncomingChannel(ws, caller, acceptedCmds);
     });
   }
