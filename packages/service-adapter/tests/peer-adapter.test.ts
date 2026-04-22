@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { FakeCernere } from "./fake-cernere.js";
+import { FakeCernere } from "../src/testing/fake-cernere.js";
 import { PeerAdapter } from "../src/peer/peer-adapter.js";
 
 describe("PeerAdapter — full relay protocol", () => {
