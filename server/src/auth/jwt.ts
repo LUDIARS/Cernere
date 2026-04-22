@@ -5,6 +5,7 @@
 import jwt from "jsonwebtoken";
 import { config } from "../config.js";
 import { AppError } from "../error.js";
+import { getProjectSigningKeys } from "./project-keys.js";
 
 const ACCESS_TOKEN_MINUTES = 60;
 const REFRESH_TOKEN_DAYS = 30;
@@ -54,17 +55,25 @@ export function generateToolToken(toolClientId: string, ownerUserId: string, sco
   );
 }
 
+/**
+ * Project token は **RS256 (非対称鍵)** で署名する. Cernere は秘密鍵で
+ * 署名し、他 LUDIARS サービス (service adapter) は公開鍵 (JWKS) で
+ * ローカル検証する. これにより毎リクエストごとに Cernere への verify
+ * 呼び出しを排除できる (Cernere は認証局として control-plane のみ担当).
+ */
 export function generateProjectToken(clientId: string, projectKey: string): string {
+  const { privateKey, kid } = getProjectSigningKeys();
   return jwt.sign(
     { sub: clientId, projectKey, tokenType: "project" },
-    config.jwtSecret,
-    { expiresIn: `${ACCESS_TOKEN_MINUTES}m` },
+    privateKey,
+    { algorithm: "RS256", keyid: kid, expiresIn: `${ACCESS_TOKEN_MINUTES}m` },
   );
 }
 
 export function verifyProjectToken(token: string): ProjectJwtClaims {
+  const { publicKey } = getProjectSigningKeys();
   try {
-    const claims = jwt.verify(token, config.jwtSecret) as ProjectJwtClaims;
+    const claims = jwt.verify(token, publicKey, { algorithms: ["RS256"] }) as ProjectJwtClaims;
     if (claims.tokenType !== "project") {
       throw AppError.unauthorized("Not a project token");
     }
