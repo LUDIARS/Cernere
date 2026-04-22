@@ -1,7 +1,7 @@
 {
   "name": "@ludiars/cernere-service-adapter",
-  "version": "0.1.0",
-  "description": "Cernere service adapter — WebSocket connection, user admission handling, token issuance, revocation",
+  "version": "0.2.0",
+  "description": "Cernere service adapter — user admission + peer backend-to-backend WS (common SDK for LUDIARS services)",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,6 +9,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./testing": {
+      "import": "./dist/testing/index.js",
+      "types": "./dist/testing/index.d.ts"
     }
   },
   "files": ["dist", "src"],
