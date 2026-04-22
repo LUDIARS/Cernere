@@ -16,6 +16,10 @@ jobs:
     name: Build & Publish
     runs-on: ubuntu-latest
     strategy:
+      # 1 パッケージ publish 失敗でも他を止めない. バージョン据え置きの
+      # パッケージは skip 扱いで fail せず通るが、万一 fail したときに
+      # 連鎖キャンセルを避ける.
+      fail-fast: false
       matrix:
         package:
           - id-cache
@@ -51,19 +55,25 @@ jobs:
       - name: Check if version changed
         id: version-check
         working-directory: packages/${{ matrix.package }}
+        env:
+          # private registry への読み取りにも auth が要る. 未設定だと
+          # npm view が黙って空文字を返し、publish が "already published"
+          # で落ちる回帰を起こしていた (Cernere issue: 以前の publish 失敗).
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PACKAGE_NAME=$(node -p "require('./package.json').name")
           LOCAL_VERSION=$(node -p "require('./package.json').version")
 
-          # Check if this version already exists on registry
-          PUBLISHED_VERSION=$(npm view "$PACKAGE_NAME" version --registry=https://npm.pkg.github.com 2>/dev/null || echo "0.0.0")
+          # Check if this version already exists on registry. versions は
+          # JSON 配列 or 単一文字列で返る。404 (初回) は空で扱う。
+          PUBLISHED_JSON=$(npm view "$PACKAGE_NAME" versions --json --registry=https://npm.pkg.github.com 2>/dev/null || echo "[]")
 
-          if [ "$LOCAL_VERSION" = "$PUBLISHED_VERSION" ]; then
+          if echo "$PUBLISHED_JSON" | grep -q "\"$LOCAL_VERSION\""; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Version $LOCAL_VERSION already published, skipping"
+            echo "Version $LOCAL_VERSION already on registry, skipping publish"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "Publishing $PACKAGE_NAME@$LOCAL_VERSION (current: $PUBLISHED_VERSION)"
+            echo "Publishing $PACKAGE_NAME@$LOCAL_VERSION"
           fi
 
       - name: Publish
