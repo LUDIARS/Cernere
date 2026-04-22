@@ -120,6 +120,15 @@ export async function dispatchProjectCommand(
       const provider = requireStr(payload, "provider");
       return svc.deleteOAuthToken(projectKey, userId, provider);
     }
+    // ─── service adapter — project token 検証用 JWKS を返す ───
+    //
+    // 他 LUDIARS サービス (Actio/Nuntius/Imperativus 等) が
+    // @ludiars/cernere-service-adapter 経由で取得する. 返却内容は
+    // RFC 7517 JWKS 形式で、ローカルでの RS256 検証に使う.
+    case "managed_project.get_jwks": {
+      const { getProjectJwks } = await import("../auth/project-keys.js");
+      return getProjectJwks();
+    }
     default:
       throw new Error(`Unknown command: ${module}.${action} (project: ${projectKey})`);
   }
