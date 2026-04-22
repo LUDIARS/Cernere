@@ -50,3 +50,10 @@ export type {
   UserAdmissionMsg,
   UserRevokeMsg,
 } from "./types.js";
+
+// ── Peer adapter (Phase 0b — service-to-service direct WS) ──
+
+export { PeerAdapter } from "./peer/peer-adapter.js";
+export { PeerError } from "./peer/envelope.js";
+export type { PeerAdapterConfig, PeerHandler } from "./peer/peer-adapter.js";
+export type { Envelope } from "./peer/envelope.js";

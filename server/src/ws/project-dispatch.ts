@@ -129,6 +129,34 @@ export async function dispatchProjectCommand(
       const { getProjectJwks } = await import("../auth/project-keys.js");
       return getProjectJwks();
     }
+    // ─── managed_relay: peer SA 間の仲介 (Phase 0b) ───
+    //
+    // Cernere は認証局に徹する. challenge 発行 / pair 許可 / endpoint
+    // registry までを担当し、データ経路 (peer ↔ peer) には入らない.
+    case "managed_relay.register_endpoint": {
+      const { registerEndpoint } = await import("../project/relay-service.js");
+      const saWsUrl = requireStr(payload, "saWsUrl");
+      registerEndpoint(projectKey, saWsUrl);
+      return { ok: true };
+    }
+    case "managed_relay.unregister_endpoint": {
+      const { unregisterEndpoint } = await import("../project/relay-service.js");
+      unregisterEndpoint(projectKey);
+      return { ok: true };
+    }
+    case "managed_relay.request_peer": {
+      const { requestPeer } = await import("../project/relay-service.js");
+      const target = requireStr(payload, "target");
+      return await requestPeer(projectKey, target);
+    }
+    case "managed_relay.verify_challenge": {
+      // 呼び出し元 (B) は自身の projectKey を WS セッションから提供し、
+      // claimedIssuer (A が提示してきた projectKey) と照合する.
+      const { verifyChallenge } = await import("../project/relay-service.js");
+      const challenge     = requireStr(payload, "challenge");
+      const claimedIssuer = requireStr(payload, "claimedIssuer");
+      return verifyChallenge(challenge, claimedIssuer, projectKey);
+    }
     default:
       throw new Error(`Unknown command: ${module}.${action} (project: ${projectKey})`);
   }
