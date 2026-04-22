@@ -262,6 +262,28 @@ export const managedProjects = pgTable("managed_projects", {
   index("idx_managed_projects_client_id").on(t.clientId),
 ]);
 
+// ── Relay Pairs (service adapter 同士の peer 許可) ────────────
+//
+// 2 つの managedProject が直接 WS で繋がる許可リスト.
+// bidirectional=TRUE なら A→B / B→A どちらも開通. FALSE なら
+// from→to のみ (使い分けは admin UI 側).
+
+export const relayPairs = pgTable("relay_pairs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  fromProjectKey: text("from_project_key").notNull()
+    .references(() => managedProjects.key, { onDelete: "cascade" }),
+  toProjectKey: text("to_project_key").notNull()
+    .references(() => managedProjects.key, { onDelete: "cascade" }),
+  bidirectional: boolean("bidirectional").notNull().default(true),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("uq_relay_pairs_from_to").on(t.fromProjectKey, t.toProjectKey),
+  index("idx_relay_pairs_from").on(t.fromProjectKey),
+  index("idx_relay_pairs_to").on(t.toProjectKey),
+]);
+
 export const projectDefinitionHistory = pgTable("project_definition_history", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectKey: text("project_key").notNull().references(() => managedProjects.key, { onDelete: "cascade" }),
