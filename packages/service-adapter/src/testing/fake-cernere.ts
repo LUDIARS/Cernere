@@ -12,6 +12,8 @@
 import { createServer, type Server } from "node:http";
 import {
   createSign,
+  createVerify,
+  createPublicKey,
   generateKeyPairSync,
   createHash,
   randomUUID,
@@ -183,7 +185,6 @@ export class FakeCernere {
     // Minimal local verify — for WS gating.
     const [h, p, s] = token.split(".");
     if (!h || !p || !s) return null;
-    const { createVerify, createPublicKey } = require("node:crypto") as typeof import("node:crypto");
     const pubkey = createPublicKey(this.privateKey);
     const ok = createVerify("RSA-SHA256").update(`${h}.${p}`).end().verify(pubkey, Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64"));
     if (!ok) return null;
