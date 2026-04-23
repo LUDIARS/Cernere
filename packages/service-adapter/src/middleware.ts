@@ -5,6 +5,8 @@
  * revoke されたユーザーを自動拒否する。
  */
 
+import { createHmac } from "node:crypto";
+
 import type { CernereServiceAdapter } from "./adapter.js";
 
 interface MiddlewareConfig {
@@ -96,10 +98,7 @@ function verifyServiceToken(token: string, secret: string): ServiceTokenPayload 
   const data = `${headerB64}.${payloadB64}`;
 
   // 署名検証
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const crypto = require("node:crypto");
-  const expected = (crypto as { createHmac: (alg: string, key: string) => { update: (data: string) => { digest: (enc: string) => string } } })
-    .createHmac("sha256", secret)
+  const expected = createHmac("sha256", secret)
     .update(data)
     .digest("base64url");
 
