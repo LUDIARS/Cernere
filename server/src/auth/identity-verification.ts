@@ -6,10 +6,11 @@
  *
  *   - マシン情報   (Platform, OS, アーキテクチャ, スクリーン, タイムゾーン, 言語)
  *   - ブラウザ情報 (UA, ベンダー, ブラウザ名/バージョン)
- *   - 位置情報     (緯度経度を 1 度単位に丸めたもの, IP の国/地域)
+ *   - 接続元 IP   (サーバーが request から取得した IP のみ。位置解決は行わない)
  *
- * 新しい/普段と異なる環境を検知した場合は、6 桁の確認コードを生成し
- * メールで送信、ユーザーに対話的入力を要求する。
+ * 位置情報 (緯度経度 / 国・地域) は使用しない。新しい/普段と異なる環境を
+ * 検知した場合は、6 桁の確認コードを生成しメールで送信、ユーザーに
+ * 対話的入力を要求する。
  *
  * チャレンジ状態は Redis に 10 分間保持される。
  */
@@ -21,6 +22,7 @@ import * as schema from "../db/schema.js";
 import { redis } from "../redis.js";
 import { logAuthEvent } from "../logging/auth-logger.js";
 import { config } from "../config.js";
+import { devLog } from "../logging/dev-logger.js";
 import { sendMail } from "./mailer.js";
 
 // ── 公開型 ────────────────────────────────────────────────────
@@ -31,8 +33,6 @@ export interface DeviceFingerprint {
   machine?: Record<string, unknown>;
   /** ブラウザ情報 (例: { ua: "...", vendor: "Apple", browser: "Safari", version: "17.4" }) */
   browser?: Record<string, unknown>;
-  /** 位置情報 (例: { latitude: 35.6, longitude: 139.6, accuracy: 100, source: "geolocation" }) */
-  geo?: Record<string, unknown>;
 }
 
 /** 検知された差分 (普段と異なる点) */
@@ -40,7 +40,6 @@ export type Anomaly =
   | "new_device"
   | "new_os"
   | "new_browser"
-  | "new_location"
   | "new_ip"
   | "missing_fingerprint";
 
@@ -55,7 +54,7 @@ export interface DeviceCheckResult {
   emailMasked?: string;
   /** 確認コードの送信先メソッド */
   codeChannel?: "email" | "console";
-  /** デバッグ用ラベル (例: "macOS · Chrome 124 · Tokyo, JP") */
+  /** デバッグ用ラベル (例: "macOS · Chrome 124") */
   label: string;
 }
 
@@ -65,28 +64,13 @@ const MAX_ATTEMPTS = 5;
 
 // ── 内部: ハッシュ計算 / 正規化 ───────────────────────────────
 
-/** フィンガープリントの正規化 (緯度経度は 1 度に丸める = 約 100km 単位) */
+/** フィンガープリントの正規化 (machine + browser のみ) */
 function normalize(fp: DeviceFingerprint): {
   machine: Record<string, unknown>;
   browser: Record<string, unknown>;
-  geo: Record<string, unknown>;
 } {
   const m = (fp.machine ?? {}) as Record<string, unknown>;
   const b = (fp.browser ?? {}) as Record<string, unknown>;
-  const g = (fp.geo ?? {}) as Record<string, unknown>;
-
-  // 大まかな位置 (1 度単位)。geolocation がない場合は IP-based の country/region のみ使う
-  const lat = typeof g.latitude === "number" ? Math.round(g.latitude as number) : null;
-  const lng = typeof g.longitude === "number" ? Math.round(g.longitude as number) : null;
-
-  const geoNorm: Record<string, unknown> = {};
-  if (lat !== null && lng !== null) {
-    geoNorm.lat = lat;
-    geoNorm.lng = lng;
-  }
-  if (typeof g.country === "string") geoNorm.country = g.country;
-  if (typeof g.region === "string") geoNorm.region = g.region;
-  if (typeof g.city === "string") geoNorm.city = g.city;
 
   return {
     machine: {
@@ -102,7 +86,6 @@ function normalize(fp: DeviceFingerprint): {
       browser: b.browser ?? null,
       version: b.version ?? null,
     },
-    geo: geoNorm,
   };
 }
 
@@ -113,19 +96,16 @@ export function computeDeviceHash(fp: DeviceFingerprint): string {
   return crypto.createHash("sha256").update(json).digest("hex");
 }
 
-/** "macOS · Chrome 124 · Tokyo, JP" のような表示ラベルを生成 */
+/** "macOS · Chrome 124" のような表示ラベルを生成 */
 export function computeDeviceLabel(fp: DeviceFingerprint): string {
   const m = (fp.machine ?? {}) as Record<string, unknown>;
   const b = (fp.browser ?? {}) as Record<string, unknown>;
-  const g = (fp.geo ?? {}) as Record<string, unknown>;
 
   const parts: string[] = [];
   if (m.os) parts.push(String(m.os));
   if (b.browser) {
     parts.push(b.version ? `${b.browser} ${b.version}` : String(b.browser));
   }
-  const place = [g.city, g.country].filter((x) => typeof x === "string" && x).join(", ");
-  if (place) parts.push(place);
   return parts.join(" · ") || "Unknown device";
 }
 
@@ -143,8 +123,16 @@ export async function checkDevice(
   fp: DeviceFingerprint | undefined,
   ctx: { ip?: string; userAgent?: string } = {},
 ): Promise<DeviceCheckResult> {
+  devLog("identity.checkDevice.begin", {
+    userId: user.id,
+    hasFingerprint: !!fp,
+    ip: ctx.ip,
+    userAgent: ctx.userAgent,
+  });
+
   // フィンガープリントが届かない場合は安全側に倒し、本人確認を要求する
-  if (!fp || (!fp.machine && !fp.browser && !fp.geo)) {
+  if (!fp || (!fp.machine && !fp.browser)) {
+    devLog("identity.checkDevice.missing_fingerprint", { userId: user.id });
     const challenge = await issueChallenge(user, fp ?? {}, ctx, ["missing_fingerprint"]);
     return challenge;
   }
@@ -153,6 +141,7 @@ export async function checkDevice(
   const label = computeDeviceLabel(fp);
 
   // 既に信頼済みデバイスとして登録されているか
+  devLog("identity.checkDevice.lookup_trusted", { userId: user.id, hash, label });
   const rows = await db.select().from(schema.trustedDevices).where(
     and(
       eq(schema.trustedDevices.userId, user.id),
@@ -163,6 +152,7 @@ export async function checkDevice(
 
   const known = rows[0];
   if (known) {
+    devLog("identity.checkDevice.trusted", { userId: user.id, deviceId: known.id });
     // last_seen_at と IP を更新
     await db.update(schema.trustedDevices).set({
       lastSeenAt: new Date(),
@@ -180,6 +170,7 @@ export async function checkDevice(
 
   // 未知のデバイス。過去のデバイスと比較して anomalies を抽出
   const anomalies = await detectAnomalies(user.id, fp, ctx.ip);
+  devLog("identity.checkDevice.anomalies", { userId: user.id, anomalies });
   const challenge = await issueChallenge(user, fp, ctx, anomalies);
   return challenge;
 }
@@ -203,17 +194,14 @@ async function detectAnomalies(
 
   const m = (fp.machine ?? {}) as Record<string, unknown>;
   const b = (fp.browser ?? {}) as Record<string, unknown>;
-  const g = (fp.geo ?? {}) as Record<string, unknown>;
 
   const knownOs = new Set(past.map((d) => (d.machineInfo as Record<string, unknown>)?.os).filter(Boolean));
   const knownBrowser = new Set(past.map((d) => (d.browserInfo as Record<string, unknown>)?.browser).filter(Boolean));
-  const knownCountry = new Set(past.map((d) => (d.geoInfo as Record<string, unknown>)?.country).filter(Boolean));
   const knownIps = new Set(past.map((d) => d.lastIp).filter((x): x is string => !!x));
 
   const anomalies: Anomaly[] = ["new_device"];
   if (m.os && !knownOs.has(m.os as string)) anomalies.push("new_os");
   if (b.browser && !knownBrowser.has(b.browser as string)) anomalies.push("new_browser");
-  if (g.country && knownCountry.size > 0 && !knownCountry.has(g.country as string)) anomalies.push("new_location");
   if (ip && knownIps.size > 0 && !knownIps.has(ip)) anomalies.push("new_ip");
 
   return anomalies;
@@ -261,6 +249,14 @@ async function issueChallenge(
   };
 
   await redis.set(`device_challenge:${deviceToken}`, JSON.stringify(stored), "EX", CHALLENGE_TTL);
+
+  devLog("identity.issueChallenge", {
+    userId: user.id,
+    deviceToken,
+    anomalies,
+    label,
+    hasEmail: !!user.email,
+  });
 
   const channel = await sendVerificationCode(user.email, code, label, anomalies);
 
@@ -370,6 +366,7 @@ async function registerTrustedDevice(stored: StoredChallenge): Promise<void> {
     return;
   }
 
+  // geoInfo カラムは互換性のため残してあるが空オブジェクトで埋める
   await db.insert(schema.trustedDevices).values({
     id: crypto.randomUUID(),
     userId: stored.userId,
@@ -377,7 +374,7 @@ async function registerTrustedDevice(stored: StoredChallenge): Promise<void> {
     label: stored.label,
     machineInfo: norm.machine,
     browserInfo: norm.browser,
-    geoInfo: norm.geo,
+    geoInfo: {},
     lastIp: stored.ip,
     firstSeenAt: now,
     lastSeenAt: now,

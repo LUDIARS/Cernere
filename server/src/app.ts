@@ -10,6 +10,7 @@ import { config } from "./config.js";
 import { handleAuthRoute } from "./http/auth-handler.js";
 import { handleCompositeRoute } from "./http/composite-handler.js";
 import { handleOAuthRoute } from "./http/oauth-handler.js";
+import { devLog, devError } from "./logging/dev-logger.js";
 import {
   handleWsOpen,
   handleWsMessage,
@@ -77,6 +78,38 @@ function jsonResponse(res: uWS.HttpResponse, status: string, data: unknown): voi
       .writeHeader("Access-Control-Allow-Credentials", "true")
       .end(JSON.stringify(data));
   });
+}
+
+/**
+ * 認証ハンドラの throw を HTTP ステータスにマップする。
+ * 既知の業務エラー (Unauthorized / not found / Rate limit / required) は
+ * 4xx に、それ以外は 500 として扱う (サーバー側の不具合をクライアントに
+ * 200/400 で隠蔽しないため)。
+ */
+function classifyError(err: unknown): { status: string; message: string } {
+  const msg = err instanceof Error ? err.message : String(err ?? "Internal error");
+
+  if (/Unauthorized/i.test(msg)) return { status: "401 Unauthorized", message: msg };
+  if (/Forbidden/i.test(msg)) return { status: "403 Forbidden", message: msg };
+  if (/not found/i.test(msg)) return { status: "404 Not Found", message: msg };
+  if (/Rate limit/i.test(msg)) return { status: "429 Too Many Requests", message: msg };
+
+  // 入力検証で投げる典型的な業務エラー
+  if (
+    /required/i.test(msg)
+    || /must be at least/i.test(msg)
+    || /Registration failed/i.test(msg)
+    || /Invalid (or expired )?(refresh token|MFA token|auth code)/i.test(msg)
+    || /code is required/i.test(msg)
+  ) {
+    return { status: "400 Bad Request", message: msg };
+  }
+
+  // 上記に当てはまらない throw は予期せぬ内部エラー扱い
+  return {
+    status: "500 Internal Server Error",
+    message: config.isDevelopment ? msg : "Internal server error",
+  };
 }
 
 // ── App 生成 ──────────────────────────────────────────────
@@ -231,17 +264,24 @@ export function createApp() {
     let aborted = false;
     res.onAborted(() => { aborted = true; });
 
+    devLog("http.auth.begin", { action, ip, userAgent });
     try {
       const body = await readBody(res);
       if (aborted) return;
+      devLog("http.auth.body", { action, bodyLen: body.length });
       const result = await handleAuthRoute(action, body, authHeader, { ip, userAgent });
+      devLog("http.auth.ok", { action, status: result.status });
       jsonResponse(res, result.status, result.data);
     } catch (err) {
       if (aborted) return;
-      const msg = (err as Error).message;
-      const status = msg.includes("Unauthorized") ? "401 Unauthorized"
-        : msg.includes("not found") ? "404 Not Found" : "400 Bad Request";
-      jsonResponse(res, status, { error: msg });
+      const { status, message } = classifyError(err);
+      if (status === "500 Internal Server Error") {
+        devError("http.auth.500", err, { action, ip });
+        console.error(`[http] auth/${action} 500:`, err);
+      } else {
+        devLog("http.auth.error", { action, status, message });
+      }
+      jsonResponse(res, status, { error: message });
     }
   });
 
@@ -253,17 +293,24 @@ export function createApp() {
     let aborted = false;
     res.onAborted(() => { aborted = true; });
 
+    devLog("http.composite.begin", { action, ip, userAgent });
     try {
       const body = await readBody(res);
       if (aborted) return;
+      devLog("http.composite.body", { action, bodyLen: body.length });
       const result = await handleCompositeRoute(action, body, { ip, userAgent });
+      devLog("http.composite.ok", { action, status: result.status });
       jsonResponse(res, result.status, result.data);
     } catch (err) {
       if (aborted) return;
-      const msg = (err as Error).message;
-      const status = msg.includes("Unauthorized") ? "401 Unauthorized"
-        : msg.includes("not found") ? "404 Not Found" : "400 Bad Request";
-      jsonResponse(res, status, { error: msg });
+      const { status, message } = classifyError(err);
+      if (status === "500 Internal Server Error") {
+        devError("http.composite.500", err, { action, ip });
+        console.error(`[http] composite/${action} 500:`, err);
+      } else {
+        devLog("http.composite.error", { action, status, message });
+      }
+      jsonResponse(res, status, { error: message });
     }
   });
 

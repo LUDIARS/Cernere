@@ -477,6 +477,8 @@ async function managedProjectCmd(userId: string, action: string, p?: Record<stri
       return svc.listUserProjectsOverview(userId);
     case "open_url":
       return svc.issueProjectOpenUrl(userId, requireStr(p, "projectKey"));
+    case "connections":
+      return svc.getProjectConnectionDetail(requireStr(p, "projectKey"));
     default:
       throw AppError.badRequest(`Unknown managed_project action: ${action}`);
   }

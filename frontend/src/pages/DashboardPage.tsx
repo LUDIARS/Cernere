@@ -9,6 +9,10 @@ interface ManagedProject {
   description: string;
   isActive: boolean;
   createdAt: string;
+  /** 現在 project_credentials で繋いでいる接続数 */
+  connectionCount: number;
+  /** 直近接続タイムスタンプ (ISO) */
+  lastConnectedAt: string | null;
 }
 
 interface ProjectDetail {
@@ -40,6 +44,8 @@ interface UserProjectOverview {
   totalColumns: number;
   filledColumns: number;
   inUse: boolean;
+  connectionCount: number;
+  lastConnectedAt: string | null;
 }
 
 export function DashboardPage() {
@@ -83,7 +89,11 @@ export function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    if (wsConnected) fetchProjects();
+    if (!wsConnected) return;
+    fetchProjects();
+    // 接続状況 (使用中バッジ) を 10 秒間隔で更新
+    const id = window.setInterval(() => { fetchProjects(); }, 10_000);
+    return () => { window.clearInterval(id); };
   }, [wsConnected, fetchProjects]);
 
   const selectProject = async (key: string) => {
@@ -187,6 +197,10 @@ export function DashboardPage() {
           {projects.map((p) => {
             const ov = overviews[p.key];
             const hasUserData = ov !== undefined;
+            const connected = p.connectionCount > 0;
+            const lastConnTitle = p.lastConnectedAt
+              ? `Last connected: ${new Date(p.lastConnectedAt).toLocaleString()}`
+              : "Never connected via project_credentials";
             return (
               <div
                 key={p.key}
@@ -206,6 +220,36 @@ export function DashboardPage() {
                     {!p.isActive && (
                       <span style={{ fontSize: "0.65rem", padding: "0.1rem 0.35rem", borderRadius: "2px", background: "var(--red, #f85149)", color: "#fff" }}>off</span>
                     )}
+                    {p.isActive && (
+                      <span
+                        title={connected
+                          ? `${p.connectionCount} active project_credentials connection(s)`
+                          : lastConnTitle}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "0.25rem",
+                          fontSize: "0.65rem",
+                          padding: "0.1rem 0.4rem",
+                          borderRadius: "2px",
+                          background: connected ? "var(--green, #2ea043)" : "transparent",
+                          color: connected ? "#fff" : "var(--text-muted)",
+                          border: connected ? "none" : "1px solid var(--border)",
+                        }}
+                      >
+                        <span
+                          aria-hidden
+                          style={{
+                            display: "inline-block",
+                            width: "0.4rem",
+                            height: "0.4rem",
+                            borderRadius: "50%",
+                            background: connected ? "#fff" : "var(--text-muted)",
+                          }}
+                        />
+                        {connected ? `使用中${p.connectionCount > 1 ? ` (${p.connectionCount})` : ""}` : "未接続"}
+                      </span>
+                    )}
                     {p.isActive && hasUserData && (
                       <span
                         title={`${ov.filledColumns}/${ov.totalColumns} columns filled`}
@@ -213,12 +257,12 @@ export function DashboardPage() {
                           fontSize: "0.65rem",
                           padding: "0.1rem 0.4rem",
                           borderRadius: "2px",
-                          background: ov.inUse ? "var(--green, #2ea043)" : "transparent",
-                          color: ov.inUse ? "#fff" : "var(--text-muted)",
-                          border: ov.inUse ? "none" : "1px solid var(--border)",
+                          background: "transparent",
+                          color: ov.inUse ? "var(--text)" : "var(--text-muted)",
+                          border: "1px solid var(--border)",
                         }}
                       >
-                        {ov.inUse ? "利用中" : "未使用"}
+                        {ov.inUse ? "データあり" : "データなし"}
                       </span>
                     )}
                   </div>

@@ -4,10 +4,9 @@
  * ブラウザから本人確認に使う以下の情報を収集する:
  *   - マシン情報   (OS, プラットフォーム, スクリーン, タイムゾーン, 言語)
  *   - ブラウザ情報 (UA, ベンダー, ブラウザ名/バージョン)
- *   - 位置情報     (Geolocation API、ユーザー許可がある場合)
  *
- * 位置情報の取得はプライバシーへの配慮のためタイムアウトを設け、
- * ユーザーが拒否した場合はそのまま空オブジェクトを返す。
+ * 位置情報 (Geolocation API) は使用しない。プライバシー保護のため
+ * デバイス識別はマシン + ブラウザ情報 + 接続元 IP のみで行う。
  */
 
 export interface MachineInfo {
@@ -26,21 +25,9 @@ export interface BrowserInfo {
   version: string;
 }
 
-export interface GeoInfo {
-  /** 緯度 (geolocation 取得時のみ) */
-  latitude?: number;
-  /** 経度 (geolocation 取得時のみ) */
-  longitude?: number;
-  /** 精度 (m) */
-  accuracy?: number;
-  /** 取得元 ("geolocation" | "denied" | "unavailable") */
-  source: "geolocation" | "denied" | "unavailable";
-}
-
 export interface DeviceFingerprint {
   machine: MachineInfo;
   browser: BrowserInfo;
-  geo: GeoInfo;
 }
 
 // ── マシン / ブラウザ ───────────────────────────────────────
@@ -99,76 +86,12 @@ export function collectBrowserInfo(): BrowserInfo {
   return { ua, vendor, browser, version };
 }
 
-// ── 位置情報 ─────────────────────────────────────────────────
-
-/**
- * Geolocation API でブラウザの現在位置を取得する。
- * ユーザーが拒否した場合や非対応環境では source を "denied" / "unavailable" にして返す。
- *
- * @param timeoutMs - 取得タイムアウト (default: 5 秒)
- */
-export function collectGeoInfo(timeoutMs = 5000): Promise<GeoInfo> {
-  return new Promise((resolve) => {
-    if (
-      typeof navigator === "undefined" ||
-      !navigator.geolocation ||
-      typeof navigator.geolocation.getCurrentPosition !== "function"
-    ) {
-      resolve({ source: "unavailable" });
-      return;
-    }
-
-    let settled = false;
-    const finish = (g: GeoInfo) => {
-      if (settled) return;
-      settled = true;
-      resolve(g);
-    };
-
-    const timer = setTimeout(() => finish({ source: "denied" }), timeoutMs);
-
-    try {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          clearTimeout(timer);
-          finish({
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
-            accuracy: pos.coords.accuracy,
-            source: "geolocation",
-          });
-        },
-        () => {
-          clearTimeout(timer);
-          finish({ source: "denied" });
-        },
-        { enableHighAccuracy: false, timeout: timeoutMs, maximumAge: 5 * 60 * 1000 },
-      );
-    } catch {
-      clearTimeout(timer);
-      finish({ source: "unavailable" });
-    }
-  });
-}
-
 // ── 公開エントリポイント ─────────────────────────────────────
 
-/**
- * 本人確認用フィンガープリントをまとめて収集する。
- *
- * @param options.requestGeo - true (default) なら Geolocation API を呼ぶ。
- *                              false なら geo は { source: "unavailable" } のみ返す。
- * @param options.geoTimeoutMs - Geolocation 取得タイムアウト (default: 5 秒)
- */
-export async function collectDeviceFingerprint(options: {
-  requestGeo?: boolean;
-  geoTimeoutMs?: number;
-} = {}): Promise<DeviceFingerprint> {
-  const { requestGeo = true, geoTimeoutMs = 5000 } = options;
-  const machine = collectMachineInfo();
-  const browser = collectBrowserInfo();
-  const geo = requestGeo
-    ? await collectGeoInfo(geoTimeoutMs)
-    : ({ source: "unavailable" } as GeoInfo);
-  return { machine, browser, geo };
+/** 本人確認用フィンガープリントをまとめて収集する。 */
+export function collectDeviceFingerprint(): DeviceFingerprint {
+  return {
+    machine: collectMachineInfo(),
+    browser: collectBrowserInfo(),
+  };
 }

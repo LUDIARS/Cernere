@@ -3,22 +3,18 @@
  * /api/auth/login と /ws/project のうち adapter が叩く部分だけを再現する.
  *
  * 提供:
- *   - project credentials での login → RS256 project JWT 発行
+ *   - project credentials での login → HS256 project JWT 発行
+ *     (旧 RS256/JWKS 機構は撤去. Cernere 本体と同じ対称鍵スキームに合わせた)
  *   - /ws/project?token=... → managed_project / managed_relay の必要コマンドを
- *     dispatch
+ *     dispatch. 旧 get_jwks の代わりに verify_token をサポート.
  *   - relay_pair は constructor で与えられた配列をインメモリで保持
  */
 
 import { createServer, type Server } from "node:http";
 import {
-  createSign,
-  createVerify,
-  createPublicKey,
-  generateKeyPairSync,
-  createHash,
+  createHmac,
   randomUUID,
   randomBytes,
-  type KeyObject,
 } from "node:crypto";
 import { WebSocketServer, type WebSocket } from "ws";
 
@@ -32,14 +28,14 @@ export interface FakeCernereOptions {
   projects: ManagedProject[];
   /** [fromProjectKey, toProjectKey] のペアのリスト (bidirectional 前提) */
   relayPairs: Array<[string, string]>;
+  /** project token 署名鍵. 未指定なら起動時に生成. */
+  jwtSecret?: string;
 }
 
 export class FakeCernere {
   private http: Server;
   private ws:   WebSocketServer;
-  private privateKey!: KeyObject;
-  private publicKeyJwk!: Record<string, string>;
-  private kid!: string;
+  private readonly jwtSecret: string;
   public port = 0;
 
   /** projectKey → 登録された SA WS URL. */
@@ -48,7 +44,7 @@ export class FakeCernere {
   private challenges = new Map<string, { issuer: string; target: string; expiresAt: number }>();
 
   constructor(private readonly opts: FakeCernereOptions) {
-    this.generateKeys();
+    this.jwtSecret = opts.jwtSecret ?? randomBytes(32).toString("hex");
     this.http = createServer(this.handleHttp.bind(this));
     this.ws   = new WebSocketServer({ noServer: true });
     this.http.on("upgrade", (req, socket, head) => {
@@ -57,7 +53,7 @@ export class FakeCernere {
         socket.destroy(); return;
       }
       const token = url.searchParams.get("token") ?? "";
-      const projectKey = this.verifyToken(token);
+      const projectKey = this.verifyTokenLocal(token);
       if (!projectKey) { socket.destroy(); return; }
       this.ws.handleUpgrade(req, socket, head, (wsock) => this.onWs(wsock, projectKey));
     });
@@ -122,10 +118,19 @@ export class FakeCernere {
         ws.send(JSON.stringify({ type: "error", request_id: reqId, code, message }));
       };
       try {
-        if (cmd === "managed_project.get_jwks") {
-          respond({ keys: [{
-            ...this.publicKeyJwk, kty: "RSA", use: "sig", alg: "RS256", kid: this.kid,
-          }] });
+        if (cmd === "managed_project.verify_token") {
+          const token = String(payload.token ?? "");
+          const claims = this.parseToken(token);
+          if (!claims) {
+            respond({ valid: false });
+          } else {
+            respond({
+              valid: true,
+              projectKey: claims.projectKey,
+              clientId: claims.sub,
+              exp: claims.exp,
+            });
+          }
         } else if (cmd === "managed_relay.register_endpoint") {
           this.endpoints.set(projectKey, String(payload.saWsUrl));
           respond({ ok: true });
@@ -161,36 +166,40 @@ export class FakeCernere {
     });
   }
 
-  // ─── crypto helpers ───────────────────────────────
-
-  private generateKeys(): void {
-    const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
-    this.privateKey = privateKey;
-    this.publicKeyJwk = publicKey.export({ format: "jwk" }) as Record<string, string>;
-    const der = publicKey.export({ format: "der", type: "spki" }) as Buffer;
-    this.kid = createHash("sha256").update(der).digest("hex").slice(0, 32);
-  }
+  // ─── crypto helpers (HS256) ────────────────────────
 
   private issueProjectToken(projectKey: string, clientId: string): string {
-    const header = { alg: "RS256", typ: "JWT", kid: this.kid };
+    const header = { alg: "HS256", typ: "JWT" };
     const now = Math.floor(Date.now() / 1000);
     const payload = { sub: clientId, projectKey, tokenType: "project", iat: now, exp: now + 3600 };
     const enc = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
     const signingInput = `${enc(header)}.${enc(payload)}`;
-    const sig = createSign("RSA-SHA256").update(signingInput).end().sign(this.privateKey).toString("base64url");
+    const sig = createHmac("sha256", this.jwtSecret).update(signingInput).digest("base64url");
     return `${signingInput}.${sig}`;
   }
 
-  private verifyToken(token: string): string | null {
-    // Minimal local verify — for WS gating.
+  private parseToken(token: string): { sub: string; projectKey: string; exp: number } | null {
     const [h, p, s] = token.split(".");
     if (!h || !p || !s) return null;
-    const pubkey = createPublicKey(this.privateKey);
-    const ok = createVerify("RSA-SHA256").update(`${h}.${p}`).end().verify(pubkey, Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64"));
-    if (!ok) return null;
-    const payload = JSON.parse(Buffer.from(p.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"));
+    const expected = createHmac("sha256", this.jwtSecret).update(`${h}.${p}`).digest("base64url");
+    if (expected !== s) return null;
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(Buffer.from(p.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"));
+    } catch { return null; }
     if (payload.tokenType !== "project") return null;
-    return payload.projectKey;
+    if (typeof payload.exp === "number" && payload.exp < Math.floor(Date.now() / 1000)) return null;
+    if (typeof payload.sub !== "string" || typeof payload.projectKey !== "string") return null;
+    return {
+      sub: payload.sub,
+      projectKey: payload.projectKey,
+      exp: typeof payload.exp === "number" ? payload.exp : 0,
+    };
+  }
+
+  private verifyTokenLocal(token: string): string | null {
+    const c = this.parseToken(token);
+    return c?.projectKey ?? null;
   }
 
   private isPairAllowed(a: string, b: string): boolean {

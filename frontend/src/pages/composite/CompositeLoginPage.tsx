@@ -9,8 +9,7 @@
  *   1. POST /api/auth/composite/login (or register) で資格情報検証
  *      → { ticket, wsPath } を取得
  *   2. WS `/auth/composite-ws?ticket=...` に接続
- *   3. ブラウザが fingerprint (Geolocation 含む) を収集 → WS から送信
- *      → パーミッションが取れるまで何度でも再試行可能
+ *   3. ブラウザが fingerprint (machine + browser 情報のみ) を収集 → WS から送信
  *   4. サーバーから state / authenticated / error メッセージを受信
  *   5. authenticated を受け取ったら auth_code を親ウィンドウに返す
  *
@@ -28,7 +27,6 @@ type Anomaly =
   | "new_device"
   | "new_os"
   | "new_browser"
-  | "new_location"
   | "new_ip"
   | "missing_fingerprint";
 
@@ -66,7 +64,6 @@ const ANOMALY_LABELS: Record<Anomaly, string> = {
   new_device: "新しいデバイス",
   new_os: "新しい OS",
   new_browser: "新しいブラウザ",
-  new_location: "普段と異なる地域",
   new_ip: "普段と異なるネットワーク",
   missing_fingerprint: "デバイス情報を取得できませんでした",
 };
@@ -122,12 +119,11 @@ export function CompositeLoginPage() {
   };
 
   /** fingerprint を収集して WS に送信。失敗時は setTimeout で再試行。 */
-  const collectAndSendFingerprint = async (ws: WebSocket) => {
+  const collectAndSendFingerprint = (ws: WebSocket) => {
     setFingerprintStatus("collecting");
     try {
-      // パーミッションを強制的に要求しながら収集
-      const fp = await collectDeviceFingerprint({ requestGeo: true, geoTimeoutMs: 15000 });
-      const hasSomething = !!(fp.machine || fp.browser || fp.geo);
+      const fp = collectDeviceFingerprint();
+      const hasSomething = !!(fp.machine || fp.browser);
       if (!hasSomething) {
         throw new Error("empty fingerprint");
       }
@@ -138,10 +134,9 @@ export function CompositeLoginPage() {
       setFingerprintStatus("failed");
       const msg = err instanceof Error ? err.message : "fingerprint collection failed";
       setError(`デバイス情報の取得に失敗しました: ${msg}。再試行します…`);
-      // 3秒後に再試行 (パーミッションダイアログ / ネットワーク復旧を待つ)
       retryTimerRef.current = window.setTimeout(() => {
         if (ws.readyState === WebSocket.OPEN) {
-          void collectAndSendFingerprint(ws);
+          collectAndSendFingerprint(ws);
         }
       }, 3000);
     }
@@ -154,7 +149,7 @@ export function CompositeLoginPage() {
         if (msg.state === "pending_device") {
           // fingerprint 未送信なら収集して送信
           if (fingerprintStatus !== "sent") {
-            void collectAndSendFingerprint(ws);
+            collectAndSendFingerprint(ws);
           }
         } else if (msg.state === "challenge_pending") {
           setChallenge(msg.data ?? {});
@@ -193,7 +188,7 @@ export function CompositeLoginPage() {
             // fingerprint 空エラーなら直ちに再収集
             retryTimerRef.current = window.setTimeout(() => {
               if (ws.readyState === WebSocket.OPEN) {
-                void collectAndSendFingerprint(ws);
+                collectAndSendFingerprint(ws);
               }
             }, 500);
           }
@@ -539,7 +534,7 @@ export function CompositeLoginPage() {
 
           {mode !== "device" && fingerprintStatus === "collecting" && (
             <p style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "0.5rem", textAlign: "center" }}>
-              デバイス情報を収集中... (位置情報の許可が必要です)
+              デバイス情報を収集中...
             </p>
           )}
         </form>

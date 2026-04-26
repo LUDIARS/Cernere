@@ -16,8 +16,15 @@ function envBool(key: string, fallback = false): boolean {
 }
 
 function isProduction(): boolean {
-  const e = process.env.CERNERE_ENV ?? process.env.APP_ENV ?? "";
+  const e = process.env.CERNERE_ENV ?? process.env.APP_ENV ?? process.env.NODE_ENV ?? "";
   return e === "production" || e === "prod";
+}
+
+function isDevelopment(): boolean {
+  if (isProduction()) return false;
+  const e = process.env.CERNERE_ENV ?? process.env.APP_ENV ?? process.env.NODE_ENV ?? "";
+  // デフォルト (env 未指定) は development とみなす
+  return e === "" || e === "development" || e === "dev";
 }
 
 export const config = {
@@ -63,4 +70,5 @@ export const config = {
 
   isHttps: env("FRONTEND_URL", "http://localhost:5173").startsWith("https://"),
   isProduction: isProduction(),
+  isDevelopment: isDevelopment(),
 } as const;

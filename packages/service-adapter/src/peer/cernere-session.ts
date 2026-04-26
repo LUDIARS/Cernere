@@ -7,7 +7,7 @@
  * Service adapter 自体が Cernere の "project" として振る舞うため、起動時に
  * 1. `POST /api/auth/login grant_type=project_credentials` で project token を取得
  * 2. その token で WS 接続
- * 3. コマンド (`get_jwks`, `get_user_data`, ...) を module_request で実行
+ * 3. コマンド (`verify_token`, `get_user_data`, ...) を module_request で実行
  *
  * ※ 再接続・token refresh 等の強化は後段で追加 (MVP は明示的 start/stop).
  */

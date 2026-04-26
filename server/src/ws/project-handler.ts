@@ -19,6 +19,7 @@ import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { verifyProjectToken, type ProjectJwtClaims } from "../auth/jwt.js";
 import { logProjectWsConnect, logProjectWsDisconnect } from "../logging/auth-logger.js";
+import { addConnection, removeConnection } from "./project-registry.js";
 
 export interface ProjectWsUserData {
   clientId: string;
@@ -86,6 +87,7 @@ export async function resolveProjectWsAuth(
 
 export function handleProjectWsOpen(ws: uWS.WebSocket<ProjectWsUserData>): void {
   const data = ws.getUserData();
+  addConnection(data.projectKey, data.connectionId, data.clientId);
   send(ws, {
     type: "connected",
     connection_id: data.connectionId,
@@ -157,5 +159,6 @@ export function handleProjectWsClose(ws: uWS.WebSocket<ProjectWsUserData>): void
     clearInterval(timer);
     pingTimers.delete(data.connectionId);
   }
+  removeConnection(data.projectKey, data.connectionId);
   logProjectWsDisconnect(data.projectKey, data.clientId, data.connectionId);
 }

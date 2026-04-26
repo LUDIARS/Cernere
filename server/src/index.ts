@@ -9,7 +9,12 @@ import { runMigrations } from "./db/migrate.js";
 
 async function main() {
   console.log("=== Cernere Server (uWebSockets.js) ===");
-  console.log(`  Environment: ${config.isProduction ? "production" : "development"}`);
+  const envLabel = config.isProduction
+    ? "production"
+    : config.isDevelopment
+      ? "development (verbose dev logging on)"
+      : "unknown";
+  console.log(`  Environment: ${envLabel}`);
 
   await runMigrations();
   await redis.connect();

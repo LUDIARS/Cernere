@@ -15,6 +15,7 @@ import { AppError } from "../error.js";
 import { projectDefinitionSchema, type ProjectDefinition } from "./schema.js";
 import { migrateProjectSchema } from "./schema-migrator.js";
 import * as cache from "./user-data-cache.js";
+import { getAllProjectStatus, getProjectConnections, getProjectStatus } from "../ws/project-registry.js";
 
 // ── Service Templates ────────────────────────────────────────
 
@@ -77,13 +78,46 @@ export function getServiceTemplate(key: string): ProjectDefinition {
 // ── Project CRUD ─────────────────────────────────────────────
 
 export async function listProjects() {
-  return db.select({
+  const rows = await db.select({
     key: dbSchema.managedProjects.key,
     name: dbSchema.managedProjects.name,
     description: dbSchema.managedProjects.description,
     isActive: dbSchema.managedProjects.isActive,
     createdAt: dbSchema.managedProjects.createdAt,
   }).from(dbSchema.managedProjects);
+
+  // 接続レジストリ (in-memory) から WS 接続状態をマージ
+  const statusMap = getAllProjectStatus();
+  return rows.map((p) => {
+    const s = statusMap.get(p.key);
+    return {
+      ...p,
+      connectionCount: s?.connectionCount ?? 0,
+      lastConnectedAt: s?.lastConnectedAt ?? null,
+      lastDisconnectedAt: s?.lastDisconnectedAt ?? null,
+    };
+  });
+}
+
+/**
+ * 個別プロジェクトの WS 接続詳細 (admin 用).
+ * connections: 現在 OPEN な接続を全件 (clientId / connectedAt 付き).
+ */
+export async function getProjectConnectionDetail(projectKey: string) {
+  const proj = await db.select({ key: dbSchema.managedProjects.key })
+    .from(dbSchema.managedProjects)
+    .where(eq(dbSchema.managedProjects.key, projectKey)).limit(1);
+  if (proj.length === 0) throw AppError.notFound("Project not found");
+
+  const status = getProjectStatus(projectKey);
+  return {
+    ...status,
+    connections: getProjectConnections(projectKey).map((c) => ({
+      connectionId: c.connectionId,
+      clientId: c.clientId,
+      connectedAt: c.connectedAt,
+    })),
+  };
 }
 
 export async function getProject(key: string) {
@@ -415,6 +449,9 @@ export async function getUserProjectData(userId: string, projectKey: string): Pr
 /**
  * ユーザーダッシュボード向け: ユーザーデータスキーマを持つプロジェクトの
  * 一覧を返す。"利用中" (inUse) はユーザーが 1 カラム以上の値を持つかで判定する。
+ *
+ * connectionCount / lastConnectedAt は project_credentials WS の生存状態を
+ * 表す (ダッシュボードの「使用中」表示はこの値を優先する)。
  */
 export interface UserProjectOverview {
   key: string;
@@ -427,6 +464,10 @@ export interface UserProjectOverview {
   filledColumns: number;
   /** 利用中か (filledColumns > 0) */
   inUse: boolean;
+  /** 現在 project_credentials で繋いでいる接続数 (Cernere プロセスローカル) */
+  connectionCount: number;
+  /** 直近に接続が確立したタイムスタンプ */
+  lastConnectedAt: Date | null;
 }
 
 /**
@@ -447,6 +488,9 @@ export async function issueProjectOpenUrl(userId: string, projectKey: string): P
   const { issueAuthCodeForUserId } = await import("../auth/auth-code.js");
   const authCode = await issueAuthCodeForUserId(userId);
   if (!authCode) throw AppError.forbidden("User not found");
+
+  // ユーザ × プロジェクトの初回 "use" を確定: Cernere DB に空行を作る
+  await ensureUserProjectRow(userId, projectKey);
 
   const separator = frontendUrl.includes("?") ? "&" : "?";
   const url = `${frontendUrl}${separator}code=${encodeURIComponent(authCode)}`;
@@ -479,6 +523,7 @@ export async function listUserProjectsOverview(userId: string): Promise<UserProj
       // 個別プロジェクトの取得失敗はスキップ扱い
     }
 
+    const status = getProjectStatus(proj.key);
     overviews.push({
       key: proj.key,
       name: proj.name,
@@ -487,6 +532,8 @@ export async function listUserProjectsOverview(userId: string): Promise<UserProj
       totalColumns: activeColumns.length,
       filledColumns: filled,
       inUse: filled > 0,
+      connectionCount: status.connectionCount,
+      lastConnectedAt: status.lastConnectedAt,
     });
   }
   return overviews;
@@ -519,6 +566,49 @@ function safeTableName(projectKey: string): string {
     throw AppError.badRequest("Invalid project key");
   }
   return `project_data_${projectKey}`;
+}
+
+/**
+ * 「ユーザがそのプロジェクトを使い始めた」タイミングで
+ * `project_data_<key>` に空行を確保する.
+ *
+ * トリガ:
+ *   - Cernere ダッシュボードの「開く」 (issueProjectOpenUrl)
+ *   - 各サービス側での composite 認証 (auth_session.projectKey が判明している場合)
+ *
+ * 既存行があれば NO-OP (ON CONFLICT DO NOTHING).
+ * project が user_data スキーマを持たない場合や DB エラー時は warn のみで握り潰す
+ * (本筋の認証フローを巻き込まないため).
+ */
+export async function ensureUserProjectRow(userId: string, projectKey: string): Promise<void> {
+  let proj;
+  try {
+    proj = await db.select().from(dbSchema.managedProjects)
+      .where(eq(dbSchema.managedProjects.key, projectKey)).limit(1);
+  } catch (err) {
+    console.warn(`[project-data] ensureUserProjectRow: project lookup failed (${projectKey}):`, err);
+    return;
+  }
+  if (proj.length === 0 || !proj[0].isActive) return;
+
+  const def = proj[0].schemaDefinition as ProjectDefinition;
+  const columns = def?.user_data?.columns ?? {};
+  const hasActive = Object.values(columns).some((c) => !c._deleted);
+  if (!hasActive) return; // user_data 定義なし → row 不要
+
+  const tableName = safeTableName(projectKey);
+  const { default: postgres } = await import("postgres");
+  const sqlClient = postgres(config.databaseUrl, { max: 1 });
+  try {
+    await sqlClient.unsafe(
+      `INSERT INTO "${tableName}" (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`,
+      [userId],
+    );
+  } catch (err) {
+    console.warn(`[project-data] ensureUserProjectRow failed (${projectKey}):`, err);
+  } finally {
+    await sqlClient.end();
+  }
 }
 
 /** 安全なカラム名チェック */
