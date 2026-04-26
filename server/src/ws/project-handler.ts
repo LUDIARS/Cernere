@@ -62,8 +62,14 @@ function send(ws: uWS.WebSocket<ProjectWsUserData>, msg: ServerMessage): void {
 }
 
 /**
- * upgrade 時にプロジェクトトークンを検証。
- * 成功時にプロジェクト情報を返し、失敗時は null。
+ * upgrade 時にプロジェクトトークンを検証 (4 層防御の Layer 1+4 相当).
+ *
+ *   1. JWT 検証 (HS256)
+ *   2. クレームの projectKey と managed_projects のレコードが整合
+ *   3. is_active = true
+ *   4. (ある場合) DB の clientId 列と claim.sub が完全一致
+ *
+ * 失敗時は null を返し caller (app.ts upgrade) が 401 を返す.
  */
 export async function resolveProjectWsAuth(
   token?: string,
@@ -71,12 +77,20 @@ export async function resolveProjectWsAuth(
   if (!token) return null;
   try {
     const claims = verifyProjectToken(token);
-    // プロジェクトが有効か DB で確認
-    const rows = await db.select({ isActive: schema.managedProjects.isActive })
+    // プロジェクトの DB レコードと突き合わせ. clientId / projectKey
+    // のいずれかが managed_projects の値と食い違うトークンは拒否.
+    const rows = await db.select({
+      key: schema.managedProjects.key,
+      clientId: schema.managedProjects.clientId,
+      isActive: schema.managedProjects.isActive,
+    })
       .from(schema.managedProjects)
       .where(eq(schema.managedProjects.clientId, claims.sub))
       .limit(1);
-    if (!rows[0] || !rows[0].isActive) return null;
+    const proj = rows[0];
+    if (!proj) return null;
+    if (!proj.isActive) return null;
+    if (claims.projectKey && claims.projectKey !== proj.key) return null;
     return claims;
   } catch {
     return null;
