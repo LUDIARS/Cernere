@@ -19,6 +19,7 @@ import {
   logUserRegister,
   logAuthEvent,
 } from "../logging/auth-logger.js";
+import { devLog } from "../logging/dev-logger.js";
 import { createAuthSession } from "../auth/auth-session.js";
 
 interface RouteResult {
@@ -29,6 +30,12 @@ interface RouteResult {
 export interface CompositeCtx {
   ip?: string;
   userAgent?: string;
+  /**
+   * project_credentials 経由で送られてきたリクエストの場合、その projectKey.
+   * 直接 REST `/api/auth/composite/...` の場合は undefined.
+   * `ensureUserProjectRow` の呼び出し対象を決めるのに使う.
+   */
+  projectKey?: string;
 }
 
 export async function handleCompositeRoute(
@@ -59,6 +66,11 @@ export async function executeCompositeAction(
   }
 }
 
+/** auth_session 作成時に projectKey を伝搬する共通ラッパ */
+function sessionCtx(ctx: CompositeCtx): { ip?: string; userAgent?: string; projectKey?: string } {
+  return { ip: ctx.ip, userAgent: ctx.userAgent, projectKey: ctx.projectKey };
+}
+
 function parseBody(body: string): Record<string, unknown> {
   if (!body) return {};
   try { return JSON.parse(body); } catch { return {}; }
@@ -79,7 +91,7 @@ async function openAuthSession(
       email: user.email,
       role: user.role,
     },
-    ctx,
+    sessionCtx(ctx),
   );
   return {
     status: "200 OK",
@@ -94,28 +106,35 @@ async function openAuthSession(
 async function compositeLogin(p: Record<string, unknown>, ctx: CompositeCtx): Promise<RouteResult> {
   const email = p.email as string | undefined;
   const password = p.password as string | undefined;
+  devLog("composite.login.begin", { email, ip: ctx.ip });
   if (!email || !password) {
     logUserLoginFailed(email, "composite", "missing credentials", ctx);
     throw new Error("email and password are required");
   }
 
+  devLog("composite.login.rateLimit", { email });
   await checkRateLimit(`login:${email}`, 10, 900);
 
+  devLog("composite.login.lookupUser", { email });
   const rows = await db.select().from(schema.users)
     .where(eq(schema.users.email, email)).limit(1);
   const user = rows[0];
   if (!user || !user.passwordHash) {
+    devLog("composite.login.userNotFound", { email });
     logUserLoginFailed(email, "composite", "invalid credentials", ctx);
     throw new Error("Unauthorized: Invalid email or password");
   }
 
+  devLog("composite.login.verifyPassword", { userId: user.id });
   const valid = await bcrypt.compare(password, user.passwordHash);
   if (!valid) {
+    devLog("composite.login.passwordInvalid", { userId: user.id });
     logUserLoginFailed(email, "composite", "invalid credentials", ctx);
     throw new Error("Unauthorized: Invalid email or password");
   }
 
   if (user.mfaEnabled) {
+    devLog("composite.login.mfaRequired", { userId: user.id });
     logAuthEvent({ event: "user.mfa.challenge", userId: user.id, email: user.email ?? undefined, provider: "composite", ip: ctx.ip, userAgent: ctx.userAgent });
     return {
       status: "200 OK",
@@ -123,6 +142,7 @@ async function compositeLogin(p: Record<string, unknown>, ctx: CompositeCtx): Pr
     };
   }
 
+  devLog("composite.login.openSession", { userId: user.id });
   logUserLogin(user.id, user.email, "composite", ctx);
   return openAuthSession(
     { id: user.id, displayName: user.displayName ?? "", email: user.email, role: user.role },
@@ -134,27 +154,33 @@ async function compositeRegister(p: Record<string, unknown>, ctx: CompositeCtx):
   const name = p.name as string | undefined;
   const email = p.email as string | undefined;
   const password = p.password as string | undefined;
+  devLog("composite.register.begin", { email, ip: ctx.ip });
 
   if (!name || !email || !password) throw new Error("name, email, password are required");
   if (password.length < 8) throw new Error("Password must be at least 8 characters");
 
+  devLog("composite.register.rateLimit", { email });
   await checkRateLimit(`register:${email}`, 5, 600);
 
+  devLog("composite.register.checkExisting", { email });
   const existing = await db.select({ id: schema.users.id })
     .from(schema.users).where(eq(schema.users.email, email)).limit(1);
   if (existing.length > 0) throw new Error("Registration failed. Please check your input and try again.");
 
+  devLog("composite.register.hashPassword");
   const passwordHash = await bcrypt.hash(password, 12);
   const countResult = await db.select({ count: sql<number>`count(*)` }).from(schema.users);
   const role = Number(countResult[0]?.count ?? 0) === 0 ? "admin" : "general";
   const userId = crypto.randomUUID();
   const now = new Date();
 
+  devLog("composite.register.insertUser", { userId, role });
   await db.insert(schema.users).values({
     id: userId, login: name, displayName: name, email, role, passwordHash,
     createdAt: now, updatedAt: now,
   });
 
+  devLog("composite.register.openSession", { userId });
   logUserRegister(userId, email, "composite", { ip: ctx.ip });
   return openAuthSession(
     { id: userId, displayName: name, email, role },

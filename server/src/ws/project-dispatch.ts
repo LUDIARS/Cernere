@@ -48,7 +48,13 @@ export async function dispatchProjectCommand(
     case "auth.register":
     case "auth.mfa-verify": {
       const { executeCompositeAction } = await import("../http/composite-handler.js");
-      return executeCompositeAction(action as "login" | "register" | "mfa-verify", payload);
+      // projectKey を ctx に載せて、認証完了時に project_data_<key> へ
+      // 行を初期化できるようにする (ensureUserProjectRow).
+      return executeCompositeAction(
+        action as "login" | "register" | "mfa-verify",
+        payload,
+        { projectKey },
+      );
     }
     // ─── managed_project: project_data_{key} へのユーザーデータアクセス ───
     // projectKey は WS セッションで bind されており、payload では受け取らない
@@ -120,14 +126,24 @@ export async function dispatchProjectCommand(
       const provider = requireStr(payload, "provider");
       return svc.deleteOAuthToken(projectKey, userId, provider);
     }
-    // ─── service adapter — project token 検証用 JWKS を返す ───
+    // ─── service adapter — peer から渡された project token をリモート検証 ───
     //
-    // 他 LUDIARS サービス (Actio/Nuntius/Imperativus 等) が
-    // @ludiars/cernere-service-adapter 経由で取得する. 返却内容は
-    // RFC 7517 JWKS 形式で、ローカルでの RS256 検証に使う.
-    case "managed_project.get_jwks": {
-      const { getProjectJwks } = await import("../auth/project-keys.js");
-      return getProjectJwks();
+    // 旧 get_jwks (RS256 + ローカル検証) は廃止. peer 側は token を
+    // Cernere に投げて { valid, projectKey, clientId } を取得する.
+    case "managed_project.verify_token": {
+      const token = requireStr(payload, "token");
+      const { verifyProjectToken } = await import("../auth/jwt.js");
+      try {
+        const claims = verifyProjectToken(token);
+        return {
+          valid: true,
+          projectKey: claims.projectKey,
+          clientId: claims.sub,
+          exp: claims.exp,
+        };
+      } catch {
+        return { valid: false };
+      }
     }
     // ─── managed_relay: peer SA 間の仲介 (Phase 0b) ───
     //

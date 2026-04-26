@@ -20,6 +20,7 @@ import {
   logProjectLogin,
   logProjectLoginFailed,
 } from "../logging/auth-logger.js";
+import { devLog } from "../logging/dev-logger.js";
 
 interface RouteResult {
   status: string;
@@ -37,6 +38,7 @@ export async function handleAuthRoute(
   authHeader: string,
   ctx: RequestCtx = {},
 ): Promise<RouteResult> {
+  devLog("auth.route", { action, ip: ctx.ip });
   switch (action) {
     case "register": return register(parseBody(body), ctx);
     case "login": return login(parseBody(body), ctx);
@@ -59,22 +61,27 @@ async function register(p: Record<string, unknown>, ctx: RequestCtx): Promise<Ro
   const name = p.name as string | undefined;
   const email = p.email as string | undefined;
   const password = p.password as string | undefined;
+  devLog("auth.register.begin", { email, ip: ctx.ip });
 
   if (!name || !email || !password) throw new Error("name, email, password are required");
   if (password.length < 8) throw new Error("Password must be at least 8 characters");
 
+  devLog("auth.register.rateLimit", { email });
   await checkRateLimit(`register:${email}`, 5, 600);
 
+  devLog("auth.register.checkExisting", { email });
   const existing = await db.select({ id: schema.users.id })
     .from(schema.users).where(eq(schema.users.email, email)).limit(1);
   if (existing.length > 0) throw new Error("Registration failed. Please check your input and try again.");
 
+  devLog("auth.register.hashPassword");
   const passwordHash = await bcrypt.hash(password, 12);
   const countResult = await db.select({ count: sql<number>`count(*)` }).from(schema.users);
   const role = Number(countResult[0]?.count ?? 0) === 0 ? "admin" : "general";
   const userId = crypto.randomUUID();
   const now = new Date();
 
+  devLog("auth.register.insertUser", { userId, role });
   await db.insert(schema.users).values({
     id: userId, login: name, displayName: name, email, role, passwordHash,
     createdAt: now, updatedAt: now,
@@ -100,32 +107,40 @@ async function register(p: Record<string, unknown>, ctx: RequestCtx): Promise<Ro
 async function login(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
   // Tool client login
   if (p.grant_type === "client_credentials") {
+    devLog("auth.login.toolClient", { clientId: p.client_id });
     return toolLogin(p.client_id as string, p.client_secret as string);
   }
   // Project login (managed_projects)
   if (p.grant_type === "project_credentials") {
+    devLog("auth.login.project", { clientId: p.client_id });
     return projectLogin(p.client_id as string, p.client_secret as string, ctx);
   }
 
   const email = p.email as string | undefined;
   const password = p.password as string | undefined;
+  devLog("auth.login.user.begin", { email, ip: ctx.ip });
   if (!email || !password) {
     logUserLoginFailed(email, "email", "missing credentials", ctx);
     throw new Error("email and password are required");
   }
 
+  devLog("auth.login.user.rateLimit", { email });
   await checkRateLimit(`login:${email}`, 10, 900);
 
+  devLog("auth.login.user.lookup", { email });
   const rows = await db.select().from(schema.users)
     .where(eq(schema.users.email, email)).limit(1);
   const user = rows[0];
   if (!user || !user.passwordHash) {
+    devLog("auth.login.user.notFound", { email });
     logUserLoginFailed(email, "email", "invalid credentials", ctx);
     throw new Error("Unauthorized: Invalid email or password");
   }
 
+  devLog("auth.login.user.verify", { userId: user.id });
   const valid = await bcrypt.compare(password, user.passwordHash);
   if (!valid) {
+    devLog("auth.login.user.invalid", { userId: user.id });
     logUserLoginFailed(email, "email", "invalid credentials", ctx);
     throw new Error("Unauthorized: Invalid email or password");
   }
