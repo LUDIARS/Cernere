@@ -2,13 +2,30 @@
  * WebSocket コマンドディスパッチャ
  *
  * module_request メッセージを受け取り、ビジネスロジックにルーティングする。
- * 全操作は operation_logs テーブルに��録される。
+ * 全操作は operation_logs テーブルに記録される。
+ *
+ * 4 層防御 (CLAUDE.md §1.2 Step 6):
+ *   1. トークン検証      — WS upgrade 時に完了済 (resolveWsAuth)
+ *   2. Redis TTL 確認    — getUserState で session_expired を弾く
+ *   3. ユーザー状態      — state === "logged_in" を要求
+ *   4. リソース権限確認  — 各 sub-dispatcher (admin 系等) が個別に実施
+ *
+ * Layer 2-3 はここで集中ガード。Layer 4 は呼び出し先関数 (例: requireSystemAdmin) に委譲。
  */
 
 import { db } from "./db/connection.js";
 import * as schema from "./db/schema.js";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { AppError } from "./error.js";
+import { getUserState } from "./redis.js";
+
+/**
+ * Layer 2-3 を要求しないコマンド (主に「現在ログイン中であることを必須としない」もの).
+ * 認証完了直前のセッション初期化や、状態遷移そのものを行うものを除外する.
+ */
+const PUBLIC_COMMANDS = new Set<string>([
+  // ゲスト → 認証済みへの昇格に使う想定があれば追加
+]);
 
 export async function dispatch(
   userId: string,
@@ -25,21 +42,39 @@ export async function dispatch(
   let error: string | undefined;
 
   try {
+    // Layer 2 + 3: Redis 上のユーザー状態が "logged_in" であることを要求.
+    // userId が空 (ゲスト) の場合は Layer 4 の呼び出し先で都度判定.
+    if (userId && !PUBLIC_COMMANDS.has(method)) {
+      const state = await getUserState(userId);
+      if (!state) {
+        throw AppError.unauthorized("Session expired. Please re-authenticate.");
+      }
+      if (state.state !== "logged_in") {
+        throw AppError.forbidden(`Session not active (state=${state.state})`);
+      }
+    }
+
     result = await execute(userId, module, action, payload as Record<string, unknown> | undefined);
   } catch (err) {
     status = "error";
     error = (err as Error).message;
     throw err;
   } finally {
-    await db.insert(schema.operationLogs).values({
-      id: crypto.randomUUID(),
-      userId,
-      sessionId,
-      method,
-      params,
-      status,
-      error: error ?? null,
-    }).catch(() => {});
+    // operation_logs は監査要件上、書き込み失敗を握り潰さず log + メトリクス出力する.
+    try {
+      await db.insert(schema.operationLogs).values({
+        id: crypto.randomUUID(),
+        userId,
+        sessionId,
+        method,
+        params,
+        status,
+        error: error ?? null,
+      });
+    } catch (logErr) {
+      console.error("[operation_logs] insert failed (audit trail at risk):",
+        logErr instanceof Error ? logErr.message : logErr);
+    }
   }
 
   return result;

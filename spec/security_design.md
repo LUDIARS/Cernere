@@ -85,16 +85,35 @@ Cernere は **常時接続セッションの強固な認証によって、外部
     │
     ├─ [Layer 1] セッション Cookie / Bearer Token 検証
     │   └─ 不正 → 401 Unauthorized
+    │   実装: ws/auth.ts resolveWsAuth() / ws/project-handler.ts resolveProjectWsAuth()
     │
     ├─ [Layer 2] Redis セッション存在確認 (TTL 7日)
     │   └─ 期限切れ → 401 Unauthorized
+    │   実装: commands.ts dispatch() の getUserState() 呼び出し
     │
     ├─ [Layer 3] ユーザステート検証 (LoggedIn であること)
     │   └─ SessionExpired → 403 Forbidden
+    │   実装: commands.ts dispatch() の state !== "logged_in" 判定
     │
     └─ [Layer 4] 所有権確認 (リソースの所有者であること)
         └─ 他ユーザ → 403 Forbidden
+        実装: 各 sub-dispatcher (requireSystemAdmin / 自データ判定 等)
 ```
+
+### 3.3 プロジェクト WS の追加検証 (resolveProjectWsAuth)
+
+`/ws/project` の upgrade 時、Layer 1+4 を統合した検証を行う:
+
+1. JWT を HS256 で verify (Layer 1)
+2. クレームの `clientId` で `managed_projects` を引く (実体確認)
+3. `is_active = true` (廃止プロジェクト拒否)
+4. クレームの `projectKey` と DB の `key` 列が一致 (token と DB の食い違い検知)
+
+これにより、JWT が後から無効化された (プロジェクト削除/停止) ケースや、token と DB の整合性が崩れたケースを upgrade 段階で弾く。
+
+### 3.4 監査ログの整合性
+
+`commands.ts dispatch()` は finally 節で `operation_logs` に書き込む。書き込み失敗を silent catch で握り潰すと監査要件 (CLAUDE.md §1.2 Step 8) が崩れるため、**書き込み失敗時は `console.error` でメトリクス出力**する (運用側で監視する前提)。
 
 ## 4. リレーのセキュリティ境界
 
