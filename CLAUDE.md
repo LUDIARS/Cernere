@@ -20,12 +20,12 @@ Cernere は汎用認証プラットフォーム & データリレーサーバー
 
 | レイヤー | 技術 |
 |----------|------|
-| サーバー | Rust + Axum 0.7 |
+| サーバー | TypeScript + uWebSockets.js + Drizzle ORM |
 | データベース | PostgreSQL 17 |
 | セッションストア | Redis 7（TTL 7日） |
 | 認証方式 | GitHub OAuth / Google OAuth / bcrypt パスワード |
 | MFA | TOTP / SMS (AWS SNS) / Email (AWS SES) |
-| トークン | JWT（アクセス: 60分、リフレッシュ: 30日） |
+| トークン | JWT HS256（アクセス: 60分、リフレッシュ: 30日） |
 | フロントエンド | React 19 + React Router 7 + TypeScript + Vite |
 
 ### 1.2 実装手順
