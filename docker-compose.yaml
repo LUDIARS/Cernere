@@ -48,7 +48,10 @@ services:
   # ソースマウント + ホットリロード
 
   backend-dev:
-    image: node:22-slim
+    # uWebSockets.js v20.60+ requires glibc 2.38+.
+    # node:22-slim / node:24-slim (Debian bookworm, glibc 2.36) fail at runtime.
+    # Use Debian trixie (glibc 2.41) base.
+    image: node:24-trixie-slim
     container_name: cernere-backend-dev
     working_dir: /app/server
     ports:
@@ -58,13 +61,17 @@ services:
       - ./migrations:/app/migrations
       - backend-node-modules:/app/server/node_modules
     environment:
-      DATABASE_URL: "${DATABASE_URL:-postgresql://cernere_user:cernere@localhost:5432/cernere}"
-      REDIS_URL: "${REDIS_URL:-redis://localhost:6379/0}"
+      DATABASE_URL: "${DATABASE_URL:-postgresql://cernere_user:cernere@postgres:5432/cernere}"
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
       LISTEN_PORT: "8080"
       FRONTEND_URL: "${FRONTEND_URL:-http://localhost:5173}"
       JWT_SECRET: "${JWT_SECRET:-}"
       NODE_ENV: "development"
+      CI: "true"
     command: sh -c "apt-get update -qq && apt-get install -y -qq git > /dev/null && npm i -g pnpm && pnpm install && npx tsx watch src/index.ts"
+    networks:
+      - default
+      - infra_default
     profiles:
       - dev
 
@@ -85,6 +92,13 @@ services:
 
 # MailHog (dev SMTP) は共有インフラ (../infra/docker-compose.yaml) で提供される。
 # infra を起動していない場合は CERNERE_SMTP_HOST を任意の SMTP に向けること。
+
+networks:
+  # 共有インフラ (../infra/docker-compose.yaml) のネットワークを external 参照。
+  # backend-dev はこのネットに属して `postgres:5432` / `redis:6379` で
+  # service name 直結する (ホストの port forwarding を経由しない)。
+  infra_default:
+    external: true
 
 volumes:
   backend-node-modules:
