@@ -22,8 +22,24 @@ import { spawn } from "node:child_process";
 import type { EnvCliConfig, InfisicalBootstrap, RawSecret } from "./types.js";
 import { authenticate, fetchSecrets, getSecretByKey, upsertSecret } from "./infisical.js";
 import { loadBootstrap, saveBootstrap } from "./env-file.js";
-import { buildDotenv } from "./env-generator.js";
+import { buildDotenv, findMissingRequired } from "./env-generator.js";
 import { createPrompt } from "./prompt.js";
+
+function abortIfRequiredMissing(
+  secrets: RawSecret[],
+  bootstrap: InfisicalBootstrap,
+  config: EnvCliConfig,
+): void {
+  const missing = findMissingRequired(secrets, bootstrap, config);
+  if (missing.length === 0) return;
+  console.error(
+    `Error: production environment "${bootstrap.environment}" で必須キーが Infisical に登録されていません:`,
+  );
+  for (const key of missing) console.error(`  ${key}`);
+  console.error("");
+  console.error("  env-cli set <KEY> <VALUE> で登録するか、 config.required.production を見直してください。");
+  process.exit(1);
+}
 
 // ─── Config Loading ────────────────────────────────────────
 
@@ -288,6 +304,8 @@ async function cmdEnv(config: EnvCliConfig, toStdout: boolean): Promise<void> {
     const token = await authenticate(bootstrap);
     const secrets = await fetchSecrets(bootstrap, token);
 
+    abortIfRequiredMissing(secrets, bootstrap, config);
+
     const result = buildDotenv(secrets, bootstrap, config);
 
     if (toStdout) {
@@ -330,6 +348,7 @@ async function cmdUp(config: EnvCliConfig, mode: UpMode, extraArgs: string[]): P
     console.log("\nInflsical から .env を生成中...");
     const token = await authenticate(bootstrap);
     const secrets = await fetchSecrets(bootstrap, token);
+    abortIfRequiredMissing(secrets, bootstrap, config);
     const result = buildDotenv(secrets, bootstrap, config);
     fs.writeFileSync(dotenvPath, result.content, "utf-8");
     console.log(`✓ ${dotenvPath} を生成しました (一時ファイル)`);

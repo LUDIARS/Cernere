@@ -12,6 +12,37 @@ export interface EnvGeneratorResult {
 }
 
 /**
+ * config.required.production で宣言されたキーが、 production 相当の environment で
+ * Infisical から取得できなかった (= 未登録 / 空文字) 場合に missing キーの配列を返す。
+ * production 以外、 または required 未宣言なら常に空配列。
+ *
+ * 「production 相当」 は bootstrap.environment が "prod" / "production" もしくは
+ * それらで始まる name (例: "prod-eu") のケース、 大文字小文字無視。
+ */
+export function findMissingRequired(
+  secrets: RawSecret[],
+  bootstrap: InfisicalBootstrap,
+  config: EnvCliConfig,
+): string[] {
+  const required = config.required?.production;
+  if (!required || required.length === 0) return [];
+
+  const env = bootstrap.environment.toLowerCase();
+  const isProduction =
+    env === "prod" || env === "production" ||
+    env.startsWith("prod-") || env.startsWith("production-");
+  if (!isProduction) return [];
+
+  const secretMap = new Map<string, string>();
+  for (const s of secrets) secretMap.set(s.secretKey, s.secretValue);
+
+  return required.filter((key) => {
+    const v = secretMap.get(key);
+    return v === undefined || v === "";
+  });
+}
+
+/**
  * Infisical のシークレットをもとに Docker 用 .env 文字列を生成する。
  *
  * 分類:
