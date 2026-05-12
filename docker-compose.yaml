@@ -78,7 +78,9 @@ services:
       INFISICAL_ENVIRONMENT: "${INFISICAL_ENVIRONMENT:-dev}"
       INFISICAL_CLIENT_ID: "${INFISICAL_CLIENT_ID:-}"
       INFISICAL_CLIENT_SECRET: "${INFISICAL_CLIENT_SECRET:-}"
-    command: sh -c "apt-get update -qq && apt-get install -y -qq git > /dev/null && npm i -g pnpm && pnpm install && npx tsx watch src/bootstrap.ts"
+    # CI=true は pnpm v10 で --frozen-lockfile を強制するので、 dev container では
+    # --no-frozen-lockfile を明示して lockfile mismatch を吸収する。
+    command: sh -c "apt-get update -qq && apt-get install -y -qq git > /dev/null && npm i -g pnpm && pnpm install --no-frozen-lockfile && npx tsx watch src/bootstrap.ts"
     networks:
       - default
       - infra_default
