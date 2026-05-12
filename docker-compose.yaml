@@ -78,9 +78,10 @@ services:
       INFISICAL_ENVIRONMENT: "${INFISICAL_ENVIRONMENT:-dev}"
       INFISICAL_CLIENT_ID: "${INFISICAL_CLIENT_ID:-}"
       INFISICAL_CLIENT_SECRET: "${INFISICAL_CLIENT_SECRET:-}"
-    # CI=true は pnpm v10 で --frozen-lockfile を強制するので、 dev container では
-    # --no-frozen-lockfile を明示して lockfile mismatch を吸収する。
-    command: sh -c "apt-get update -qq && apt-get install -y -qq git > /dev/null && npm i -g pnpm && pnpm install --no-frozen-lockfile && npx tsx watch src/bootstrap.ts"
+    # pnpm v10 系は ERR_PNPM_IGNORED_BUILDS で esbuild postinstall を拒否し続ける
+    # (workspace.yaml の onlyBuiltDependencies を書いても効かない version がある)。
+    # 当面 pnpm v9 に pin して回避。 v10 の strict build script 仕様が安定したら戻す。
+    command: sh -c "apt-get update -qq && apt-get install -y -qq git > /dev/null && npm i -g pnpm@9 && pnpm install --no-frozen-lockfile && npx tsx watch src/bootstrap.ts"
     networks:
       - default
       - infra_default
