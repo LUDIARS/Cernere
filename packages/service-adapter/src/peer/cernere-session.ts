@@ -119,8 +119,13 @@ export class CernereSession {
       const body = await res.text().catch(() => "");
       throw new Error(`[cernere-session] login failed (${res.status}): ${body}`);
     }
-    const data = await res.json() as { access_token?: string; project_token?: string };
-    const tok = data.project_token ?? data.access_token;
+    // Cernere は camelCase (accessToken) で返す。snake_case は legacy 互換用。
+    const data = await res.json() as {
+      access_token?: string;
+      project_token?: string;
+      accessToken?: string;
+    };
+    const tok = data.project_token ?? data.access_token ?? data.accessToken;
     if (!tok) throw new Error("[cernere-session] login response missing project token");
     return tok;
   }

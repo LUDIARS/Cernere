@@ -229,7 +229,7 @@ export async function updateProjectSchema(key: string, payload: unknown, userId?
 
   const parsed = projectDefinitionSchema.safeParse(payload);
   if (!parsed.success) {
-    throw AppError.badRequest(`Invalid definition: ${parsed.error.issues.map((i) => i.message).join(", ")}`);
+    throw AppError.badRequest(`Invalid definition: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`);
   }
   const definition = parsed.data;
 
@@ -253,6 +253,19 @@ export async function updateProjectSchema(key: string, payload: unknown, userId?
         _deleted: true,
       };
     }
+  }
+
+  // payload に top-level field が無ければ旧値を保持 (partial-update セマンティクス).
+  // サービスの起動時 auto-sync は user_data のみ送ってくるが、その際に
+  // 既存の endpoint / data_sharing を消してしまわないようにする。
+  if (definition.endpoint === undefined && oldDef?.endpoint) {
+    definition.endpoint = oldDef.endpoint;
+  }
+  if (definition.data_sharing === undefined && oldDef?.data_sharing) {
+    definition.data_sharing = oldDef.data_sharing;
+  }
+  if (!definition.project.description && oldDef?.project?.description) {
+    definition.project.description = oldDef.project.description;
   }
 
   await db.update(dbSchema.managedProjects).set({

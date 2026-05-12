@@ -31,14 +31,26 @@ function send(ws: uWS.WebSocket<WsUserData>, msg: ServerMessage): void {
   try {
     data = ws.getUserData();
   } catch {
-    // 既に破棄された WebSocket
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`[ws] send dropped: getUserData failed (type=${msg.type})`);
+    }
     return;
   }
-  if (data.closed) return;
+  if (data.closed) {
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`[ws] send dropped: closed flag set (sid=${data.sessionId} type=${msg.type})`);
+    }
+    return;
+  }
   try {
-    ws.send(JSON.stringify(msg));
-  } catch {
-    // close と send のレース。以降の send をブロックするため closed を立てる
+    const ret = ws.send(JSON.stringify(msg));
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`[ws] sent sid=${data.sessionId} type=${msg.type}${msg.module ? ` ${msg.module}.${msg.action}` : ""} ret=${ret}`);
+    }
+  } catch (err) {
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`[ws] send threw sid=${data.sessionId} type=${msg.type} err=${(err as Error).message}`);
+    }
     data.closed = true;
   }
 }
@@ -142,11 +154,33 @@ export async function handleWsMessage(
     return;
   }
   if (msg.type === "module_request") {
+    const t0 = Date.now();
+    // payload から識別子になりそうな key だけ pull する (full payload は冗長 + secret 漏洩リスク)
+    const p = msg.payload as Record<string, unknown> | undefined;
+    const ids: Record<string, unknown> = {};
+    for (const k of ["projectKey", "key", "moduleKey", "id", "groupId"]) {
+      if (p && typeof p[k] === "string") ids[k] = p[k];
+    }
     try {
       const result = await dispatch(data.userId, data.sessionId, msg.module, msg.action, msg.payload);
       send(ws, { type: "module_response", module: msg.module, action: msg.action, payload: result });
+      console.log(`[action] ${JSON.stringify({
+        ts: new Date().toISOString(),
+        userId: data.userId, sessionId: data.sessionId,
+        module: msg.module, action: msg.action,
+        ...ids,
+        status: "ok", durationMs: Date.now() - t0,
+      })}`);
     } catch (err) {
-      send(ws, { type: "error", code: "command_error", message: (err as Error).message });
+      const message = (err as Error).message;
+      send(ws, { type: "error", code: "command_error", message });
+      console.log(`[action] ${JSON.stringify({
+        ts: new Date().toISOString(),
+        userId: data.userId, sessionId: data.sessionId,
+        module: msg.module, action: msg.action,
+        ...ids,
+        status: "error", error: message, durationMs: Date.now() - t0,
+      })}`);
     }
     return;
   }
@@ -167,9 +201,11 @@ export async function handleWsClose(ws: uWS.WebSocket<WsUserData>): Promise<void
 
   if (!data.isGuest || data.promoted) {
     sessionRegistry.unregister(data.sessionId);
-    await updateUserStateField(data.userId, "session_expired");
     logUserWsDisconnect(data.userId, data.sessionId);
+    // ustate は user_id 単一キーなので、他に生存セッションがあれば
+    // state を session_expired に落とさない (落とすと他セッションが弾かれる)。
     if (!sessionRegistry.isOnline(data.userId)) {
+      await updateUserStateField(data.userId, "session_expired");
       notifyPresenceChange(data.userId, "offline").catch(() => {});
     }
   }
