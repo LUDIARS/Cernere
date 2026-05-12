@@ -4,9 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch src/bootstrap.ts",
+    "dev:legacy": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/bootstrap.js",
+    "start:legacy": "node dist/index.js"
   },
   "dependencies": {
     "@aws-sdk/client-ses": "^3.1030.0",
