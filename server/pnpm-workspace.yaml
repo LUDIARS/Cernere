@@ -1,2 +1,9 @@
-allowBuilds:
-  esbuild: set this to true or false
+# pnpm v10 only honors `onlyBuiltDependencies` from this file (not package.json
+# or .npmrc). Declare `packages: ["."]` so the single-package directory is
+# treated as a workspace root.
+packages:
+  - "."
+overrides:
+  esbuild: ^0.25.0
+onlyBuiltDependencies:
+  - esbuild
