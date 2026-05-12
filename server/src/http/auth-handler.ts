@@ -238,11 +238,18 @@ async function verify(p: Record<string, unknown>): Promise<RouteResult> {
 
 async function exchange(p: Record<string, unknown>): Promise<RouteResult> {
   const code = p.code as string | undefined;
-  if (!code) throw new Error("code is required");
+  const codeMask = code ? `${code.slice(0, 8)}…(${code.length})` : "(none)";
+  if (!code) {
+    console.log(`[trace:exchange] missing code`);
+    throw new Error("code is required");
+  }
   const raw = await redis.get(`authcode:${code}`);
+  console.log(`[trace:exchange] code=${codeMask} found=${raw !== null}`);
   if (!raw) throw new Error("Unauthorized: Invalid or expired auth code");
   await redis.del(`authcode:${code}`);
-  return { status: "200 OK", data: JSON.parse(raw) };
+  const parsed = JSON.parse(raw);
+  console.log(`[trace:exchange] code=${codeMask} returning user=${parsed.user?.id ?? "(none)"} hasAccessToken=${!!parsed.accessToken}`);
+  return { status: "200 OK", data: parsed };
 }
 
 async function me(authHeader: string): Promise<RouteResult> {

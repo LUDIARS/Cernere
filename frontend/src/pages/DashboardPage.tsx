@@ -66,33 +66,41 @@ export function DashboardPage() {
   const [templates, setTemplates] = useState<Array<{ key: string; name: string; description: string }>>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
 
-  // Fetch projects + user data overview (利用中/未使用 判定)
-  const fetchProjects = useCallback(async () => {
+  // Admin: edit schema form (overlays detail view)
+  const [showEdit, setShowEdit] = useState(false);
+  const [editJson, setEditJson] = useState("");
+
+  // Fetch projects + user data overview (利用中/未使用 判定).
+  // silent=true は background poll 用 — loading toggle と error UI を出さず、
+  // データが前回と同一なら state 更新をスキップして再描画させない
+  // (DOM 点滅・フォーカス飛び対策).
+  const fetchProjects = useCallback(async (silent = false) => {
     try {
-      setLoading(true);
-      setError(null);
+      if (!silent) setLoading(true);
+      if (!silent) setError(null);
       const [list, ov] = await Promise.all([
         wsClient.sendCommand<ManagedProject[]>("managed_project", "list"),
         wsClient.sendCommand<UserProjectOverview[]>("managed_project", "overview")
           .catch(() => [] as UserProjectOverview[]),
       ]);
-      setProjects(list);
       const map: Record<string, UserProjectOverview> = {};
       for (const o of ov) map[o.key] = o;
-      setOverviews(map);
+      // 構造的に同じなら参照を維持して React の re-render を抑制
+      setProjects((prev) => JSON.stringify(prev) === JSON.stringify(list) ? prev : list);
+      setOverviews((prev) => JSON.stringify(prev) === JSON.stringify(map) ? prev : map);
     } catch (err) {
       console.error("[Dashboard] Failed to fetch projects:", err);
-      setError((err as Error).message);
+      if (!silent) setError((err as Error).message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     if (!wsConnected) return;
     fetchProjects();
-    // 接続状況 (使用中バッジ) を 10 秒間隔で更新
-    const id = window.setInterval(() => { fetchProjects(); }, 10_000);
+    // 接続状況 (使用中バッジ) を 10 秒間隔で silent 更新
+    const id = window.setInterval(() => { fetchProjects(true); }, 10_000);
     return () => { window.clearInterval(id); };
   }, [wsConnected, fetchProjects]);
 
@@ -160,11 +168,48 @@ export function DashboardPage() {
     }
   };
 
-  const handleOpen = async (key: string) => {
+  const handleOpen = (key: string) => {
+    // iOS Safari は user gesture 同期コンテキスト内でしか window.open() を許さない。
+    // await 後に呼ぶと gesture context が失われ popup が blocker に止められる。
+    // → 先に about:blank で popup を確保し、authCode 取得後に location を差し替える。
+    const popup = window.open("about:blank", "_blank");
+    if (!popup) {
+      setError("Popup blocked. Please allow popups.");
+      return;
+    }
+    // opener 経由で新タブから親タブを操作できないよう sever (noopener と同等の効果)。
+    try { popup.opener = null; } catch { /* cross-origin 後は無視 */ }
+    setError(null);
+    wsClient.sendCommand<{ url: string }>("managed_project", "open_url", { projectKey: key })
+      .then(({ url }) => {
+        popup.location.replace(url);
+      })
+      .catch((err) => {
+        popup.close();
+        setError((err as Error).message);
+      });
+  };
+
+  const startEdit = () => {
+    if (!selected) return;
+    setEditJson(JSON.stringify(selected.schemaDefinition, null, 2));
+    setShowEdit(true);
+    setError(null);
+  };
+
+  const handleUpdate = async () => {
+    if (!selected) return;
     setError(null);
     try {
-      const { url } = await wsClient.sendCommand<{ url: string }>("managed_project", "open_url", { key });
-      window.open(url, "_blank", "noopener");
+      const parsed = JSON.parse(editJson);
+      // server requires top-level "key" + project.key matches
+      parsed.key = selected.key;
+      if (parsed.project) parsed.project.key = selected.key;
+      await wsClient.sendCommand("managed_project", "update_schema", parsed);
+      setShowEdit(false);
+      const detail = await wsClient.sendCommand<ProjectDetail>("managed_project", "get", { key: selected.key });
+      setSelected(detail);
+      fetchProjects();
     } catch (err) {
       setError((err as Error).message);
     }
@@ -384,12 +429,41 @@ export function DashboardPage() {
                   </div>
                 </div>
                 {isAdmin && selected.isActive && (
-                  <button onClick={() => handleDelete(selected.key)} style={{
-                    padding: "0.3rem 0.75rem", fontSize: "0.8rem", borderRadius: "4px",
-                    border: "1px solid var(--red, #f85149)", background: "transparent", color: "var(--red)", cursor: "pointer",
-                  }}>Deactivate</button>
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <button onClick={startEdit} style={{
+                      padding: "0.3rem 0.75rem", fontSize: "0.8rem", borderRadius: "4px",
+                      border: "1px solid var(--border)", background: "transparent", color: "var(--text)", cursor: "pointer",
+                    }}>Edit Schema</button>
+                    <button onClick={() => handleDelete(selected.key)} style={{
+                      padding: "0.3rem 0.75rem", fontSize: "0.8rem", borderRadius: "4px",
+                      border: "1px solid var(--red, #f85149)", background: "transparent", color: "var(--red)", cursor: "pointer",
+                    }}>Deactivate</button>
+                  </div>
                 )}
               </div>
+
+              {showEdit && isAdmin && (
+                <div style={{ marginBottom: "1rem", padding: "1rem", background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "6px" }}>
+                  <h3 style={{ fontSize: "0.9rem", fontWeight: 600, marginBottom: "0.75rem" }}>Edit Schema Definition</h3>
+                  <textarea
+                    value={editJson}
+                    onChange={(e) => setEditJson(e.target.value)}
+                    style={{
+                      width: "100%", height: "calc(100vh - 380px)", minHeight: "300px",
+                      padding: "0.5rem", fontFamily: "monospace", fontSize: "0.8rem", borderRadius: "4px",
+                      border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)",
+                      boxSizing: "border-box", resize: "vertical",
+                    }}
+                  />
+                  <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+                    <button className="primary" onClick={handleUpdate}>Save</button>
+                    <button onClick={() => { setShowEdit(false); setError(null); }} style={{
+                      padding: "0.4rem 1rem", fontSize: "0.85rem", borderRadius: "4px",
+                      border: "1px solid var(--border)", background: "transparent", color: "var(--text)", cursor: "pointer",
+                    }}>Cancel</button>
+                  </div>
+                </div>
+              )}
 
               {selected.description && (
                 <p style={{ fontSize: "0.85rem", marginBottom: "1rem" }}>{selected.description}</p>

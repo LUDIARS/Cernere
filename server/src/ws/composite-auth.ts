@@ -163,6 +163,11 @@ export async function handleCompositeAuthMessage(
   ws: uWS.WebSocket<CompositeWsUserData>,
   raw: ArrayBuffer,
 ): Promise<void> {
+  // uWS は message handler が return すると raw ArrayBuffer を detach する。
+  // await の後で参照すると "detached ArrayBuffer" になるため、最初に
+  // 同期で文字列化しておく (Buffer.from は内部 copy)。
+  const rawText = Buffer.from(raw).toString();
+
   const data = ws.getUserData();
   const session = await getAuthSession(data.ticket);
   if (!session) {
@@ -173,8 +178,18 @@ export async function handleCompositeAuthMessage(
 
   let msg: ClientMessage;
   try {
-    msg = JSON.parse(Buffer.from(raw).toString()) as ClientMessage;
-  } catch {
+    msg = JSON.parse(rawText) as ClientMessage;
+  } catch (err) {
+    // 観測のため stdout に残す (ewatch が拾えるように [http-error] と同階層のタグで)。
+    // raw text は先頭 200 文字までに切る (size DoS / PII 漏洩防御)。
+    console.log(`[composite-error] ${JSON.stringify({
+      ts: new Date().toISOString(),
+      ticket: data.ticket,
+      reason: "invalid JSON",
+      parseError: err instanceof Error ? err.message : String(err),
+      rawLen: rawText.length,
+      rawPreview: rawText.slice(0, 200),
+    })}`);
     send(ws, { type: "error", retryable: true, reason: "invalid JSON" });
     return;
   }
