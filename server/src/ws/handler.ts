@@ -45,7 +45,10 @@ function send(ws: uWS.WebSocket<WsUserData>, msg: ServerMessage): void {
   try {
     const ret = ws.send(JSON.stringify(msg));
     if (process.env.NODE_ENV !== "production") {
-      console.log(`[ws] sent sid=${data.sessionId} type=${msg.type}${msg.module ? ` ${msg.module}.${msg.action}` : ""} ret=${ret}`);
+      // ServerMessage は discriminated union。 module / action は module_response variant
+      // にしか無いので、 type で narrow してから参照する。
+      const modSuffix = msg.type === "module_response" ? ` ${msg.module}.${msg.action}` : "";
+      console.log(`[ws] sent sid=${data.sessionId} type=${msg.type}${modSuffix} ret=${ret}`);
     }
   } catch (err) {
     if (process.env.NODE_ENV !== "production") {
