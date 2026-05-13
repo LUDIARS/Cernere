@@ -12,6 +12,7 @@ import * as schema from "../db/schema.js";
 import {
   generateTokenPair, generateToolToken, generateProjectToken, generateUserProjectToken, verifyToken, verifyProjectToken, extractBearerToken, REFRESH_TOKEN_DAYS,
 } from "../auth/jwt.js";
+import { isPasetoEnabled, signProjectToken } from "../auth/paseto.js";
 import { checkRateLimit, redis } from "../redis.js";
 import {
   logUserLogin,
@@ -316,9 +317,45 @@ async function projectUserToken(
   if (!userRows[0]) throw new Error("Unauthorized: User not found");
   const user = userRows[0];
 
-  const accessToken = generateUserProjectToken(user.id, project.key, user.role);
-  devLog("auth.projectUserToken.issue", { userId: user.id, projectKey: project.key, ip: ctx.ip });
+  // hub_url (= 受け取る service の URL) を受け取って PASETO の aud claim に入れる。
+  // Issue #91 の Phase 1 仕様。 hub_url 未指定 + PASETO 未有効 のときだけ
+  // 旧 HS256 経路にフォールバック (= 段階移行期間の互換)。
+  const hubUrl = typeof p.hub_url === "string" ? p.hub_url.trim() : "";
+  const displayName = (user.displayName ?? user.login ?? "").trim() || `user-${user.id.slice(0, 8)}`;
 
+  if (hubUrl && isPasetoEnabled()) {
+    const tokenTtl = 15 * 60;
+    const accessToken = await signProjectToken({
+      userId: user.id,
+      projectKey: project.key,
+      role: user.role,
+      displayName,
+      audience: hubUrl,
+      ttlSec: tokenTtl,
+    });
+    devLog("auth.projectUserToken.issue", {
+      userId: user.id, projectKey: project.key, audience: hubUrl, ip: ctx.ip, alg: "EdDSA",
+    });
+    return {
+      status: "200 OK",
+      data: {
+        tokenType: "user_for_project",
+        accessToken,
+        expiresIn: tokenTtl,
+        projectKey: project.key,
+        userId: user.id,
+        displayName,
+        audience: hubUrl,
+        alg: "EdDSA",
+      },
+    };
+  }
+
+  // legacy fallback: HS256 (= migration 期間中、 hub_url 渡さない old client 向け)
+  const accessToken = generateUserProjectToken(user.id, project.key, user.role);
+  devLog("auth.projectUserToken.issue", {
+    userId: user.id, projectKey: project.key, ip: ctx.ip, alg: "HS256-legacy",
+  });
   return {
     status: "200 OK",
     data: {
@@ -327,6 +364,7 @@ async function projectUserToken(
       expiresIn: 3600,
       projectKey: project.key,
       userId: user.id,
+      alg: "HS256",
     },
   };
 }
