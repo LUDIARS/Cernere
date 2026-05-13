@@ -10,7 +10,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import {
-  generateTokenPair, generateToolToken, generateProjectToken, verifyToken, verifyProjectToken, extractBearerToken, REFRESH_TOKEN_DAYS,
+  generateTokenPair, generateToolToken, generateProjectToken, generateUserProjectToken, verifyToken, verifyProjectToken, extractBearerToken, REFRESH_TOKEN_DAYS,
 } from "../auth/jwt.js";
 import { checkRateLimit, redis } from "../redis.js";
 import {
@@ -47,6 +47,7 @@ export async function handleAuthRoute(
     case "verify": return verify(parseBody(body));
     case "exchange": return exchange(parseBody(body));
     case "me": return me(authHeader);
+    case "project-token": return projectUserToken(parseBody(body), authHeader, ctx);
     default:
       return { status: "404 Not Found", data: { error: `Unknown auth action: ${action}` } };
   }
@@ -266,6 +267,66 @@ async function me(authHeader: string): Promise<RouteResult> {
       id: u.id, name: u.displayName, email: u.email, role: u.role,
       hasGoogleAuth: !!u.googleId, hasPassword: !!u.passwordHash,
       googleScopes: u.googleScopes ?? [],
+    },
+  };
+}
+
+/**
+ * POST /api/auth/project-token  — 「ログイン中ユーザ × 指定 project」 の per-call token を発行。
+ *
+ * リクエスト:
+ *   Authorization: Bearer <user accessToken>
+ *   body: { project_key: "memoria-hub" }   (project_id でも可: 後方互換)
+ *
+ * 戻り値:
+ *   { tokenType: "user_for_project", accessToken, expiresIn, projectKey, userId }
+ *
+ * 設計意図:
+ *   ・呼び出し元 (Memoria local backend など) は **自分用の long-lived secret を持たない**。
+ *     ログイン中ユーザの user JWT を借りて、 各 project に対する short-lived token を都度発行する。
+ *   ・返した token は呼び出し元 process の memory のみに保持される想定。 disk / Infisical
+ *     には残さない。 user/AI も値を見ない (HTTPS+memory 経由でのみ流通)。
+ *   ・project 側 (Hub) は HS256 共有鍵で local 検証する既存経路をそのまま使う。
+ */
+async function projectUserToken(
+  p: Record<string, unknown>,
+  authHeader: string,
+  ctx: RequestCtx,
+): Promise<RouteResult> {
+  const token = extractBearerToken(authHeader);
+  if (!token) throw new Error("Unauthorized: No token provided");
+  const claims = verifyToken(token);
+
+  const projectKey = (p.project_key as string | undefined) ?? (p.project_id as string | undefined);
+  if (!projectKey || typeof projectKey !== "string") {
+    throw new Error("project_key is required");
+  }
+
+  await checkRateLimit(`project_user_token:${claims.sub}:${projectKey}`, 60, 60);
+
+  const rows = await db.select().from(schema.managedProjects)
+    .where(eq(schema.managedProjects.key, projectKey)).limit(1);
+  const project = rows[0];
+  if (!project || !project.isActive) {
+    throw new Error(`project '${projectKey}' not found or inactive`);
+  }
+
+  const userRows = await db.select().from(schema.users)
+    .where(eq(schema.users.id, claims.sub)).limit(1);
+  if (!userRows[0]) throw new Error("Unauthorized: User not found");
+  const user = userRows[0];
+
+  const accessToken = generateUserProjectToken(user.id, project.key, user.role);
+  devLog("auth.projectUserToken.issue", { userId: user.id, projectKey: project.key, ip: ctx.ip });
+
+  return {
+    status: "200 OK",
+    data: {
+      tokenType: "user_for_project",
+      accessToken,
+      expiresIn: 3600,
+      projectKey: project.key,
+      userId: user.id,
     },
   };
 }
