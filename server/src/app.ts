@@ -8,6 +8,7 @@
 import uWS from "uWebSockets.js";
 import { config } from "./config.js";
 import { handleAuthRoute } from "./http/auth-handler.js";
+import { getPublicKeys } from "./auth/paseto.js";
 import { handleCompositeRoute } from "./http/composite-handler.js";
 import { handleOAuthRoute } from "./http/oauth-handler.js";
 import { devLog, devError } from "./logging/dev-logger.js";
@@ -335,6 +336,18 @@ export function createApp() {
   app.get("/auth/github/callback", (res, req) => handleOAuthRoute(res, req, "github", "callback"));
   app.get("/auth/google/login", (res, req) => handleOAuthRoute(res, req, "google", "login"));
   app.get("/auth/google/callback", (res, req) => handleOAuthRoute(res, req, "google", "callback"));
+
+  // ── PASETO 公開鍵 (well-known) ────────────────────────────
+  // service (= Memoria Hub 等) が起動時 + 定期 fetch して project-token を
+  // local verify するための public key。 認証不要・キャッシュ可。
+  // Issue #91 / Phase 1 を参照。
+  app.get("/.well-known/cernere-public-key", (res) => {
+    const keys = getPublicKeys();
+    res.cork(() => {
+      res.writeHeader("cache-control", "public, max-age=600");
+      jsonResponse(res, "200 OK", { keys });
+    });
+  });
 
   // ── Health check ────────────────────────────────────────
   app.get("/health", (res) => {
