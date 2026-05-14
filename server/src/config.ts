@@ -2,6 +2,8 @@
  * 環境変数設定
  */
 
+import { randomBytes } from "node:crypto";
+
 function env(key: string, fallback?: string): string {
   const val = process.env[key];
   if (val !== undefined) return val;
@@ -50,8 +52,11 @@ export const config = {
     if (isProduction()) {
       throw new Error("JWT_SECRET must be set in production environment");
     }
-    console.warn("[config] JWT_SECRET is not set — using insecure default (dev only)");
-    return "cernere-dev-secret-change-in-production";
+    // M-2: dev フォールバックを既知のハードコード文字列にすると、 環境変数 1 本の
+    // 設定ミスで「既知 secret で署名された token が通る」状態になる。 プロセス起動毎に
+    // ランダム生成し、 dev 環境間でも token を共有させない (再起動で全 token が無効化)。
+    console.warn("[config] JWT_SECRET is not set — generated an ephemeral dev secret (tokens reset on restart)");
+    return randomBytes(32).toString("hex");
   })(),
 
   // AWS MFA
