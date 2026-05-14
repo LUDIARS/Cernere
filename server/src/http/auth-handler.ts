@@ -45,7 +45,7 @@ export async function handleAuthRoute(
     case "login": return login(parseBody(body), ctx);
     case "refresh": return refresh(parseBody(body));
     case "logout": return logout(parseBody(body));
-    case "verify": return verify(parseBody(body));
+    case "verify": return verify(parseBody(body), ctx);
     case "exchange": return exchange(parseBody(body));
     case "me": return me(authHeader);
     case "project-token": return projectUserToken(parseBody(body), authHeader, ctx);
@@ -201,7 +201,10 @@ async function logout(p: Record<string, unknown>): Promise<RouteResult> {
   return { status: "200 OK", data: { message: "Logged out" } };
 }
 
-async function verify(p: Record<string, unknown>): Promise<RouteResult> {
+async function verify(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
+  // verify は token 文字列の有効性 oracle になりうるため rate limit を課す
+  // (M-1: login/register には rate limit があるのに verify には無かった非対称を解消)。
+  await checkRateLimit(`verify:${ctx.ip ?? "unknown"}`, 60, 60);
   const token = p.token as string;
   // プロジェクトトークンとして検証
   try {
@@ -239,18 +242,23 @@ async function verify(p: Record<string, unknown>): Promise<RouteResult> {
 }
 
 async function exchange(p: Record<string, unknown>): Promise<RouteResult> {
+  // M-3: authcode は user の access/refresh token を取り出す bearer ticket。
+  // 以前は code の先頭 8 文字を平文 console.log に書いていた。 値はログに残さず、
+  // dev のみ有効な devLog に「有無 / 結果」だけを寄せる。
   const code = p.code as string | undefined;
-  const codeMask = code ? `${code.slice(0, 8)}…(${code.length})` : "(none)";
   if (!code) {
-    console.log(`[trace:exchange] missing code`);
+    devLog("auth.exchange.missingCode", {});
     throw new Error("code is required");
   }
   const raw = await redis.get(`authcode:${code}`);
-  console.log(`[trace:exchange] code=${codeMask} found=${raw !== null}`);
+  devLog("auth.exchange.lookup", { found: raw !== null });
   if (!raw) throw new Error("Unauthorized: Invalid or expired auth code");
   await redis.del(`authcode:${code}`);
   const parsed = JSON.parse(raw);
-  console.log(`[trace:exchange] code=${codeMask} returning user=${parsed.user?.id ?? "(none)"} hasAccessToken=${!!parsed.accessToken}`);
+  devLog("auth.exchange.done", {
+    userId: parsed.user?.id ?? "(none)",
+    hasAccessToken: !!parsed.accessToken,
+  });
   return { status: "200 OK", data: parsed };
 }
 

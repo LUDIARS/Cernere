@@ -5,6 +5,7 @@
 import jwt from "jsonwebtoken";
 import { config } from "../config.js";
 import { AppError } from "../error.js";
+import { devLog } from "../logging/dev-logger.js";
 
 const ACCESS_TOKEN_MINUTES = 60;
 const REFRESH_TOKEN_DAYS = 30;
@@ -112,7 +113,11 @@ export function verifyUserProjectToken(token: string): UserProjectJwtClaims {
       throw AppError.unauthorized("Not a user_for_project token");
     }
     return claims;
-  } catch {
+  } catch (err) {
+    // M-4: 期限切れ / 署名不正 / claim 不正 をユーザー応答では曖昧化したまま、
+    // 内部ログには err.name を残して incident response 時の原因特定を可能にする。
+    if (err instanceof AppError) throw err;
+    devLog("auth.verifyUserProjectToken.failed", { reason: (err as Error)?.name ?? "unknown" });
     throw AppError.unauthorized("Invalid or expired user_for_project token");
   }
 }
@@ -124,7 +129,10 @@ export function verifyProjectToken(token: string): ProjectJwtClaims {
       throw AppError.unauthorized("Not a project token");
     }
     return claims;
-  } catch {
+  } catch (err) {
+    // M-4: 同上。 内部ログに err.name、 ユーザー応答は曖昧なまま。
+    if (err instanceof AppError) throw err;
+    devLog("auth.verifyProjectToken.failed", { reason: (err as Error)?.name ?? "unknown" });
     throw AppError.unauthorized("Invalid or expired project token");
   }
 }
