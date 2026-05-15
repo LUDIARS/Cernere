@@ -40,7 +40,7 @@ Layer 4: リソース所有権・ロールチェック (403)
 ## プロジェクト構成
 
 ```
-├── server/                # TypeScript バックエンド (Hono)
+├── server/                # TypeScript バックエンド (uWebSockets.js)
 │   └── src/
 │       ├── index.ts       # エントリポイント
 │       ├── app.ts         # ルーティング + WebSocket

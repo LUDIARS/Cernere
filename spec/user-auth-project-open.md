@@ -31,7 +31,7 @@ sequenceDiagram
     CS-->>SF: 200 OK<br/>{ accessToken, refreshToken,<br/>  user: { id, name, email, role } }
     SF->>SF: history.replaceState で<br/>?code= を URL から削除
     Note over SF,CS: 以降は通常セッションと同等
-    SF->>CS: GET /ws?token=<accessToken><br/>または POST /api/auth/refresh
+    SF->>CS: GET /auth?token=<accessToken><br/>または POST /api/auth/refresh
 ```
 
 ## ステップ詳細
