@@ -19,6 +19,11 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import {
+  startAuthentication,
+  type PublicKeyCredentialRequestOptionsJSON,
+  type AuthenticationResponseJSON,
+} from "@simplewebauthn/browser";
 import { collectDeviceFingerprint } from "../../lib/device-fingerprint";
 
 const API_BASE = "";
@@ -279,6 +284,45 @@ export function CompositeLoginPage() {
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Authentication failed");
+      setLoading(false);
+    }
+  };
+
+  /** Passkey (FaceID / TouchID / Windows Hello / 物理キー) でログイン。
+   *  Cernere の通常 /api/auth/passkey/login-begin で options を取り、 ブラウザの
+   *  生体認証ダイアログを開く。 verify は /api/auth/passkey/composite-login-finish
+   *  で authCode を発行する経路 (= JWT は返さず、 親サービスに postMessage する) */
+  const handlePasskeyLogin = async () => {
+    setError("");
+    setInfo("");
+    setLoading(true);
+    try {
+      const beginRes = await fetch(`${API_BASE}/api/auth/passkey/login-begin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email || "" }),
+      });
+      const beginData = await beginRes.json() as
+        { options: PublicKeyCredentialRequestOptionsJSON; challengeOwner: string; error?: string };
+      if (!beginRes.ok) throw new Error(beginData.error || "Passkey login start failed");
+
+      const assertion: AuthenticationResponseJSON = await startAuthentication({ optionsJSON: beginData.options });
+
+      const finishRes = await fetch(`${API_BASE}/api/auth/passkey/composite-login-finish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ response: assertion, challengeOwner: beginData.challengeOwner }),
+      });
+      const finishData = await finishRes.json() as { authCode?: string; error?: string };
+      if (!finishRes.ok || !finishData.authCode) {
+        throw new Error(finishData.error || "Passkey login failed");
+      }
+
+      completeAuth(finishData.authCode);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Passkey login failed";
+      setError(msg);
+    } finally {
       setLoading(false);
     }
   };
@@ -555,6 +599,32 @@ export function CompositeLoginPage() {
               <span>or</span>
               <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
             </div>
+
+            {/* Passkey (Face ID / Touch ID / Windows Hello / Android 生体 / 物理キー) */}
+            <button
+              type="button"
+              onClick={handlePasskeyLogin}
+              disabled={loading}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "0.5rem",
+                width: "100%",
+                padding: "0.6rem",
+                background: "var(--bg-surface-2)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-sm)",
+                color: "var(--text)",
+                fontSize: "0.875rem",
+                fontWeight: 500,
+                marginBottom: "0.5rem",
+                cursor: loading ? "not-allowed" : "pointer",
+                opacity: loading ? 0.6 : 1,
+              }}
+            >
+              🔐 Passkey でログイン (Face ID / Touch ID / Windows Hello)
+            </button>
 
             {/* Google */}
             <a
