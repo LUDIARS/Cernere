@@ -73,6 +73,19 @@ export const config = {
   smtpPass: env("CERNERE_SMTP_PASS", ""),
   mailFrom: env("CERNERE_MAIL_FROM", "noreply@cernere.local"),
 
+  // Identity (device) verification を完全に off にする dev/緊急用スイッチ。
+  // true のとき checkDevice は常に trusted を返し、 確認コードのメール送信を行わない。
+  // 本番では絶対に true にしてはいけない (isProduction ガードあり)。
+  identityVerificationDisabled: (() => {
+    const raw = envBool("CERNERE_IDENTITY_VERIFICATION_DISABLED");
+    if (raw && isProduction()) {
+      throw new Error(
+        "CERNERE_IDENTITY_VERIFICATION_DISABLED=true is not allowed in production",
+      );
+    }
+    return raw;
+  })(),
+
   isHttps: env("FRONTEND_URL", "http://localhost:5173").startsWith("https://"),
   isProduction: isProduction(),
   isDevelopment: isDevelopment(),
