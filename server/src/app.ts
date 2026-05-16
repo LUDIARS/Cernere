@@ -8,6 +8,7 @@
 import uWS from "uWebSockets.js";
 import { config } from "./config.js";
 import { handleAuthRoute } from "./http/auth-handler.js";
+import { handlePasskeyRoute } from "./http/passkey-handler.js";
 import { getPublicKeys } from "./auth/paseto.js";
 import { handleCompositeRoute } from "./http/composite-handler.js";
 import { handleOAuthRoute } from "./http/oauth-handler.js";
@@ -281,6 +282,35 @@ export function createApp() {
         console.error(`[http] auth/${action} 500:`, err);
       } else {
         devLog("http.auth.error", { action, status, message });
+      }
+      jsonResponse(res, status, { error: message });
+    }
+  });
+
+  // ── Passkey (WebAuthn): POST /api/auth/passkey/:action ──
+  app.post("/api/auth/passkey/:action", async (res, req) => {
+    const action = req.getParameter(0) ?? "";
+    const authHeader = req.getHeader("authorization") ?? "";
+    const userAgent = req.getHeader("user-agent") ?? undefined;
+    const ip = getRemoteIp(res);
+    let aborted = false;
+    res.onAborted(() => { aborted = true; });
+
+    devLog("http.passkey.begin", { action, ip, userAgent });
+    try {
+      const body = await readBody(res);
+      if (aborted) return;
+      const result = await handlePasskeyRoute(action, body, authHeader, { ip, userAgent });
+      devLog("http.passkey.ok", { action, status: result.status });
+      jsonResponse(res, result.status, result.data);
+    } catch (err) {
+      if (aborted) return;
+      const { status, message } = classifyError(err);
+      if (status === "500 Internal Server Error") {
+        devError("http.passkey.500", err, { action, ip });
+        console.error(`[http] passkey/${action} 500:`, err);
+      } else {
+        devLog("http.passkey.error", { action, status, message });
       }
       jsonResponse(res, status, { error: message });
     }

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-ses": "^3.1030.0",
+    "@simplewebauthn/server": "^13.3.0",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.45.1",
     "ioredis": "^5.10.0",

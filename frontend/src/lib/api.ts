@@ -1,5 +1,15 @@
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
+// Passkey 用は @simplewebauthn/browser を使うので type だけ import
+import {
+  startRegistration, startAuthentication,
+} from "@simplewebauthn/browser";
+import type {
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+  AuthenticationResponseJSON,
+} from "@simplewebauthn/browser";
+
 // ── Token Management ──────────────────────────────
 
 export function getAccessToken(): string | null {
@@ -203,6 +213,56 @@ export const auth = {
 
   async me(): Promise<UserProfile> {
     return request<UserProfile>("/api/auth/me");
+  },
+
+  // ── Passkey (WebAuthn / Face ID / Touch ID / Windows Hello / Android 生体 / 物理キー) ──
+
+  /** 現在のユーザに passkey を新規登録する。 ブラウザが OS の生体認証ダイアログを開く */
+  async passkeyRegister(nickname?: string): Promise<{ ok: true; credentialId: string }> {
+    const opts = await request<PublicKeyCredentialCreationOptionsJSON>("/api/auth/passkey/register-begin", {
+      method: "POST", body: JSON.stringify({}),
+    });
+    const response = await startRegistration({ optionsJSON: opts });
+    const res = await request<{ ok: true; credentialId: string }>("/api/auth/passkey/register-finish", {
+      method: "POST", body: JSON.stringify({ response, nickname: nickname ?? null }),
+    });
+    return res;
+  },
+
+  /** passkey でログイン。 email を渡すとそのユーザの credentials を allow に詰める */
+  async passkeyLogin(email?: string): Promise<AuthResponse> {
+    const begin = await fetch(`${API_BASE}/api/auth/passkey/login-begin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email ?? "" }),
+    });
+    const beginData = await begin.json() as
+      { options: PublicKeyCredentialRequestOptionsJSON; challengeOwner: string; error?: string };
+    if (!begin.ok) throw new Error(beginData.error || "Passkey login failed");
+    const response: AuthenticationResponseJSON = await startAuthentication({ optionsJSON: beginData.options });
+    const finish = await fetch(`${API_BASE}/api/auth/passkey/login-finish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ response, challengeOwner: beginData.challengeOwner }),
+    });
+    const data = await finish.json() as AuthResponse & { error?: string };
+    if (!finish.ok) throw new Error(data.error || "Passkey login failed");
+    setTokens(data.accessToken, data.refreshToken);
+    setStoredUser({
+      id: data.user.id,
+      name: data.user.displayName,
+      email: data.user.email || "",
+      role: data.user.role,
+    });
+    return data;
+  },
+
+  async passkeyList(): Promise<{ items: Array<{ id: string; credentialId: string; nickname: string | null; deviceType: string; backedUp: boolean; aaguid: string | null; createdAt: string; lastUsedAt: string | null }> }> {
+    return request("/api/auth/passkey/list", { method: "POST", body: "{}" });
+  },
+
+  async passkeyDelete(id: string): Promise<{ ok: true; removed: number }> {
+    return request("/api/auth/passkey/delete", { method: "POST", body: JSON.stringify({ id }) });
   },
 
   // ── MFA ──────────────────────────────────────
