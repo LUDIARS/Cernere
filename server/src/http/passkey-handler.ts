@@ -39,6 +39,7 @@ import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { redis, checkRateLimit } from "../redis.js";
 import { generateTokenPair, verifyToken, extractBearerToken, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
+import { issueAuthCode } from "../auth/auth-code.js";
 import { logUserLogin, logUserLoginFailed } from "../logging/auth-logger.js";
 import { devLog } from "../logging/dev-logger.js";
 
@@ -62,6 +63,11 @@ export async function handlePasskeyRoute(
     case "register-finish": return registerFinish(authHeader, parseBody(body));
     case "login-begin":     return loginBegin(parseBody(body), ctx);
     case "login-finish":    return loginFinish(parseBody(body), ctx);
+    /* composite (= popup-based SSO) からの passkey verify。 通常の login-finish と違い、
+     * JWT を直接返さず authCode (= Redis 1-shot ticket) を発行する。 親サービスは
+     * postMessage で受け取り、 自分の backend 経由で /api/auth/exchange して
+     * service_token を得る。 */
+    case "composite-login-finish": return compositeLoginFinish(parseBody(body), ctx);
     case "list":            return listPasskeys(authHeader);
     case "delete":          return deletePasskey(authHeader, parseBody(body));
     default:
@@ -207,7 +213,16 @@ async function loginBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise<
   return { status: "200 OK", data: { options: opts, challengeOwner } };
 }
 
-async function loginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
+/** WebAuthn assertion を verify して、 紐付くユーザを返す。 verify 成功時は
+ *  counter を進めて last_used_at + last_login_at を更新する。 通常 login と
+ *  composite login の両方から使う共通部。 */
+async function verifyPasskeyAssertion(
+  p: Record<string, unknown>,
+  ctx: RequestCtx,
+): Promise<{
+  user: typeof schema.users.$inferSelect;
+  challengeOwner: string;
+}> {
   const response = p.response as AuthenticationResponseJSON | undefined;
   const challengeOwner = typeof p.challengeOwner === "string" ? p.challengeOwner : "";
   if (!response) throw new Error("response is required");
@@ -257,15 +272,18 @@ async function loginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise
   await db.update(schema.users).set({ lastLoginAt: now, updatedAt: now })
     .where(eq(schema.users.id, user.id));
 
+  await redis.del(challengeKey("login", challengeOwner));
+  return { user, challengeOwner };
+}
+
+async function loginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
+  const { user } = await verifyPasskeyAssertion(p, ctx);
   const { accessToken, refreshToken } = generateTokenPair(user.id, user.role);
-  const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
+  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
     id: crypto.randomUUID(), userId: user.id, refreshToken, expiresAt,
   });
-
-  await redis.del(challengeKey("login", challengeOwner));
   logUserLogin(user.id, user.email ?? user.login, "passkey", { ip: ctx.ip });
-
   return {
     status: "200 OK",
     data: {
@@ -281,6 +299,21 @@ async function loginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise
       refreshToken,
     },
   };
+}
+
+/** composite popup 用 passkey finish: JWT は返さず、 authCode を発行する。
+ *  親サービス (Memoria Hub 等) が postMessage で受け取り、 /api/auth/exchange
+ *  経由で実トークンに交換する。 */
+async function compositeLoginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
+  const { user } = await verifyPasskeyAssertion(p, ctx);
+  const authCode = await issueAuthCode({
+    userId: user.id,
+    displayName: user.displayName,
+    email: user.email,
+    role: user.role ?? "general",
+  });
+  logUserLogin(user.id, user.email ?? user.login, "passkey-composite", { ip: ctx.ip });
+  return { status: "200 OK", data: { authCode } };
 }
 
 // ─── プロフィール画面用: 一覧 + 削除 ──────────────────────────
