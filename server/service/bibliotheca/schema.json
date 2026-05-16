@@ -6,8 +6,8 @@
   },
 
   "endpoint": {
-    "url": "http://localhost:17500",
-    "frontend_url": "http://localhost:17500",
+    "url": "http://localhost:17501",
+    "frontend_url": "http://localhost:17501",
     "same_server": true,
     "bridge_path": "/bibliotheca"
   },
