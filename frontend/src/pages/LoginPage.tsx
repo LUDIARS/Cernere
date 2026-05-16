@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 
 export function LoginPage() {
-  const { login, register, googleAuthUrl, githubAuthUrl } = useAuth();
+  const { login, register, passkeyLogin, googleAuthUrl, githubAuthUrl } = useAuth();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -165,6 +165,43 @@ export function LoginPage() {
           <span>or</span>
           <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
         </div>
+
+        {/* Passkey (Face ID / Touch ID / Windows Hello / Android 生体 / 物理キー) */}
+        <button
+          type="button"
+          onClick={async () => {
+            setError("");
+            setLoading(true);
+            try {
+              await passkeyLogin(email || undefined);
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : "Passkey login failed";
+              setError(message);
+            } finally {
+              setLoading(false);
+            }
+          }}
+          disabled={loading}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "0.5rem",
+            width: "100%",
+            padding: "0.6rem",
+            background: "var(--bg-surface-2)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)",
+            color: "var(--text)",
+            fontSize: "0.875rem",
+            fontWeight: 500,
+            marginBottom: "0.5rem",
+            cursor: loading ? "not-allowed" : "pointer",
+            opacity: loading ? 0.6 : 1,
+          }}
+        >
+          🔐 Passkey でログイン (Face ID / Touch ID / Windows Hello)
+        </button>
 
         {/* Google */}
         <a

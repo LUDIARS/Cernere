@@ -76,4 +76,23 @@ export const config = {
   isHttps: env("FRONTEND_URL", "http://localhost:5173").startsWith("https://"),
   isProduction: isProduction(),
   isDevelopment: isDevelopment(),
+
+  // ── WebAuthn / Passkey ────────────────────────────────────
+  // RP ID は eTLD+1 (例: cernere.example.com → cernere.example.com、
+  // または親ドメイン example.com)。 ブラウザは window.location.origin を見て
+  // RP ID がそのサブドメインか否かをチェックする。
+  // 既定は FRONTEND_URL のホスト名から自動。
+  webauthnRpName:
+    env("WEBAUTHN_RP_NAME", env("APP_NAME", "Cernere")),
+  webauthnRpId:
+    env("WEBAUTHN_RP_ID",
+      (() => {
+        const u = env("FRONTEND_URL", "http://localhost:5173");
+        try { return new URL(u).hostname; } catch { return "localhost"; }
+      })(),
+    ),
+  // 受け付ける origin (= 通常は FRONTEND_URL と同じ。 複数許可は comma 区切り)
+  webauthnOrigins:
+    env("WEBAUTHN_ORIGINS", env("FRONTEND_URL", "http://localhost:5173"))
+      .split(",").map(s => s.trim()).filter(Boolean),
 } as const;

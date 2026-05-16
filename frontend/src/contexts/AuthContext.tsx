@@ -20,6 +20,8 @@ interface AuthContextType {
   wsConnected: boolean;
   mfaChallenge: MfaChallenge | null;
   login: (email: string, password: string) => Promise<void>;
+  /** Passkey (WebAuthn / Face ID / Touch ID / Windows Hello 等) でログイン */
+  passkeyLogin: (email?: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   mfaSendCode: (method: string) => Promise<void>;
@@ -115,6 +117,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser({ id: data.user.id, name: data.user.displayName, email: data.user.email || "", role: data.user.role });
   }, []);
 
+  const passkeyLogin = useCallback(async (email?: string) => {
+    const data = await authApi.passkeyLogin(email);
+    setUser({ id: data.user.id, name: data.user.displayName, email: data.user.email || "", role: data.user.role });
+  }, []);
+
   const register = useCallback(async (name: string, email: string, password: string) => {
     const data = await authApi.register({ name, email, password });
     setUser({ id: data.user.id, name: data.user.displayName, email: data.user.email || "", role: data.user.role });
@@ -152,6 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         wsConnected,
         mfaChallenge,
         login,
+        passkeyLogin,
         register,
         logout,
         mfaSendCode,
