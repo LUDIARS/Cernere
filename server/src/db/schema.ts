@@ -5,8 +5,13 @@
  */
 
 import {
-  pgTable, text, uuid, timestamp, bigint, boolean, jsonb, integer, primaryKey, uniqueIndex, index,
+  pgTable, text, uuid, timestamp, bigint, boolean, jsonb, integer, customType, primaryKey, uniqueIndex, index,
 } from "drizzle-orm/pg-core";
+
+// drizzle 標準には bytea 型がないので簡易 custom type で代用 (= raw Buffer / Uint8Array)
+const bytea = customType<{ data: Buffer; default: false }>({
+  dataType() { return "bytea"; },
+});
 
 // ── Users ────────────────────────────────────────────────────
 
@@ -86,6 +91,28 @@ export const trustedDevices = pgTable("trusted_devices", {
 }, (t) => [
   index("idx_trusted_devices_user").on(t.userId),
   index("idx_trusted_devices_user_last_seen").on(t.userId, t.lastSeenAt),
+]);
+
+// ── Passkeys (WebAuthn / FIDO2) ──────────────────────────────
+// FaceID / Touch ID / Windows Hello / Android 生体認証 / 物理キー の公開鍵を保存。
+// 1 user に複数 (端末ごと / 同期パスキーで一括) 登録可能。
+
+export const passkeys = pgTable("passkeys", {
+  id: uuid("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  credentialId: text("credential_id").notNull(),         // base64url
+  publicKey: bytea("public_key").notNull(),               // COSE bytes
+  counter: bigint("counter", { mode: "number" }).notNull().default(0),
+  deviceType: text("device_type").notNull().default("singleDevice"),
+  backedUp: boolean("backed_up").notNull().default(false),
+  transports: jsonb("transports").notNull().default([]),  // ["internal"] / ["usb","nfc"] 等
+  nickname: text("nickname"),                              // 表示用 (例: "iPhone 15", "Yubikey 5C")
+  aaguid: text("aaguid"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+}, (t) => [
+  uniqueIndex("idx_passkeys_credential_id").on(t.credentialId),
+  index("idx_passkeys_user").on(t.userId, t.createdAt),
 ]);
 
 // ── Organizations ────────────────────────────────────────────
