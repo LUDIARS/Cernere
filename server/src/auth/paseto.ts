@@ -26,14 +26,33 @@
  * spec / migration timeline: Cernere Issue #91 を参照。
  */
 
+import { createPrivateKey, type KeyObject } from "node:crypto";
 import { V4, type ConsumeOptions, type ProduceOptions } from "paseto";
 import { devLog } from "../logging/dev-logger.js";
+
+// Ed25519 PKCS8 ASN.1 prefix — 32 byte seed をこの後ろに連結すると
+// `crypto.createPrivateKey({ format: 'der', type: 'pkcs8' })` で読める private KeyObject になる。
+// paseto v3.1.4 の bytesToKeyObject (lib/v2/key.js) と同じ approach。
+const ED25519_PKCS8_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
+
+/** 32 byte の Ed25519 seed から private KeyObject を構築。 paseto V4.sign に
+ *  渡す前段で必要 — raw 32 byte Buffer は public key と誤認される。 */
+function seedToPrivateKey(seed: Buffer): KeyObject {
+  return createPrivateKey({
+    key: Buffer.concat([ED25519_PKCS8_PREFIX, seed]),
+    format: "der",
+    type: "pkcs8",
+  });
+}
 
 // ── claims ───────────────────────────────────────────────────────────────────
 
 /** PASETO v4 で署名する project-token の claims。
  *  既存 HS256 (UserProjectJwtClaims) との差分: aud / displayName / kid。
- *  sub = userId をそのまま維持 → 既存 service 側 middleware が壊れない。 */
+ *  sub = userId をそのまま維持 → 既存 service 側 middleware が壊れない。
+ *
+ *  iat / exp は paseto v3.1.4 の規約で ISO 8601 日付文字列。 Unix epoch number を
+ *  そのまま入れると verify 側で `payload.exp must be a string` で reject される。 */
 export interface PasetoProjectClaims {
   sub: string;          // userId (UUID)
   projectKey: string;   // managed_projects.key (例: "memoria")
@@ -41,8 +60,8 @@ export interface PasetoProjectClaims {
   displayName: string;  // users.display_name / login (PII 最小、 email は含めない)
   kind: "user_for_project";
   aud: string;          // 「この token を受ける service の URL」 (例: "https://hub.memoria.example.com")
-  iat: number;
-  exp: number;
+  iat: string;          // ISO 8601 (paseto v3 規約)
+  exp: string;          // ISO 8601
   jti?: string;         // replay 検出用 (= service 側で 1 回限り検証する用途)
 }
 
@@ -57,8 +76,10 @@ interface VerifyKey {
 }
 
 interface PasetoKeyset {
-  /** 現行署名鍵。 新規 token はこれで署名する。 */
-  signing: { kid: string; secret: Buffer; publicKey: Buffer };
+  /** 現行署名鍵。 新規 token はこれで署名する。
+   *  signingKey は paseto V4.sign に渡す Node KeyObject (raw seed では
+   *  ライブラリが public key と誤判定するため pre-build しておく)。 */
+  signing: { kid: string; signingKey: KeyObject; publicKey: Buffer };
   /** 検証に使える全 public key (現行 + 旧)。 getPublicKeys() で公開される。 */
   verifyKeys: VerifyKey[];
 }
@@ -91,13 +112,24 @@ function loadKeys(): PasetoKeyset | undefined {
   try {
     const secret = Buffer.from(secretB64, "base64");
     const publicKey = Buffer.from(publicB64, "base64");
-    // Ed25519 secret は 32 or 64 byte、 public は 32 byte
-    if (secret.length !== 32 && secret.length !== 64) {
+    // Ed25519 secret は 32 byte (seed) or 64 byte (seed || public)。 publicKey は raw 32 byte。
+    let seed: Buffer;
+    if (secret.length === 32) {
+      seed = secret;
+    } else if (secret.length === 64) {
+      // 末尾 32 byte は public copy。 paseto lib の bytesToKeyObject と同じ前処理。
+      seed = secret.subarray(0, 32);
+    } else {
       throw new Error(`CERNERE_PASETO_SECRET_KEY length=${secret.length} (expected 32 or 64)`);
     }
     if (publicKey.length !== 32) {
       throw new Error(`CERNERE_PASETO_PUBLIC_KEY length=${publicKey.length} (expected 32)`);
     }
+
+    // paseto V4.sign は KeyObject (Ed25519 private) しか受け付けない。 raw 32 byte
+    // を渡すと paseto 内 _checkPrivateKey が public key と誤判定して失敗するため、
+    // ここで PKCS8 + createPrivateKey を経由して KeyObject に昇格させる。
+    const signingKey = seedToPrivateKey(seed);
 
     const verifyKeys: VerifyKey[] = [{ kid, publicKey, current: true }];
 
@@ -113,7 +145,7 @@ function loadKeys(): PasetoKeyset | undefined {
       }
     }
 
-    return { signing: { kid, secret, publicKey }, verifyKeys };
+    return { signing: { kid, signingKey, publicKey }, verifyKeys };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`PASETO key load failed: ${msg}`);
@@ -163,7 +195,8 @@ export async function signProjectToken(params: {
   ttlSec?: number;
 }): Promise<string> {
   if (!keyset) throw new Error("PASETO is not enabled (set CERNERE_PASETO_SECRET_KEY)");
-  const now = Math.floor(Date.now() / 1000);
+  const nowMs = Date.now();
+  const ttlSec = params.ttlSec ?? PROJECT_TOKEN_TTL_SEC;
   const claims: PasetoProjectClaims = {
     sub: params.userId,
     projectKey: params.projectKey,
@@ -171,17 +204,17 @@ export async function signProjectToken(params: {
     displayName: params.displayName,
     kind: "user_for_project",
     aud: params.audience,
-    iat: now,
-    exp: now + (params.ttlSec ?? PROJECT_TOKEN_TTL_SEC),
+    iat: new Date(nowMs).toISOString(),
+    exp: new Date(nowMs + ttlSec * 1000).toISOString(),
     jti: crypto.randomUUID(),
   };
   const opts: ProduceOptions = { kid: keyset.signing.kid };
-  // V4 secret key は 32 byte (seed) でも 64 byte (= seed + public concatenated) でも受け取る。
-  // claims を Record<string, unknown> 互換に cast (PasetoProjectClaims は index signature を
-  // 持たない狭い型なので、 ライブラリ I/F に合わせる)。
+  // V4.sign は KeyObject (Ed25519 private) を要求する。 loadKeys() で
+  // seedToPrivateKey() 経由で構築済み。 claims は index signature を持たない
+  // 狭い型なので Record<string, unknown> 互換に cast する。
   return V4.sign(
     claims as unknown as Record<string, unknown>,
-    keyset.signing.secret as unknown as Parameters<typeof V4.sign>[1],
+    keyset.signing.signingKey as unknown as Parameters<typeof V4.sign>[1],
     opts,
   );
 }
