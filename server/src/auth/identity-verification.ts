@@ -130,6 +130,21 @@ export async function checkDevice(
     userAgent: ctx.userAgent,
   });
 
+  // dev / 緊急用バイパス。 CERNERE_IDENTITY_VERIFICATION_DISABLED=true で
+  // device 検証をスキップし trusted を返す (本番では config 側でガード済)。
+  if (config.identityVerificationDisabled) {
+    const label = fp ? computeDeviceLabel(fp) : "verification-disabled";
+    devLog("identity.checkDevice.disabled_by_config", { userId: user.id, label });
+    logAuthEvent({
+      event: "user.device.trusted",
+      userId: user.id,
+      deviceLabel: label,
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+    });
+    return { trusted: true, anomalies: [], label };
+  }
+
   // フィンガープリントが届かない場合は安全側に倒し、本人確認を要求する
   if (!fp || (!fp.machine && !fp.browser)) {
     devLog("identity.checkDevice.missing_fingerprint", { userId: user.id });
