@@ -1,0 +1,20 @@
+{
+  "project": {
+    "key": "bibliotheca",
+    "name": "Bibliotheca",
+    "description": "本 / 機材 貸出台帳 (ISBN / QR スキャン + admin 専用返却)"
+  },
+
+  "endpoint": {
+    "url": "http://localhost:17500",
+    "frontend_url": "http://localhost:17500",
+    "same_server": true,
+    "bridge_path": "/bibliotheca"
+  },
+
+  "data_sharing": [],
+
+  "user_data": {
+    "columns": {}
+  }
+}
