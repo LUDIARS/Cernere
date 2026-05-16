@@ -35,6 +35,12 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
       },
+      // PASETO V4 公開鍵配布 endpoint (= 各 LUDIARS サービスが起動時に fetch する)。
+      // proxy が無いと Vite の SPA fallback で index.html が返り、 サービス側 JSON parse 失敗
+      "/.well-known": {
+        target: backendUrl,
+        changeOrigin: true,
+      },
     },
   },
 });
