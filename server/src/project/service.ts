@@ -17,6 +17,18 @@ import { migrateProjectSchema } from "./schema-migrator.js";
 import * as cache from "./user-data-cache.js";
 import { getAllProjectStatus, getProjectConnections, getProjectStatus } from "../ws/project-registry.js";
 
+// ── Project definition helpers ───────────────────────────────
+
+/**
+ * schema_definition.endpoint.frontend_url を取り出す.
+ * Hub Shell (Memoria 等) が .well-known/ludiars-app.json を probe する
+ * ために list / overview に同梱する.
+ */
+function extractFrontendUrl(def: unknown): string | null {
+  const fu = (def as ProjectDefinition | null | undefined)?.endpoint?.frontend_url;
+  return typeof fu === "string" && fu.length > 0 ? fu : null;
+}
+
 // ── Service Templates ────────────────────────────────────────
 
 function getServiceDir(): string {
@@ -84,14 +96,19 @@ export async function listProjects() {
     description: dbSchema.managedProjects.description,
     isActive: dbSchema.managedProjects.isActive,
     createdAt: dbSchema.managedProjects.createdAt,
+    schemaDefinition: dbSchema.managedProjects.schemaDefinition,
   }).from(dbSchema.managedProjects);
 
   // 接続レジストリ (in-memory) から WS 接続状態をマージ
   const statusMap = getAllProjectStatus();
   return rows.map((p) => {
     const s = statusMap.get(p.key);
+    const { schemaDefinition, ...rest } = p;
     return {
-      ...p,
+      ...rest,
+      // Hub Shell が manifest probe するための frontend URL.
+      // schema_definition.endpoint.frontend_url から派生し、 未設定なら null.
+      frontendUrl: extractFrontendUrl(schemaDefinition),
       connectionCount: s?.connectionCount ?? 0,
       lastConnectedAt: s?.lastConnectedAt ?? null,
       lastDisconnectedAt: s?.lastDisconnectedAt ?? null,
@@ -481,6 +498,11 @@ export interface UserProjectOverview {
   connectionCount: number;
   /** 直近に接続が確立したタイムスタンプ */
   lastConnectedAt: Date | null;
+  /**
+   * Hub Shell が .well-known/ludiars-app.json を probe するための frontend URL.
+   * schema_definition.endpoint.frontend_url から派生、 未設定なら null.
+   */
+  frontendUrl: string | null;
 }
 
 /**
@@ -547,6 +569,7 @@ export async function listUserProjectsOverview(userId: string): Promise<UserProj
       inUse: filled > 0,
       connectionCount: status.connectionCount,
       lastConnectedAt: status.lastConnectedAt,
+      frontendUrl: extractFrontendUrl(definition),
     });
   }
   return overviews;
