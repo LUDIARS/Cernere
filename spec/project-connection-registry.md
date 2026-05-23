@@ -55,13 +55,16 @@ sequenceDiagram
 ```ts
 {
   key, name, description, isActive, createdAt,
-  connectionCount: number,         // ← NEW
-  lastConnectedAt: Date | null,    // ← NEW
-  lastDisconnectedAt: Date | null, // ← NEW
+  connectionCount: number,         // 接続レジストリ
+  lastConnectedAt: Date | null,    // 接続レジストリ
+  lastDisconnectedAt: Date | null, // 接続レジストリ
+  frontendUrl: string | null,      // schema_definition.endpoint.frontend_url から派生
 }
 ```
 
-`managed_project.overview` (ユーザ視点の data 集計) にも `connectionCount` / `lastConnectedAt` を追加。
+`frontendUrl` は Memoria Hub Shell ([Memoria/spec/feature/hub-shell.md](https://github.com/LUDIARS/Memoria/blob/main/spec/feature/hub-shell.md)) が `<origin>/.well-known/ludiars-app.json` を probe するために使う。 値は `schema_definition.endpoint.frontend_url` (= プロジェクト定義時の `endpoint.frontend_url`) をそのまま転写する。 endpoint 未設定のプロジェクトは `null`、 Hub Shell の同期対象外になる。
+
+`managed_project.overview` (ユーザ視点の data 集計) にも `connectionCount` / `lastConnectedAt` / `frontendUrl` を追加。
 
 新コマンド `managed_project.connections` は admin 用に接続詳細を返す:
 

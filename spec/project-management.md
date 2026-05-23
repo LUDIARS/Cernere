@@ -113,9 +113,15 @@ CREATE TABLE project_data_{key} (
 |--------|--------|---------|------|
 | `project` | `list` | — | 認証済み |
 | `project` | `get` | `{ key }` | 認証済み |
+| `project` | `overview` | — | 認証済み |
 | `project` | `register` | `{ yaml, url? }` | admin |
 | `project` | `delete` | `{ key }` | admin |
 | `project` | `update_schema` | `{ key, yaml }` | admin |
+
+`list` / `overview` の戻り値には `frontendUrl: string | null` を含む。
+これは `schema_definition.endpoint.frontend_url` を露出したもので、
+Memoria Hub Shell が manifest probe (`<origin>/.well-known/ludiars-app.json`) するために使う。
+詳細は [project-connection-registry.md](./project-connection-registry.md#ダッシュボードへの露出) 参照。
 
 ### ユーザーデータ操作
 
