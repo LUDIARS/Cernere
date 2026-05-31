@@ -35,6 +35,11 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
+      # 認証コア (JWT / PASETO トークンの署名・検証・異常系) の unit テスト。
+      # DB/Redis 不要で動く純ロジックのみ。
+      - name: Tests
+        run: pnpm test
+
   frontend-typecheck:
     name: Frontend TypeScript Check
     runs-on: ubuntu-latest
