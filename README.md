@@ -2,6 +2,13 @@
 
 汎用認証プラットフォーム & データリレーサーバー。複数の認証方式（OAuth / パスワード / MFA）、組織・チーム管理、プロジェクトの永続化、および WebSocket ベースのリアルタイムメッセージリレーを提供します。
 
+## セットアップ
+
+設定・起動手順は用途別に [`spec/setup/`](spec/setup/) にまとめてある:
+
+- [サーバを起動する](spec/setup/server-bootstrap.md) / [Infisical 秘密管理](spec/setup/infisical-secrets.md) / [PASETO 署名鍵](spec/setup/paseto-keys.md) / [サービス登録](spec/setup/service-registration.md)
+- 全設定キー: [spec/setup/config-reference.md](spec/setup/config-reference.md)
+
 ## セキュリティ思想
 
 Cernere は **常時接続セッションの強固な認証** を基盤とするセキュリティモデルを採用しています。
