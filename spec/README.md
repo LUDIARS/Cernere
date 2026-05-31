@@ -41,8 +41,12 @@ LUDIARS 認証プラットフォーム Cernere の仕様書。AIFormat
 | [migration-to-typescript.md](plan/migration-to-typescript.md) | Rust → Node.js 移行履歴 |
 
 ### `data/` — データスキーマ
-（未整備。スキーマ定義は `migrations/` の連番 SQL を参照。`feature/project-management.md` /
-`feature/user-project-row.md` にテーブル関連の記述あり。）
+| ドキュメント | 範囲 |
+|---|---|
+| [README.md](data/README.md) | スコープ（Cernere 所有 / 委託データ除外）+ テーブル一覧（ドメイン別） |
+| [schema.md](data/schema.md) | 全 21 テーブルの列定義・制約・インデックス・FK |
+
+※ 動的 `project_data_<key>`（他サービス委託データ）は対象外。
 
 ---
 
