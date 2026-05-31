@@ -21,7 +21,7 @@ PR #72 で対応した内容:
 - `commands.dispatch` に Layer 2-3 (Redis セッション + LoggedIn) ガード (= #63 C5)
 - `operation_logs` の silent catch を `console.error` に変更 (= #63 H11)
 - `resolveProjectWsAuth` に `projectKey × DB` 整合性チェック (= #49 §1)
-- `spec/security_design.md` §3.2-3.4 を実装に合わせて更新 (= #49 §3)
+- `spec/interface/security_design.md` §3.2-3.4 を実装に合わせて更新 (= #49 §3)
 - 4 層防御 middleware の集中ガード (= #49 §2 部分対応)
 
 直近で対応済みの C4 (本番 JWT_SECRET 弱既定値) は `113a7b9` の `config.ts isProduction()` で NODE_ENV 評価済み。

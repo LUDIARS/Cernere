@@ -161,7 +161,7 @@ sequenceDiagram
 
 ## エラー応答
 
-REST はステータスコードを `400 / 401 / 403 / 404 / 429 / 500` で返す ([server/src/app.ts](../server/src/app.ts) の `classifyError`)。
+REST はステータスコードを `400 / 401 / 403 / 404 / 429 / 500` で返す ([server/src/app.ts](../../server/src/app.ts) の `classifyError`)。
 WS は `{ type:"error", code, message, request_id? }` で返し、致命的エラーは `ws.end(4xxx, reason)` で切断する。
 
 ## ping/pong タイムアウト
