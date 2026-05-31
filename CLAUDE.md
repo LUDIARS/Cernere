@@ -188,7 +188,7 @@ Cernere のセキュリティは以下の 3 つの柱に基づく。
 
 ### 1.5 参考ドキュメント
 
-- セキュリティ設計: https://github.com/LUDIARS/Cernere/blob/main/spec/security_design.md
+- セキュリティ設計: https://github.com/LUDIARS/Cernere/blob/main/spec/interface/security_design.md
 - リレー設計: https://github.com/LUDIARS/Cernere/blob/main/docs/relay_design.md
 - サービスインターフェース: https://github.com/LUDIARS/Cernere/blob/main/docs/service_interface.md
 
