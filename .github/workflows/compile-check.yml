@@ -8,11 +8,16 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   server-typecheck:
     name: Server TypeScript Check
     runs-on: ubuntu-latest
+    # @ludiars/vestigium を GitHub Packages から取得するための token。
+    # server/.npmrc が ${NODE_AUTH_TOKEN} を参照する。
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     defaults:
       run:
         working-directory: server
