@@ -9,8 +9,14 @@
  */
 
 import { ensureEnv } from './lib/env-bootstrap.js';
+import { install as installVestigium } from '@ludiars/vestigium';
 
 async function bootstrap(): Promise<void> {
+  installVestigium({
+    serviceCode: 'cernere',
+    captureConsole: true,
+    pinoTransport: false,
+  });
   try {
     await ensureEnv();
   } catch (err) {
