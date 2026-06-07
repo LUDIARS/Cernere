@@ -680,3 +680,82 @@ accessToken (C-3)。
    させる。 [[feedback_secret_per_user_memory_only]] を満たすこと。
 
 > 解決済 (改訂で close): composite ログインの処遇 → C-4 で撤廃に確定。
+
+---
+
+## 11. Corpus UI モデル — widget SPA / feature list / UI key レジストリ
+
+> 2026-06-08 ユーザ確定。 §13.2 の panels[] / inline ui を一般化する Corpus 全体
+> モデル。 **正本は Corpus DESIGN.md §13 に反映する**義務がある (本書は Cernere
+> 適用の記述、 モデルの権威は Corpus 側)。 この節を Corpus DESIGN へ移植する PR
+> を別途立てる (§9 に P0.5 として追加)。
+
+### 11.1 Corpus は 1 枚のウィジェット型 SPA
+
+Corpus は **単一のウィジェット型 SPA** で、 接続した各サービスの UI レンダリングを
+**代行**する。 サービスは自前フロントを持たず、 UI を宣言 (descriptor) または
+HTML 定義として渡すだけ。 「各サービスの Vite フロントエンドを Corpus に集約する」
+イメージで、 N 個の SPA を 1 つの Corpus に畳み込む。 §4.1 の「シェルは host が
+一度描く」 を全サービスへ一般化したもの。
+
+### 11.2 トップページは無い — feature list + 初回レンダリング
+
+**「トップページ」 という概念は存在しない。** 代わりに各サービスは:
+
+- **feature list** — そのサービスが持つ機能の一覧 (旧 panels[] の一般化)
+- **初回レンダリング (initial render)** — 認証直後 / サービス選択直後に **最初に
+  どの UI キーを描くか** の宣言
+
+を宣言する。 Corpus は固定ダッシュボードを描かず、 サービスの feature list と
+initial-render 宣言に従って描画を組み立てる。
+
+### 11.3 UI key レジストリ — キー → UI 情報 のペア
+
+各サービスは UI 定義を **キー → UI 情報** のペアで登録する (UI key registry):
+
+| UI 情報の種類 | 中身 | 用途 |
+|---|---|---|
+| **descriptor** | §13.4 の宣言的 PanelDescriptor | 定型 UI (一覧/フォーム/詳細…) — 既定 |
+| **html** | **HTML を直接用意する UI 定義** | 特注画面のエスケープハッチ (宣言で書けない見た目) |
+
+`html` 種は §13.2 の `custom` (WC mount) より一段手前の軽量エスケープハッチ:
+サービスが **静的 HTML 文字列** をキーに結びつけ、 Corpus がそのまま挿入する
+(JS 実行が要る WebAuthn 等は引き続き `custom`)。 これにより「descriptor で書ける
+ものは descriptor、 見た目だけ特注したいものは html、 JS 必須は custom」 の 3 段。
+
+§1.5 のキャッシュ境界はキー単位で効く: UI 情報 (descriptor/html) はキーごとに
+version/ETag 付きで配信し、 host が WebStorage / ローカルにキャッシュする。
+
+### 11.4 バックエンド駆動レンダリング — backend が UI キーを渡す
+
+サービス **backend は UI キーを渡して Corpus にそのキーの UI を描かせる**。
+descriptor を毎回送るのではなく、 「このキーを描け」 と指示する。 これにより:
+
+- backend がフロー制御を握る (例: 状態に応じて描く UI キーを切り替える)
+- ログインも **Corpus が `login` キーで pre-auth レンダリング**する (§6.0 を確定)。
+  未認証時、 host は Cernere の feature list から initial-render = `login` キーを
+  引いて描く。 §2 C-1 の「レンダラは identity=null でも描ける」 の具体機構
+
+> 受け渡し機構 (manifest 静的宣言 vs runtime push) の詳細は実装で詰める。 v1 は
+> manifest に keyed UI 定義 + initial-render を載せる静的方式から始める。
+
+### 11.5 共通 UI は共通 UI 定義として一度だけ
+
+複数サービスで同形の UI (ログイン枠 / カード / フォーム / バナー…) は **共通 UI
+定義**として Corpus に一度だけ持ち、 各サービスはキー参照で使い回す (§4 共通化の
+最終形)。 「データ以外を共通化」 が UI key レジストリ上で「共通キーを参照」 として
+実現される。
+
+### 11.6 既存スキーマへの写像
+
+| 本書の旧概念 | 11 章モデルでの呼び名 |
+|---|---|
+| manifest `panels[]` | feature list (keyed UI 定義群) |
+| panel `id` | UI キー |
+| panel `ui` (inline descriptor) | UI 情報 (種=descriptor) |
+| (新規) | UI 情報 (種=html) — 特注画面 |
+| 既定で先頭 panel を開く | initial-render 宣言 (明示) |
+| §6.0 login | `login` キー (pre-auth、 initial-render 候補) |
+
+§5 マニフェストは段階的に keyed registry + initial-render + ui-info-kind を持つ形へ
+拡張する (Corpus DESIGN §13 反映とセット)。
