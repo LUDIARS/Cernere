@@ -18,10 +18,14 @@
 
 ### 1.1 目的
 
-Cernere の画面 (ログイン / ダッシュボード / データオプトアウト / 管理者) を
-Corpus 内蔵レンダラが描く **descriptor (JSON)** で宣言し直し、 Cernere 側の
-フロント JS を原則ゼロにする。 「サービスは UI を書かない (descriptor だけ
-書く)」 という Corpus §13 の目標を Cernere にも適用する。
+Cernere の全画面 (ログイン / ダッシュボード / データオプトアウト / 管理者) を
+corpus-renderer が描く **descriptor (JSON)** で宣言し直し、 **Cernere 自前
+frontend (React SPA) を完全撤廃**する。 ログインも未認証 render で descriptor 化
+できる (§2 C-1) ため、 bespoke UI はゼロになり、 Cernere は backend のみ
+(REST データ EP + descriptor EP + custom 部品) を配信するサーバになる。
+「サービスは UI を書かない (descriptor だけ書く)」 という Corpus §13 の目標を
+Cernere にも適用し、 同 descriptor を Web / デスクトップ / ゲームエンジンの
+各ホストに流用する (§1.4)。
 
 ### 1.2 スコープ (本書)
 
@@ -36,8 +40,32 @@ Corpus 内蔵レンダラが描く **descriptor (JSON)** で宣言し直し、 C
 
 - corpus.ts (マニフェスト + descriptor) の実装
 - WS ハンドラを叩く REST データエンドポイントの実装
-- 既存 React SPA の撤去 / 最小化
+- 既存 React SPA (`frontend/`) の実削除 (撤廃の実装は P6)
 - §7 で「descriptor 拡張」 と判定した分の Corpus 本体への実装 (Corpus 側 PR)
+
+### 1.4 設計原則 — descriptor はホスト非依存 (Web / デスクトップ / ゲームエンジン流用)
+
+corpus-renderer は「descriptor + `data()` + identity」 のみを入力とし、 hub 本体・
+認証・特定 DOM 実装に依存しない自己完結パッケージ (§13.7)。 したがって **同じ
+descriptor を別ホストのレンダラ実装で描ける**:
+
+- Web (Corpus shell / Cernere thin frontend) — DOM レンダラ
+- デスクトップ (Tauri 等) — 同 descriptor を埋め込み
+- **ゲームエンジン / ネイティブ描画** — Pictor / Ergo の native UI 層が
+  descriptor を解釈すれば、 ゲーム内 UI として Cernere ログイン/アカウント等を
+  そのまま再利用できる
+
+これは「UI を JSON で宣言し、 描画は host 側レンダラ実装が担う」 という宣言的
+レンダリングの本質的な利点。 本書で定義する Cernere の descriptor は **特定の
+描画ホストを前提にしない** ように書く (DOM 固有の指定を descriptor に持ち込ま
+ない)。 host 固有事情 (WebAuthn / postMessage 等) は `custom` 部品に閉じ込め、
+custom は host ごとに別実装を差せる差し替え点とする (§7)。 これにより
+Cernere の認証 UI が Web hub にもネイティブ/ゲームクライアントにも 1 つの
+descriptor で行き渡る。
+
+> 含意: §7 で `custom` に落とす部品 (passkey / MFA / member 検索 等) は
+> 「host 非依存にできない箇所」 の一覧でもある。 host ごとの実装差は custom の
+> tag 実装側に閉じ、 descriptor 本体は共有され続ける。
 
 ---
 
@@ -47,24 +75,38 @@ Cernere は Corpus に集約される **leaf サービスではなく、 Corpus 
 する先 (authority)**。 この非対称性から、 他サービス (Aedilis / Bibliotheca /
 Actio) の declarative 化には無い 3 つの制約がある。
 
-### C-1. ログインは pre-auth ゲートで、 declarative パネルにできない
+### C-1. ログインは pre-auth で描く。 レンダラ (≠ hub サービス) なので描画可能
 
-Corpus の declarative パネルは **ユーザが Corpus にログイン済み** の状態で
-内蔵レンダラが描く。 一方 Cernere のログイン画面は「まだ誰でもない」 状態の
-画面であり、 しかも **Corpus がログインのために叩く相手そのもの**。 構造的に
-パネル化できない (鶏卵)。
+**Corpus はサービスではなく汎用レンダラ** (`@ludiars/corpus-renderer`、 §13.7)。
+入力は「descriptor + `data(dataId, init)` + identity」 のみで、 hub 本体にも
+認証にも依存しない。 したがって `identity = null` (未認証) でも descriptor を
+描け、 **ログイン画面も descriptor として描画できる** (当初「鶏卵で不可」 と
+した判断は誤り)。
 
-加えてログイン UI は以下の非宣言的処理を含む:
-- WebAuthn / パスキー (`@simplewebauthn/browser` の `startAuthentication`)
-- OAuth リダイレクト (Google / GitHub への `<a href>` 遷移)
-- デバイスフィンガープリント収集 + MFA チャレンジ WS フロー
-- composite ログイン (他サービスから popup/iframe で開き postMessage で
-  auth_code を返す) — `frontend/src/pages/composite/`
+これにより **Cernere frontend (自前 React SPA) は全撤廃**する。 ログイン含む
+全画面が descriptor 化され、 描画は **host 側レンダラ** (Web は Corpus shell、
+他はデスクトップ/ゲームエンジン、 §1.4) が担う。 Cernere は backend のみ —
+REST データ EP + descriptor EP (`/api/corpus/ui/*`) + custom 部品バンドル
+(`public/corpus-ui/*.js`) を配信する純粋なサーバになる。 host は未認証時に
+ログイン descriptor、 認証成立後にパネル descriptor を render する。
 
-→ **方針: ログインは移行対象外**。 現行の `LoginPage` / `CompositeLoginPage` /
-`CompositeCallbackPage` は Cernere 単独配信のスタンドアロンページとして残す。
-Corpus 経由でアクセスした利用者は Corpus 自身のログイン (= Cernere に委譲)
-を通ってからパネルを見る。 詳細は §6.0。
+ただしログイン UI 内の一部インタラクションは宣言で書けず `custom` になる:
+- WebAuthn / パスキー (`@simplewebauthn/browser` の `startAuthentication`) — §7-G2
+- デバイスフィンガープリント収集 + MFA チャレンジ WS フロー — §7-G11
+- composite ログイン (popup/iframe + postMessage で auth_code 返却) — §7-G12
+
+宣言で書ける部分:
+- email/password の `form` (submit 先は REST `/api/auth/login` `/register`)
+- Google / GitHub OAuth ボタン (遷移は action-button のナビゲート、 §7-G3)
+
+レンダラ側に 1 つ要求が要る: **未認証 render + auth-submit で identity を確立**
+するモード (フォーム成功時に返るトークンを host が保持して再 render)。 §7-G13。
+詳細な descriptor は §6.0。
+
+> composite (他サービス埋め込みログイン) は postMessage/フィンガープリント/MFA
+> が絡むため frontend 撤廃の **唯一の残課題**。 descriptor + custom 部品へ寄せる
+> (host 非依存の custom 実装) か、 撤廃直前まで composite ページだけ残すかを
+> §10-q4 で決める。 通常ログインは先に descriptor 化して frontend を撤廃する。
 
 ### C-2. データ経路が WebSocket。 declarative レンダラは REST
 
@@ -99,7 +141,8 @@ Corpus が D5 で保持する **user accessToken** (Cernere が native 検証で
 
 | ユーザ区分 | 現行ページ | 移行後 Corpus パネル | 移行可否 |
 |---|---|---|---|
-| ログインUI | `LoginPage` / composite | (移行せず・スタンドアロン維持) | ✗ C-1 |
+| ログインUI | `LoginPage` | `login` (未認証 render、 §6.0) | ✓ (WebAuthn/MFA は custom) |
+| ログインUI | composite | (当面スタンドアロン維持、 §7-G12) | △ |
 | ダッシュボード | `DashboardPage` (Projects) | `projects` パネル | ✓ |
 | ダッシュボード | `ProfilePage` | `account` パネル | ✓ (パスキーのみ custom) |
 | ダッシュボード | `OrganizationsPage` | `organizations` パネル | ✓ (検索のみ拡張要) |
@@ -188,6 +231,11 @@ Cernere 側の共通化レイヤ。 括り出す候補:
   "auth": "cernere-user-token",        // C-3: 自己トークン直接検証 (project-token 中継しない)
   "cernereProjectKey": "cernere",
   "data": [
+    // ── auth (未認証で叩く。 §6.0 login descriptor 用) ─────
+    { "id": "auth-login",    "path": "/api/auth/login",                "scope": "local", "title": "ログイン" },
+    { "id": "auth-register", "path": "/api/auth/register",             "scope": "local", "title": "新規登録" },
+    { "id": "auth-google",   "path": "/api/auth/google/url",           "scope": "local", "title": "Google OAuth URL" },
+    { "id": "auth-github",   "path": "/api/auth/github/url",           "scope": "local", "title": "GitHub OAuth URL" },
     // ── account ───────────────────────────────────────────
     { "id": "me",            "path": "/api/corpus/me",                 "scope": "local", "title": "自分の基本情報" },
     { "id": "my-profile",    "path": "/api/corpus/profile",            "scope": "local", "title": "パーソナリティ" },
@@ -223,18 +271,65 @@ Cernere 側の共通化レイヤ。 括り出す候補:
 > へ拡張する要求 (§7-G6)。 未対応の間は `admin` パネルを出さず、 各管理操作を
 > 既存パネル内の `requires:"admin"` component として置く。
 
+`login` (§6.0) は `panels[]` に **入れない**。 hub のタブではなく、 host
+(Corpus shell 等) が未認証時に取得して描く pre-auth descriptor だから
+(manifest panel = 認証後の hub タブ)。 ログイン descriptor は
+`/api/corpus/ui/login` で配信し、 host が identity 無し時に取得する。
+
 ---
 
 ## 6. パネル別 UI カード定義
 
 テンプレート記法・filter は Corpus §13.5 準拠 (`{field}` / `{field|datetime}`)。
 
-### 6.0 ログイン (移行せず)
+### 6.0 `login` (未認証 render)
 
-C-1 のとおりパネル化しない。 現行 React の `LoginPage` /
-`CompositeLoginPage` / `CompositeCallbackPage` をスタンドアロン配信のまま残す。
-Corpus 移行後の Cernere frontend は「ログイン専用の最小 SPA」 に縮小する
-(認証後ページは全部 Corpus パネルへ移すため)。
+C-1 のとおり、 レンダラは `identity = null` でも描けるのでログインも descriptor
+化する。 **host (Web は Corpus shell)** が未認証時に Cernere の **ログイン
+descriptor** (`/api/corpus/ui/login`) を取得して描き、 `form` submit 成功で
+identity を確立 → 認証後パネルへ再 render。 Cernere 側に frontend は無い。
+
+```jsonc
+{
+  "descriptorVersion": 1,
+  "title": "Cernere",
+  "sections": [
+    { "components": [
+      // email/password — login / register をタブで切替 (tabs)
+      { "type": "tabs", "tabs": [
+        { "label": "ログイン", "components": [
+          { "type": "form",
+            "submit": { "dataId": "auth-login", "method": "POST",
+                        "success": "ログインしました" },   // 成功で identity 確立 (§7-G13)
+            "fields": [
+              { "name": "email",    "label": "メール",       "input": "text",     "required": true },
+              { "name": "password", "label": "パスワード",   "input": "password", "required": true } ] } ] },
+        { "label": "新規登録", "components": [
+          { "type": "form",
+            "submit": { "dataId": "auth-register", "method": "POST", "success": "登録しました" },
+            "fields": [
+              { "name": "name",     "label": "名前",         "input": "text",     "required": true },
+              { "name": "email",    "label": "メール",       "input": "text",     "required": true },
+              { "name": "password", "label": "パスワード (8文字以上)", "input": "password", "required": true } ] } ] } ] },
+
+      // OAuth — 外部 URL へナビゲート (§7-G3)
+      { "type": "action-button", "label": "Google でログイン",
+        "action": { "dataId": "auth-google", "method": "GET", "then": "navigate" } },
+      { "type": "action-button", "label": "GitHub でログイン",
+        "action": { "dataId": "auth-github", "method": "GET", "then": "navigate" } },
+
+      // パスキー / MFA は browser API・多段フロー → custom (§7-G2/G11)
+      { "type": "custom", "tag": "cernere-passkey-login", "url": "/corpus-ui/passkey-login.js" } ] }
+  ]
+}
+```
+
+宣言で書けるのは email/password form と OAuth ナビゲートまで。 `input:"password"`
+は現行 9 種に無い (§7-G14 で追加要求、 暫定は `text`)。 パスキー認証 / MFA
+チャレンジ / デバイスフィンガープリントは `custom` 部品で吸収する。
+
+composite ログイン (他サービス埋め込み) は postMessage + フィンガープリント +
+MFA が密結合のため当面スタンドアロン維持 (§7-G12)。
 
 ### 6.1 `account` パネル (= 現行 Profile)
 
@@ -463,6 +558,10 @@ vitest を別 PR で更新する (Corpus 側作業)。
 | G8 | 詳細内のスキーマ列テーブル (detail + table の混在) | △ | `section` で detail と table を併置 (既存で可) |
 | G9 | リアルタイム presence (WS push の online ドット) | **E**/△ | polling データ列に退行 or custom。 リアルタイムは WS 維持 |
 | G10 | 表の行内 select で即時更新 (ロール変更) | **X** | rowActions に `select` action 種を追加。 暫定 E |
+| G11 | MFA チャレンジ + デバイスフィンガープリント (多段 WS フロー) | **E** | custom `cernere-passkey-login` 等に内包。 host 非依存にできず custom 確定 |
+| G12 | composite ログイン (popup/iframe + postMessage) | **E** | 当面スタンドアロン維持。 host 依存が強く descriptor 化を急がない |
+| G13 | 未認証 render + auth-submit で identity 確立 | **X** | レンダラに pre-auth モード (form 成功で返るトークンを host が保持 → 再 render) |
+| G14 | `password` 入力種 (マスク) | **X** | FormField `input` に `password` 追加。 暫定 `text` |
 
 §13 で既に解決済み (拡張不要) の Cernere ニーズ: 一覧カード (`list`) /
 フォーム (`form`) / 詳細 (`detail`) / 表 (`table`) / インライン編集
@@ -480,6 +579,8 @@ accessToken (C-3)。
 
 | dataId | method | 内部委譲 (既存 WS) |
 |---|---|---|
+| auth-login / auth-register | POST | 既存 REST `/api/auth/*` (新設不要) |
+| auth-google / auth-github | GET | OAuth URL 返却 (既存) |
 | me | GET | session user_state |
 | my-profile | GET/PATCH | `profile` get/update |
 | projects | GET/POST | `managed_project` list+overview / register |
@@ -504,13 +605,15 @@ accessToken (C-3)。
 | P0 | 本 UI 設計 + UI カード定義 + 共通化方針 | ✅ 本書 |
 | P1 | Corpus 側 descriptor 拡張 (§7 X 項のうち着手するもの: G1/G4/G6 優先) | Corpus PR |
 | P2 | Cernere サーバ: §8 REST データエンドポイント + `/api/corpus/ui/*` + manifest | Cernere PR |
-| P3 | custom 部品 (passkey / member-add) を `public/corpus-ui/` に配信 | Cernere PR |
-| P4 | Corpus に Cernere を接続 → 動作確認 → 表現力ギャップ再洗い出し | 結合 |
-| P5 | 認証後 React ページ撤去、 frontend をログイン専用最小 SPA に縮小 | Cernere PR |
+| P3 | custom 部品 (passkey / passkey-login / member-add) を `public/corpus-ui/` に配信 | Cernere PR |
+| P4 | Corpus shell に Cernere を接続 → ログイン+全パネル動作確認 → ギャップ再洗い出し | 結合 |
+| P5 | composite の処遇を決定 (§10-q4)、 残った場合のみ最小ホストに退避 | Cernere PR |
+| P6 | **`frontend/` ディレクトリを完全削除** (React SPA 撤廃) + Dockerfile/nginx/CI 整理 | Cernere PR |
 
 各 PR は [[feedback_concurrent_session_branch]] に従い feat ブランチ + PR
 ([[feedback_auto_merge_flow]])。 prototyping-flow の SaaS 系 (Cernere+Corpus+
-フロント刷新) に該当するため、 P2-P3 は同一 PR に寄せてよい。
+フロント刷新) に該当するため、 P2-P3 は同一 PR に寄せてよい。 P6 (frontend 撤廃)
+は P4 結合確認グリーン + composite 処遇確定 (P5) を満たしてから。
 
 ---
 
@@ -523,5 +626,12 @@ accessToken (C-3)。
    を許容するか、 presence ドットだけ custom で残すか。
 3. **JSON スキーマ編集** (G7) — textarea 退行を v1 許容するか、 最初から
    custom エディタを用意するか。 [[feedback_decision_metrics]] で評価する。
-4. **ログイン最小 SPA の置き場** (P5) — Cernere frontend に残すか、 Corpus
-   シェルのログイン画面に一本化して Cernere 直アクセス用だけ残すか。
+4. **composite ログインの処遇** (frontend 撤廃の唯一の残課題、 §2 C-1 / G12) —
+   (a) descriptor + host 非依存 custom 部品へ寄せて完全 descriptor 化するか、
+   (b) composite 1 ページだけ独立した最小ホストへ退避して frontend 本体は撤廃
+   するか。 通常ログイン/全パネルは descriptor 化済の前提。
+   [[feedback_decision_metrics]] で評価する。
+5. **Cernere 直アクセス時のホスト** — frontend 撤廃後、 Cernere を直接ブラウザ
+   で開いた場合に誰が renderer を提供するか。 Corpus shell へリダイレクトで
+   一本化するか、 Cernere server が corpus-renderer を載せた最小ホスト HTML を
+   1 枚だけ配信するか (bespoke SPA ではなく renderer の薄い土台)。
