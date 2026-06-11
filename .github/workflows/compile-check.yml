@@ -34,6 +34,15 @@ jobs:
         with:
           version: 10
 
+      # pnpm v10 はリポジトリ同梱 .npmrc 内の ${ENV} 展開を拒否する
+      # (repository-controlled credential の env 展開禁止)。そのため
+      # @ludiars (GitHub Packages) の token は home の ~/.npmrc に展開済みの
+      # 値で書き込む。working-directory 既定は server だが ~ は home を指す。
+      - name: Authenticate to GitHub Packages
+        run: |
+          echo "@ludiars:registry=https://npm.pkg.github.com" >> ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
+
       - name: Install dependencies
         run: pnpm install
 
