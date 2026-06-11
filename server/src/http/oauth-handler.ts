@@ -13,6 +13,7 @@ import { config } from "../config.js";
 import { generateTokenPair, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
 import { redis, SESSION_TTL_SECS } from "../redis.js";
 import { logAuthEvent } from "../logging/auth-logger.js";
+import { encryptSecret } from "../lib/crypto/secret-box.js";
 
 const CSRF_COOKIE = "cernere_csrf_state";
 const SESSION_COOKIE = "ars_session";
@@ -311,8 +312,12 @@ async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader
     userRole = userRows[0].role;
     await db.update(schema.users).set({
       displayName: gUser.name, avatarUrl: gUser.picture, email: gUser.email,
-      googleAccessToken: tokenData.access_token,
-      googleRefreshToken: tokenData.refresh_token ?? userRows[0].googleRefreshToken,
+      // 機密トークンは保存時に暗号化する (RULE.md §7.2)。refresh_token が
+      // 今回返らない場合は既存 (暗号化済み) 値をそのまま保持する。
+      googleAccessToken: encryptSecret(tokenData.access_token),
+      googleRefreshToken: tokenData.refresh_token
+        ? encryptSecret(tokenData.refresh_token)
+        : userRows[0].googleRefreshToken,
       googleTokenExpiresAt: Math.floor(Date.now() / 1000) + tokenData.expires_in,
       lastLoginAt: now, updatedAt: now,
     }).where(eq(schema.users.id, userId));
@@ -323,8 +328,8 @@ async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader
     await db.insert(schema.users).values({
       id: userId, googleId: gUser.id, login: gUser.email.split("@")[0],
       displayName: gUser.name, avatarUrl: gUser.picture, email: gUser.email,
-      role: userRole, googleAccessToken: tokenData.access_token,
-      googleRefreshToken: tokenData.refresh_token,
+      role: userRole, googleAccessToken: encryptSecret(tokenData.access_token),
+      googleRefreshToken: tokenData.refresh_token ? encryptSecret(tokenData.refresh_token) : null,
       googleTokenExpiresAt: Math.floor(Date.now() / 1000) + tokenData.expires_in,
       lastLoginAt: now, createdAt: now, updatedAt: now,
     });

@@ -26,6 +26,8 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash"),
 
   // Google OAuth
+  // accessToken / refreshToken は保存時暗号化 (lib/crypto/secret-box, AES-256-GCM)。
+  // 書込みは必ず encryptSecret() を通すこと。読出し時は decryptSecret()。RULE.md §7.2。
   googleId: text("google_id").unique(),
   googleAccessToken: text("google_access_token"),
   googleRefreshToken: text("google_refresh_token"),
@@ -33,6 +35,8 @@ export const users = pgTable("users", {
   googleScopes: jsonb("google_scopes"),
 
   // MFA
+  // totpSecret は秘密鍵。MFA 配線時は encryptSecret()/decryptSecret() を必ず通す
+  // こと (現状未配線で書込みコードは無い)。RULE.md §7.2。
   totpSecret: text("totp_secret"),
   totpEnabled: boolean("totp_enabled").notNull().default(false),
   phoneNumber: text("phone_number"),
