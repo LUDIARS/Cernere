@@ -38,7 +38,7 @@ import { config } from "../config.js";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { redis, checkRateLimit } from "../redis.js";
-import { generateTokenPair, verifyToken, extractBearerToken, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
+import { generateTokenPair, verifyToken, verifyProjectToken, extractBearerToken, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
 import { issueAuthCode } from "../auth/auth-code.js";
 import { logUserLogin, logUserLoginFailed } from "../logging/auth-logger.js";
 import { devLog } from "../logging/dev-logger.js";
@@ -56,6 +56,7 @@ export async function handlePasskeyRoute(
   body: string,
   authHeader: string,
   ctx: RequestCtx = {},
+  query: string = "",
 ): Promise<RouteResult> {
   devLog("passkey.route", { action, ip: ctx.ip });
   switch (action) {
@@ -70,6 +71,10 @@ export async function handlePasskeyRoute(
     case "composite-login-finish": return compositeLoginFinish(parseBody(body), ctx);
     case "list":            return listPasskeys(authHeader);
     case "delete":          return deletePasskey(authHeader, parseBody(body));
+    /* Ostiarius 等の会場ゲートウェイがオフライン検証用に、 登録済み passkey の
+     * 公開鍵を bulk 取得する。 admin (= users.role==='admin') か service (project token)
+     * のみ。 秘密情報は返さない (公開鍵のみ)。 CONTRACTS.md §2 参照。 */
+    case "export":          return exportPasskeys(authHeader, query);
     default:
       return { status: "404 Not Found", data: { error: `Unknown passkey action: ${action}` } };
   }
@@ -92,6 +97,30 @@ async function requireUserId(authHeader: string): Promise<{ id: string; role: st
 
 function challengeKey(prefix: string, id: string): string {
   return `passkey:challenge:${prefix}:${id}`;
+}
+
+/**
+ * export 用の認可。 admin 限定 (CONTRACTS.md §2)。 2 経路を許す:
+ *   1. user accessToken で `users.role === 'admin'` のユーザ (運用者の手動取得)
+ *   2. project token (= service-to-service Bearer。 Ostiarius の CERNERE_SERVICE_TOKEN)
+ * どちらも満たさなければ 401/403。
+ */
+async function requireExportAuth(authHeader: string): Promise<void> {
+  const token = extractBearerToken(authHeader);
+  if (!token) throw new Error("Unauthorized: missing bearer token");
+
+  // (2) service: project token (project_credentials 由来) を先に試す
+  try {
+    verifyProjectToken(token);
+    return; // 有効な project token = service 認証成立
+  } catch { /* user token として再評価 */ }
+
+  // (1) user: accessToken を検証し、 DB の role が admin かを確認
+  const payload = verifyToken(token);
+  if (typeof payload.sub !== "string") throw new Error("Unauthorized: invalid token");
+  const rows = await db.select({ role: schema.users.role })
+    .from(schema.users).where(eq(schema.users.id, payload.sub)).limit(1);
+  if (rows[0]?.role !== "admin") throw new Error("Forbidden: admin required");
 }
 
 // ─── REGISTER ─────────────────────────────────────────────────────
@@ -344,4 +373,38 @@ async function deletePasskey(authHeader: string, p: Record<string, unknown>): Pr
     .where(and(eq(schema.passkeys.id, id), eq(schema.passkeys.userId, userId)))
     .returning({ id: schema.passkeys.id });
   return { status: "200 OK", data: { ok: true, removed: removed.length } };
+}
+
+// ─── EXPORT (会場ゲートウェイ用 bulk 公開鍵取得) ──────────────────
+//
+// Ostiarius がオフラインで WebAuthn assertion を検証するため、 登録済み
+// passkey の公開鍵を一括取得する。 返すのは公開鍵 (COSE bytes を base64) と
+// 検証に必要な最小フィールドのみ。 秘密情報は一切含めない。 認可は admin /
+// service 限定 (requireExportAuth)。 CONTRACTS.md §2。
+
+async function exportPasskeys(authHeader: string, query: string): Promise<RouteResult> {
+  await requireExportAuth(authHeader);
+
+  // ?project=<key> は将来の絞り込み用。 passkeys テーブルに project 概念が
+  // 無い (= user に紐付くのみ) ため、 現状は受け取るだけで全件を返す。
+  const project = new URLSearchParams(query).get("project") ?? undefined;
+
+  const rows = await db.select({
+    userId: schema.passkeys.userId,
+    credentialId: schema.passkeys.credentialId,
+    publicKey: schema.passkeys.publicKey,
+    counter: schema.passkeys.counter,
+    transports: schema.passkeys.transports,
+  }).from(schema.passkeys);
+
+  const credentials = rows.map((r) => ({
+    userId: r.userId,
+    credentialId: r.credentialId,                              // base64url (登録時のまま)
+    publicKey: Buffer.from(r.publicKey).toString("base64"),   // COSE bytes → base64
+    counter: Number(r.counter),
+    transports: Array.isArray(r.transports) ? (r.transports as string[]) : [],
+  }));
+
+  devLog("passkey.export", { count: credentials.length, project: project ?? null });
+  return { status: "200 OK", data: { credentials } };
 }
