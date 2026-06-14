@@ -152,7 +152,10 @@ async function registerBegin(authHeader: string, _body: Record<string, unknown>)
     authenticatorSelection: {
       // platform (= Face ID 等内蔵) と cross-platform (= 物理キー) どちらも許可
       residentKey: "preferred",
-      userVerification: "preferred",
+      // 出席チェックイン (Ostiarius) が assertion を userVerification:'required' で
+      // 検証するため、 登録時点で UV (生体/PIN) を必須化して整合させる。 端末貸し
+      // 対策が設計の核なので、 ここはセキュア方向 (preferred → required) に寄せる。
+      userVerification: "required",
     },
   });
 
@@ -174,7 +177,11 @@ async function registerFinish(authHeader: string, p: Record<string, unknown>): P
     expectedChallenge,
     expectedOrigin: ORIGINS,
     expectedRPID: RP_ID,
-    requireUserVerification: false,
+    // 登録 options で userVerification:'required' を指示しているので、 finish でも
+    // UV フラグを必須化して「UV 無しで作られた passkey」 を弾く。 こうすると Ostiarius
+    // の required 検証で確実に通る credential だけが登録される。 既存 passkey の
+    // ログイン (login-finish) には影響しない (新規登録のみ)。
+    requireUserVerification: true,
   });
   if (!verification.verified || !verification.registrationInfo) {
     throw new Error("Passkey registration failed verification");
