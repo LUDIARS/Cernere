@@ -316,6 +316,36 @@ export function createApp() {
     }
   });
 
+  // ── Passkey export (GET): bulk 公開鍵取得 (admin/service 限定) ──
+  // Ostiarius 等の会場ゲートウェイがオフライン検証用に登録済み passkey の
+  // 公開鍵を取得する。 GET なので body は無く、 ?project=<key> を query で受ける。
+  // CONTRACTS.md §2 / handlePasskeyRoute("export")。
+  app.get("/api/auth/passkey/export", async (res, req) => {
+    const authHeader = req.getHeader("authorization") ?? "";
+    const query = req.getQuery() ?? "";
+    const ip = getRemoteIp(res);
+    let aborted = false;
+    res.onAborted(() => { aborted = true; });
+
+    devLog("http.passkey.export.begin", { ip });
+    try {
+      const result = await handlePasskeyRoute("export", "", authHeader, { ip }, query);
+      if (aborted) return;
+      devLog("http.passkey.export.ok", { status: result.status });
+      jsonResponse(res, result.status, result.data);
+    } catch (err) {
+      if (aborted) return;
+      const { status, message } = classifyError(err);
+      if (status === "500 Internal Server Error") {
+        devError("http.passkey.export.500", err, { ip });
+        console.error("[http] passkey/export 500:", err);
+      } else {
+        devLog("http.passkey.export.error", { status, message });
+      }
+      jsonResponse(res, status, { error: message });
+    }
+  });
+
   // ── Composite Auth: POST /api/auth/composite/:action ────
   app.post("/api/auth/composite/:action", async (res, req) => {
     const action = req.getParameter(0) ?? "";
