@@ -326,6 +326,28 @@ export const projectDefinitionHistory = pgTable("project_definition_history", {
   index("idx_project_def_history_key").on(t.projectKey),
 ]);
 
+// ── OIDC Clients (Cernere を IdP とする OpenID Connect RP 登録) ──
+// Cloudflare Access 等の Relying Party を登録する。 client_secret は bcrypt
+// ハッシュで保存し、 redirect_uris は完全一致でのみ許可する (open redirect 防止)。
+
+export const oidcClients = pgTable("oidc_clients", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  clientId: text("client_id").notNull().unique(),
+  clientSecretHash: text("client_secret_hash").notNull(),
+  name: text("name").notNull(),
+  // 許可する redirect_uri の完全一致リスト (例: Cloudflare の callback URL)
+  redirectUris: jsonb("redirect_uris").notNull().default([]),
+  // 許可スコープ (既定 openid email profile)
+  scopes: jsonb("scopes").notNull().default(["openid", "email", "profile"]),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("idx_oidc_clients_client_id").on(t.clientId),
+]);
+
 // ── Project OAuth Tokens (プロジェクト別 OAuth トークンストレージ) ──
 // Cernere を個人データの単一情報源とするため、各プロジェクトは
 // OAuth refresh/access token を自前で保管せず Cernere に預ける。

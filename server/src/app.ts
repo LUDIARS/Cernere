@@ -12,6 +12,16 @@ import { handlePasskeyRoute } from "./http/passkey-handler.js";
 import { getPublicKeys } from "./auth/paseto.js";
 import { handleCompositeRoute } from "./http/composite-handler.js";
 import { handleOAuthRoute } from "./http/oauth-handler.js";
+import {
+  handleOidcDiscovery,
+  handleOidcJwks,
+  handleOidcAuthorize,
+  handleOidcToken,
+  handleOidcUserinfo,
+  handleOidcConsentInfo,
+  handleOidcApprove,
+  handleOidcDeny,
+} from "./http/oidc-handler.js";
 import { devLog, devError } from "./logging/dev-logger.js";
 import {
   handleWsOpen,
@@ -408,6 +418,18 @@ export function createApp() {
       jsonResponse(res, "200 OK", { keys });
     });
   });
+
+  // ── OIDC Provider (OpenID Connect IdP) ───────────────────
+  // Cernere を IdP とする RP (Cloudflare Access 等) 向け。 spec/feature/oidc-provider.md。
+  app.get("/.well-known/openid-configuration", (res) => handleOidcDiscovery(res));
+  app.get("/.well-known/jwks.json", (res) => handleOidcJwks(res));
+  app.get("/oidc/authorize", (res, req) => handleOidcAuthorize(res, req));
+  app.post("/oidc/token", (res, req) => handleOidcToken(res, req));
+  app.get("/oidc/userinfo", (res, req) => handleOidcUserinfo(res, req));
+  // consent はフロント (/oidc/consent) が仲介する。
+  app.get("/api/auth/oidc/request", (res, req) => handleOidcConsentInfo(res, req));
+  app.post("/api/auth/oidc/approve", (res, req) => handleOidcApprove(res, req));
+  app.post("/api/auth/oidc/deny", (res, req) => handleOidcDeny(res, req));
 
   // ── Health check ────────────────────────────────────────
   app.get("/health", (res) => {

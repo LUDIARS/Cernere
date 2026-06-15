@@ -35,6 +35,19 @@ export const config = {
   listenPort: parseInt(env("LISTEN_PORT", "8080"), 10),
   frontendUrl: env("FRONTEND_URL", "http://localhost:5173"),
 
+  // ── 外部到達 URL / OIDC issuer ────────────────────────────
+  // publicUrl は「外部 (Cloudflare Access 等の RP / ブラウザ) から Cernere
+  // サーバーに到達する URL」。 OIDC の各エンドポイント (authorize/token/
+  // userinfo/jwks) と discovery の issuer はこの値を基準に組み立てる。
+  // リバースプロキシ配下では LISTEN_PORT ではなく公開ホストを指定すること。
+  publicUrl: env("CERNERE_PUBLIC_URL", `http://localhost:${env("LISTEN_PORT", "8080")}`)
+    .replace(/\/+$/, ""),
+  // OIDC issuer。 既定は publicUrl と同じ。 discovery の "issuer" と
+  // id_token の "iss" claim はこの値になる (末尾スラッシュ無し)。
+  oidcIssuer: env("CERNERE_OIDC_ISSUER",
+    env("CERNERE_PUBLIC_URL", `http://localhost:${env("LISTEN_PORT", "8080")}`))
+    .replace(/\/+$/, ""),
+
   // GitHub OAuth
   githubClientId: env("GITHUB_CLIENT_ID", ""),
   githubClientSecret: env("GITHUB_CLIENT_SECRET", ""),
