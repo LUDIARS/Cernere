@@ -365,6 +365,52 @@ export const auth = {
   },
 };
 
+// ── OIDC Provider consent API ─────────────────────
+// Cernere を IdP とする RP (Cloudflare Access 等) の認可同意フロー。
+// /oidc/authorize がフロントの /oidc/consent に飛ばし、 ここで承認/拒否する。
+
+export interface OidcConsentInfo {
+  clientName: string;
+  scopes: string[];
+  redirectUri: string;
+}
+
+export const oidc = {
+  async getRequest(requestId: string): Promise<OidcConsentInfo> {
+    const res = await fetch(`${API_BASE}/api/auth/oidc/request?request_id=${encodeURIComponent(requestId)}`, {
+      credentials: "include",
+    });
+    const data = await res.json() as OidcConsentInfo & { error?: string };
+    if (!res.ok) throw new Error(data.error || "Failed to load authorization request");
+    return data;
+  },
+
+  async approve(requestId: string): Promise<{ redirectTo: string }> {
+    const token = getAccessToken();
+    const res = await fetch(`${API_BASE}/api/auth/oidc/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      credentials: "include",
+      body: JSON.stringify({ request_id: requestId }),
+    });
+    const data = await res.json() as { redirectTo: string; error?: string };
+    if (!res.ok) throw new Error(data.error || "Authorization failed");
+    return data;
+  },
+
+  async deny(requestId: string): Promise<{ redirectTo: string }> {
+    const res = await fetch(`${API_BASE}/api/auth/oidc/deny`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ request_id: requestId }),
+    });
+    const data = await res.json() as { redirectTo: string; error?: string };
+    if (!res.ok) throw new Error(data.error || "Failed to deny authorization");
+    return data;
+  },
+};
+
 // ── Profile API ──────────────────────────────────
 
 export interface ProfilePrivacy {
