@@ -20,6 +20,8 @@ Cernere が実際に読む環境変数の正本テーブル。各キーは下記
 | `LISTEN_PORT` | `8080` | config.ts / compose | HTTP/WS listen ポート (※ `LISTEN_ADDR` は読まれない) |
 | `FRONTEND_URL` | `http://localhost:5173` | config.ts | CORS origin + `isHttps` 判定 + WebAuthn 既定 RP/origin |
 | `JWT_SECRET` | 起動毎ランダム生成 (dev、warn) | config.ts | HS256 署名鍵 (user/project/tool/MFA token) (prod 必須) |
+| `CERNERE_PUBLIC_URL` | `http://localhost:<LISTEN_PORT>` | config.ts | 外部到達 URL。 OIDC エンドポイント/issuer の基準 (proxy 配下は公開ホストを指定) |
+| `CERNERE_OIDC_ISSUER` | `CERNERE_PUBLIC_URL` | config.ts | OIDC discovery の `issuer` / id_token の `iss` |
 | `CERNERE_ENV` / `APP_ENV` / `NODE_ENV` | `""` (=development) | config.ts / ws/handler.ts | `production`/`prod` で本番モード |
 
 ## 環境判定の補足
@@ -47,6 +49,15 @@ Cernere が実際に読む環境変数の正本テーブル。各キーは下記
 | `CERNERE_PASETO_PREVIOUS_PUBLIC_KEYS` | (なし) | `kid:base64,...` ローテーション中の旧公開鍵 (検証専用) |
 
 詳細・罠は [paseto-keys.md](paseto-keys.md)。`_SECRET_KEY` と `_PUBLIC_KEY` 両方揃って有効化。
+
+## OIDC Provider id_token 署名 (auth/oidc-keys.ts)
+
+| キー | 既定 | 用途 |
+|---|---|---|
+| `CERNERE_OIDC_PRIVATE_KEY` | (未設定: dev=ephemeral 生成 / prod=OIDC 無効) | RSA PKCS8 PEM (raw or base64)。 id_token (RS256) 署名鍵 |
+| `CERNERE_OIDC_KID` | `oidc-1` | JWKS の key id |
+
+PASETO (project-token、 Ed25519) とは別の鍵・別用途 (外部 RP に配る id_token 専用)。詳細は [oidc-provider.md](oidc-provider.md)。
 
 ## MFA / AWS (config.ts)
 

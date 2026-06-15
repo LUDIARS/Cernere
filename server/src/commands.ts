@@ -94,6 +94,7 @@ async function execute(
     case "user": return userCmd(userId, action, payload);
     case "profile": return profileCmd(userId, action, payload);
     case "managed_project": return managedProjectCmd(userId, action, payload);
+    case "oidc_client": return oidcClientCmd(userId, action, payload);
     default:
       throw AppError.badRequest(`Unknown module: ${module}`);
   }
@@ -516,6 +517,31 @@ async function managedProjectCmd(userId: string, action: string, p?: Record<stri
       return svc.getProjectConnectionDetail(requireStr(p, "projectKey"));
     default:
       throw AppError.badRequest(`Unknown managed_project action: ${action}`);
+  }
+}
+
+// -- OIDC Client (IdP として登録する RP の管理、 admin 専用) --
+
+async function oidcClientCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
+  await requireSystemAdmin(userId);
+  const svc = await import("./oidc/clients.js");
+
+  switch (action) {
+    case "list":
+      return svc.listClients();
+    case "register":
+      // 戻り値に平文 client_secret を 1 度だけ含む (再取得不可)。
+      return svc.registerClient(p, userId);
+    case "rotate_secret":
+      return svc.rotateSecret(requireStr(p, "clientId"));
+    case "update_redirect_uris":
+      return svc.updateRedirectUris(requireStr(p, "clientId"), p?.redirectUris ?? p?.redirect_uris);
+    case "enable":
+      return svc.setActive(requireStr(p, "clientId"), true);
+    case "disable":
+      return svc.setActive(requireStr(p, "clientId"), false);
+    default:
+      throw AppError.badRequest(`Unknown oidc_client action: ${action}`);
   }
 }
 

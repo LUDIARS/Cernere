@@ -8,6 +8,7 @@ import { DataOptOutPage } from "./pages/DataOptOutPage";
 import { OrganizationsPage } from "./pages/OrganizationsPage";
 import { CompositeLoginPage } from "./pages/composite/CompositeLoginPage";
 import { CompositeCallbackPage } from "./pages/composite/CompositeCallbackPage";
+import { OidcConsentPage } from "./pages/oidc/OidcConsentPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -38,6 +39,9 @@ function AppRoutes() {
       {/* Composite: 他サービス組み込み用 (アプリシェルなし) */}
       <Route path="/composite/login" element={<CompositeLoginPage />} />
       <Route path="/composite/callback" element={<CompositeCallbackPage />} />
+
+      {/* OIDC: 認可同意 (Cernere を IdP とする RP の consent) */}
+      <Route path="/oidc/consent" element={<OidcConsentPage />} />
 
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
       {/* 認証済みページは AppLayout 内で描画 — WS 接続を維持 */}
