@@ -95,6 +95,7 @@ async function execute(
     case "profile": return profileCmd(userId, action, payload);
     case "managed_project": return managedProjectCmd(userId, action, payload);
     case "oidc_client": return oidcClientCmd(userId, action, payload);
+    case "oidc_keys": return oidcKeysCmd(userId, action, payload);
     default:
       throw AppError.badRequest(`Unknown module: ${module}`);
   }
@@ -542,6 +543,22 @@ async function oidcClientCmd(userId: string, action: string, p?: Record<string, 
       return svc.setActive(requireStr(p, "clientId"), false);
     default:
       throw AppError.badRequest(`Unknown oidc_client action: ${action}`);
+  }
+}
+
+// -- OIDC 署名鍵 (JWKS) の状態参照、 admin 専用 --
+// 鍵そのものは env / Infisical で管理する (ローテーション手順は spec/setup/oidc-provider.md)。
+// ここでは admin GUI が現行 kid / 公開中の旧 kid を可視化するための読み取りのみ提供する。
+
+async function oidcKeysCmd(userId: string, action: string, _p?: Record<string, unknown>): Promise<unknown> {
+  await requireSystemAdmin(userId);
+  const { getOidcKeyStatus } = await import("./auth/oidc-keys.js");
+
+  switch (action) {
+    case "status":
+      return getOidcKeyStatus();
+    default:
+      throw AppError.badRequest(`Unknown oidc_keys action: ${action}`);
   }
 }
 
