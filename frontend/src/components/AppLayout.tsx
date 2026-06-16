@@ -7,12 +7,16 @@ const navItems = [
   { path: "/organizations", label: "Organizations" },
   { path: "/profile", label: "Profile" },
   { path: "/data-optout", label: "Data" },
+  { path: "/oidc-clients", label: "OIDC", adminOnly: true },
 ];
 
 export function AppLayout() {
   const { user, wsConnected, logout } = useAuth();
   const location = useLocation();
   const isMobile = useIsMobile();
+
+  const isAdmin = user?.role === "admin";
+  const visibleNavItems = navItems.filter((item) => !item.adminOnly || isAdmin);
 
   const statusBadge = (
     <span style={{
@@ -42,7 +46,7 @@ export function AppLayout() {
       display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.8rem",
       flexWrap: "wrap",
     }}>
-      {navItems.map((item) => (
+      {visibleNavItems.map((item) => (
         <Link
           key={item.path}
           to={item.path}
