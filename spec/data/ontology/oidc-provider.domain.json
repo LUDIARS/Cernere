@@ -1,0 +1,21 @@
+{
+  "name": "oidc-provider",
+  "description": "Cernere を IdP とする OpenID Connect プロバイダ。認可コード発行、トークン交換、approve/deny、userinfo、外部 RP 向けエンドポイントと OIDC クライアント管理。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)server/src/oidc/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)server/tests/oidc/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/pages/admin/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/pages/oidc/[^/]+$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"oidc-provider\" domain: Cernere を IdP とする OpenID Connect プロバイダ。認可コード発行、トークン交換、approve/deny、userinfo、外部 RP 向けエンドポイントと OIDC クライアント管理。"
+}

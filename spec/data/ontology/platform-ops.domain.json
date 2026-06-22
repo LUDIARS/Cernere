@@ -1,0 +1,27 @@
+{
+  "name": "platform-ops",
+  "description": "運用基盤。Infisical シークレット管理 CLI、環境設定、操作監査ログ (operation_logs)、認証イベント記録など、プラットフォームの設定・秘密・可観測性を担う。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)packages/env-cli/src/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)server/src/logging/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)packages/id-service/src/migration/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)server/src/lib/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)scripts/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)server/scripts/[^/]+$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"platform-ops\" domain: 運用基盤。Infisical シークレット管理 CLI、環境設定、操作監査ログ (operation_logs)、認証イベント記録など、プラットフォームの設定・秘密・可観測性を担う。"
+}

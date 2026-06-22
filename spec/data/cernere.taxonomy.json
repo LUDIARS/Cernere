@@ -1,0 +1,242 @@
+{
+  "version": 1,
+  "project": "cernere",
+  "iterations": 2,
+  "domains": [
+    {
+      "name": "authentication",
+      "description": "ユーザ認証の中核。JWT/リフレッシュトークン発行、OAuth (GitHub/Google)、パスワード (bcrypt)、MFA (TOTP/SMS/Email)、パスキー、デバイス検証を扱う多層防御の認証基盤。",
+      "modules": [
+        {
+          "name": "auth-routes",
+          "description": "ログイン・パスキー・認証 HTTP ルート (server/src/http)",
+          "paths": [
+            "(^|/)server/src/http/[^/]+$"
+          ]
+        },
+        {
+          "name": "auth-core",
+          "description": "トークン発行・検証、チャレンジ、デバイス/Bearer 抽出 (server/src/auth)",
+          "paths": [
+            "(^|/)server/src/auth/[^/]+$",
+            "(^|/)server/tests/auth/[^/]+$"
+          ]
+        },
+        {
+          "name": "crypto",
+          "description": "シークレット暗号化と鍵解決 (server/src/lib/crypto)",
+          "paths": [
+            "(^|/)server/tests/lib/crypto/[^/]+$",
+            "(^|/)server/src/lib/crypto/[^/]+$"
+          ]
+        },
+        {
+          "name": "service-adapter",
+          "description": "Service-to-service auth adapter: middleware and token verification (createServiceAuthMiddleware, verifyServiceToken, connect) plus its test suite.",
+          "paths": [
+            "(^|/)packages/service-adapter/src/[^/]+$",
+            "(^|/)packages/service-adapter/tests/[^/]+$"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "session-relay",
+      "description": "常時接続セッションとリアルタイムメッセージリレー。WebSocket 接続確立・ping/pong 生存検証・SessionExpired 遷移、ゲスト/複合認証ハンドリング、同一ユーザ間リレー、Redis セッション TTL 管理。",
+      "modules": [
+        {
+          "name": "session-store",
+          "description": "Redis セッション・コマンド実行・アプリ配線 (server/src)",
+          "paths": [
+            "(^|/)server/src/[^/]+$"
+          ]
+        },
+        {
+          "name": "ws-dispatch",
+          "description": "WS メッセージ/コマンドディスパッチ、デバイス・検証ハンドラ (server/src/ws)",
+          "paths": [
+            "(^|/)server/src/ws/[^/]+$"
+          ]
+        },
+        {
+          "name": "composite-auth",
+          "description": "複合ログインとフィンガープリント収集 (packages/composite, frontend/src/pages/composite)",
+          "paths": [
+            "(^|/)frontend/src/pages/composite/[^/]+$",
+            "(^|/)packages/composite/src/ui/[^/]+$",
+            "(^|/)packages/composite/src/[^/]+$"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "web-frontend",
+      "description": "React 19 / React Router 7 ベースの管理 UI。ログイン・ダッシュボード・組織/チーム管理・データオプトアウト画面と、トークン保持・WS クエリ・認証コンテキストのクライアントライブラリ。",
+      "modules": [
+        {
+          "name": "pages",
+          "description": "ログイン・ダッシュボード・組織・オプトアウト各画面 (frontend/src/pages)",
+          "paths": [
+            "(^|/)frontend/src/pages/[^/]+$"
+          ]
+        },
+        {
+          "name": "client-lib",
+          "description": "リクエスト・トークン保持・リフレッシュ・WS フック (frontend/src/lib, hooks)",
+          "paths": [
+            "(^|/)frontend/src/lib/[^/]+$",
+            "(^|/)frontend/src/hooks/[^/]+$"
+          ]
+        },
+        {
+          "name": "auth-context",
+          "description": "認証プロバイダと useAuth・ルートガード (frontend/src/contexts)",
+          "paths": [
+            "(^|/)frontend/src/contexts/[^/]+$"
+          ]
+        },
+        {
+          "name": "frontend-app",
+          "description": "React frontend shell: routing, auth gating, and layout (App, AppRoutes, RequireAuth, AppLayout).",
+          "paths": [
+            "(^|/)frontend/src/[^/]+$",
+            "(^|/)frontend/src/components/[^/]+$"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "oidc-provider",
+      "description": "Cernere を IdP とする OpenID Connect プロバイダ。認可コード発行、トークン交換、approve/deny、userinfo、外部 RP 向けエンドポイントと OIDC クライアント管理。",
+      "modules": [
+        {
+          "name": "oidc-flow",
+          "description": "認可生成・トークン交換・承認/拒否・userinfo (server/src/oidc)",
+          "paths": [
+            "(^|/)server/src/oidc/[^/]+$",
+            "(^|/)server/tests/oidc/[^/]+$"
+          ]
+        },
+        {
+          "name": "oidc-admin-ui",
+          "description": "OIDC クライアント登録・同意画面 (frontend/src/pages/admin, oidc)",
+          "paths": [
+            "(^|/)frontend/src/pages/admin/[^/]+$",
+            "(^|/)frontend/src/pages/oidc/[^/]+$"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "platform-ops",
+      "description": "運用基盤。Infisical シークレット管理 CLI、環境設定、操作監査ログ (operation_logs)、認証イベント記録など、プラットフォームの設定・秘密・可観測性を担う。",
+      "modules": [
+        {
+          "name": "env-cli",
+          "description": "Infisical シークレット管理 CLI コマンド (packages/env-cli)",
+          "paths": [
+            "(^|/)packages/env-cli/src/[^/]+$"
+          ]
+        },
+        {
+          "name": "audit-logging",
+          "description": "認証イベント・ユーザログイン・操作ログ記録 (server/src/logging)",
+          "paths": [
+            "(^|/)server/src/logging/[^/]+$"
+          ]
+        },
+        {
+          "name": "id-service-migration",
+          "description": "id-service migration and config tooling (scan, generateConfig, printConfig) run as a standalone CLI.",
+          "paths": [
+            "(^|/)packages/id-service/src/migration/[^/]+$"
+          ]
+        },
+        {
+          "name": "ops-tooling",
+          "description": "Server bootstrap and repo-level scripts: environment validation (ensureEnv) and maintenance script entrypoints.",
+          "paths": [
+            "(^|/)server/src/lib/[^/]+$",
+            "(^|/)scripts/[^/]+$",
+            "(^|/)server/scripts/[^/]+$"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "project-data",
+      "description": "プロジェクトの永続化と管理。ユーザ×プロジェクトの行確保、ユーザデータ設定、ピア要求、スキーマ migration、プロジェクト概要一覧などのデータリレー対象資源を扱う。",
+      "modules": [
+        {
+          "name": "project-store",
+          "description": "ユーザデータ・ピア要求・スキーマ移行・概要一覧 (server/src/project)",
+          "paths": [
+            "(^|/)server/src/project/[^/]+$"
+          ]
+        },
+        {
+          "name": "db-migrations",
+          "description": "Drizzle スキーマと SQL マイグレーション実行 (server/src/db)",
+          "paths": [
+            "(^|/)server/src/db/[^/]+$"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "identity-sdk",
+      "description": "汎用 Identity Service SDK 群。外部サービス向けの認証ルート・トークン生成・キャッシュ・WebSocket 認証アダプタ・プラグイン/プロフィールリポジトリを提供する再利用可能パッケージ。",
+      "modules": [
+        {
+          "name": "id-service",
+          "description": "認証ルート・トークン生成・プラグイン・移行 (packages/id-service)",
+          "paths": [
+            "(^|/)packages/id-service/src/core/[^/]+$"
+          ]
+        },
+        {
+          "name": "service-adapter",
+          "description": "外部サービス用 WS 認証ミドルウェア・ピアエンベロープ (packages/service-adapter)",
+          "paths": [
+            "(^|/)packages/service-adapter/src/peer/[^/]+$",
+            "(^|/)packages/service-adapter/src/testing/[^/]+$"
+          ]
+        },
+        {
+          "name": "id-cache",
+          "description": "Id Service 用ユーザキャッシュと退避 (packages/id-cache)",
+          "paths": [
+            "(^|/)packages/id-cache/src/[^/]+$"
+          ]
+        },
+        {
+          "name": "id-service-plugin",
+          "description": "id-service plugin surface that wires profile/opt-out repositories and exposes register/get/list operations.",
+          "paths": [
+            "(^|/)packages/id-service/src/plugin/[^/]+$"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "demo",
+      "description": "Standalone demo application: routes, in-memory ext-data store, and response/DTO models demonstrating the identity and ext-data flows.",
+      "modules": [
+        {
+          "name": "demo-app",
+          "description": "Standalone demo application: routes, in-memory ext-data store, and response/DTO models demonstrating the identity and ext-data flows.",
+          "paths": [
+            "(^|/)demo/src/[^/]+$",
+            "(^|/)demo/src/routes/[^/]+$",
+            "(^|/)demo/src/store/[^/]+$",
+            "(^|/)demo/src/models/[^/]+$"
+          ]
+        }
+      ]
+    }
+  ],
+  "unassigned": {
+    "count": 0,
+    "sample": []
+  }
+}

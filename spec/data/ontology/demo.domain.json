@@ -1,0 +1,21 @@
+{
+  "name": "demo",
+  "description": "Standalone demo application: routes, in-memory ext-data store, and response/DTO models demonstrating the identity and ext-data flows.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)demo/src/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)demo/src/routes/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)demo/src/store/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)demo/src/models/[^/]+$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"demo\" domain: Standalone demo application: routes, in-memory ext-data store, and response/DTO models demonstrating the identity and ext-data flows."
+}
