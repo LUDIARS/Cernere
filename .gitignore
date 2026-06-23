@@ -8,6 +8,7 @@ dist
 *.tsbuildinfo
 logs/
 *.log
+.anatomia/
 .claude/
 *.stackdump
 **/.pnpm-store/

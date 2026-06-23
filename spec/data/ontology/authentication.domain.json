@@ -1,0 +1,30 @@
+{
+  "name": "authentication",
+  "description": "ユーザ認証の中核。JWT/リフレッシュトークン発行、OAuth (GitHub/Google)、パスワード (bcrypt)、MFA (TOTP/SMS/Email)、パスキー、デバイス検証を扱う多層防御の認証基盤。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)server/src/http/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)server/src/auth/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)server/tests/auth/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)server/tests/lib/crypto/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)server/src/lib/crypto/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)packages/service-adapter/src/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)packages/service-adapter/tests/[^/]+$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"authentication\" domain: ユーザ認証の中核。JWT/リフレッシュトークン発行、OAuth (GitHub/Google)、パスワード (bcrypt)、MFA (TOTP/SMS/Email)、パスキー、デバイス検証を扱う多層防御の認証基盤。"
+}
