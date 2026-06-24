@@ -36,7 +36,21 @@ CREATE INDEX idx_oauth_tokens_project_provider
 ```
 
 - `(project_key, user_id, provider)` でユニーク (1 ユーザ × 1 プロバイダ × 1 プロジェクトに 1 トークン)
-- 削除は user CASCADE のみ。明示的な `delete_oauth_token` も提供
+- 削除は次の 3 経路:
+  1. user 行削除時の `ON DELETE CASCADE` (アカウント削除 = `user.delete_account`)
+  2. モジュール opt-out (`managed_project.optout`) 時に該当 user × project の全トークンを削除
+  3. 明示的な `delete_oauth_token`
+
+## 保存時暗号化 (encryption at rest)
+
+`access_token` / `refresh_token` は最重要機微列なので、`users.google_*` と同一規律で
+**保存時に暗号化する** (RULE.md §7.2)。
+
+- 書込/読出は必ず `server/src/project/oauth-token-crypto.ts` の `encryptToken()` /
+  `decryptToken()` (= `encryptSecret()` / `decryptSecret()`, AES-256-GCM) を経由する。
+- 鍵 (`CERNERE_SECRET_KEY`) 未設定時は書込が throw する (fail-closed、平文フォールバック無し)。
+- 暗号化導入前に平文で書かれた既存行は lazy 移行: read 時は移行シムで平文のまま返り、
+  次回 UPSERT で必ず暗号化形式 (`v1:...`) へ書き直される。
 
 ## WS API
 
@@ -138,7 +152,9 @@ sequenceDiagram
 
 - ❌ サービス側 DB に access/refresh token を保存する
 - ❌ token を JS でフロントに渡してからリクエストする (XSS で漏洩する)
-- ❌ token を ログに出力する (`console.log(token)` 等)
+- ❌ token を ログに出力する (`console.log(token)` 等)。`operation_logs` への記録時も
+  キー名ベースで `[REDACTED]` にマスクされる (`server/src/lib/redact.ts`)
+- ❌ token を**平文で DB に保存する** (必ず `encryptToken()` 経由。上記「保存時暗号化」参照)
 - ❌ provider 文字列を payload で揺らす ("google" / "Google" / "google-oauth" 等が混在しないよう統一)
 
 ## サービス側ヘルパー (推奨)

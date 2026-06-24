@@ -16,7 +16,7 @@
  */
 
 import { randomUUID, randomBytes } from "node:crypto";
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, or, inArray } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 
@@ -104,6 +104,44 @@ async function isPairAllowed(fromKey: string, toKey: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+// ─── User Opt-out Gate ────────────────────────────────────────
+
+/**
+ * relay はプロジェクト対 (project ↔ project) の許可だが、relay 経路で流れるのは
+ * 個々のユーザのデータである。あるユーザが端点プロジェクトの一方からデータ提供を
+ * opt-out している場合、そのユーザのデータを relay で流してはならない
+ * (個人データ単一情報源 / right to be forgotten)。
+ *
+ * 純粋判定: ユーザの opt-out 済み serviceId 集合に relay 端点のいずれかが
+ * 含まれていれば relay を拒否する (安全側)。
+ */
+export function isRelayBlockedByOptout(
+  optedOutServiceIds: ReadonlySet<string>,
+  fromKey: string,
+  toKey: string,
+): boolean {
+  return optedOutServiceIds.has(fromKey) || optedOutServiceIds.has(toKey);
+}
+
+/** 指定ユーザが relay 端点いずれかを opt-out しているか DB で確認. */
+async function userOptedOutOfRelay(
+  userId: string,
+  fromKey: string,
+  toKey: string,
+): Promise<boolean> {
+  const rows = await db
+    .select({ serviceId: schema.userDataOptouts.serviceId })
+    .from(schema.userDataOptouts)
+    .where(
+      and(
+        eq(schema.userDataOptouts.userId, userId),
+        inArray(schema.userDataOptouts.serviceId, [fromKey, toKey]),
+      ),
+    );
+  const ids = new Set(rows.map((r) => r.serviceId));
+  return isRelayBlockedByOptout(ids, fromKey, toKey);
+}
+
 // ─── Public API (WS コマンドから呼ばれる) ────────────────────
 
 export interface RequestPeerResult {
@@ -112,15 +150,28 @@ export interface RequestPeerResult {
   expiresAt:  number; // Unix ms
 }
 
-/** A から B への呼び出し準備. 成功時は challenge と B の SA URL を返す. */
+/**
+ * A から B への呼び出し準備. 成功時は challenge と B の SA URL を返す.
+ *
+ * `userId` が渡された場合 (= relay 経路で特定ユーザのデータを扱う呼び出し)、
+ * そのユーザが端点プロジェクトのいずれかを opt-out していれば relay を拒否する.
+ * 省略時は従来通りプロジェクト対の許可のみで判定する (後方互換).
+ */
 export async function requestPeer(
   issuerKey: string,
   targetKey: string,
+  userId?: string,
 ): Promise<RequestPeerResult> {
   if (!(await isPairAllowed(issuerKey, targetKey))) {
     throw new RelayError(
       "pair_not_allowed",
       `relay pair ${issuerKey} → ${targetKey} is not registered or inactive`,
+    );
+  }
+  if (userId && (await userOptedOutOfRelay(userId, issuerKey, targetKey))) {
+    throw new RelayError(
+      "user_opted_out",
+      `user ${userId} has opted out of data sharing with one of ${issuerKey}/${targetKey}`,
     );
   }
   const saWsUrl = endpoints.get(targetKey);

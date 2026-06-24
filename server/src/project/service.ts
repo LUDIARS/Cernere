@@ -14,6 +14,7 @@ import { config } from "../config.js";
 import { AppError } from "../error.js";
 import { projectDefinitionSchema, type ProjectDefinition } from "./schema.js";
 import { migrateProjectSchema } from "./schema-migrator.js";
+import { encryptToken, decryptToken } from "./oauth-token-crypto.js";
 import * as cache from "./user-data-cache.js";
 import { getAllProjectStatus, getProjectConnections, getProjectStatus } from "../ws/project-registry.js";
 
@@ -405,8 +406,59 @@ export async function setModuleOptout(userId: string, projectKey: string, module
     }
   }
 
+  // 3. opt-out したプロジェクトに預けてある OAuth トークンを失効・削除する。
+  //    「個人データ単一情報源 → 一カ所削除で全失効」(oauth-token-storage.md:7-9) を
+  //    成立させる中核。これが無いと opt-out 後もサービスは get_oauth_token で
+  //    トークンを取得し続けられてしまう。
+  await db.delete(dbSchema.projectOauthTokens).where(and(
+    eq(dbSchema.projectOauthTokens.projectKey, projectKey),
+    eq(dbSchema.projectOauthTokens.userId, userId),
+  ));
+
   await cache.invalidate(userId, projectKey);
   return { message: "Opted out", projectKey, moduleKey, deletedColumns: moduleCols };
+}
+
+/**
+ * アカウント削除 (right to be forgotten)。指定ユーザの個人データを Cernere から
+ * 完全消去する。users 行を削除すると FK ON DELETE CASCADE により以下が連鎖削除される:
+ *   refresh_sessions / verification_codes / trusted_devices / passkeys /
+ *   organization_members / tool_clients / user_profiles / projects /
+ *   service_tickets / user_data_optouts / project_oauth_tokens /
+ *   project_data_<key> (各動的テーブルも user_id ON DELETE CASCADE)。
+ *
+ * CASCADE を持たない参照は削除をブロックするため明示的に先処理する:
+ *   - operation_logs.user_id (no action) → 監査ログごと purge (個人データ/トークン
+ *     混入を残さない。FLOW-L1 対応)。
+ *   - definition_history.applied_by (nullable, no action) → NULL 化 (admin 操作履歴
+ *     はユーザ個人データではないため記録自体は残す)。
+ *
+ * 注: organizations.created_by は NOT NULL かつ CASCADE 無し。org 作成は system admin
+ * 専用操作なので一般ユーザ削除では発火しない。admin が org 作成者のまま自己削除を
+ * 試みた場合は FK 制約で fail-closed (無言で部分削除しない)。
+ */
+export async function deleteUserAccount(
+  userId: string,
+): Promise<{ ok: true; userId: string }> {
+  const userRows = await db.select({ id: dbSchema.users.id })
+    .from(dbSchema.users).where(eq(dbSchema.users.id, userId)).limit(1);
+  if (userRows.length === 0) {
+    throw AppError.notFound("User not found");
+  }
+
+  await db.transaction(async (tx) => {
+    // 監査ログを purge (token/PII が params に残らないよう、かつ FK ブロック解消)。
+    await tx.delete(dbSchema.operationLogs)
+      .where(eq(dbSchema.operationLogs.userId, userId));
+    // admin 操作履歴の作成者参照を外す (履歴自体は保持)。
+    await tx.update(dbSchema.projectDefinitionHistory)
+      .set({ appliedBy: null })
+      .where(eq(dbSchema.projectDefinitionHistory.appliedBy, userId));
+    // users 削除で残りは CASCADE 連鎖。
+    await tx.delete(dbSchema.users).where(eq(dbSchema.users.id, userId));
+  });
+
+  return { ok: true, userId };
 }
 
 export async function removeModuleOptout(userId: string, projectKey: string, moduleKey: string) {
@@ -864,8 +916,14 @@ export async function storeOAuthToken(
   if (existing.length > 0) {
     await db.update(dbSchema.projectOauthTokens)
       .set({
-        accessToken: input.accessToken ?? existing[0].accessToken,
-        refreshToken: input.refreshToken ?? existing[0].refreshToken,
+        // 新しい平文が来たときだけ暗号化して上書き。来なければ保存済み (暗号化済 or
+        // 移行前平文) の値をそのまま保持する — 既存値を二重暗号化しない。
+        accessToken: input.accessToken != null
+          ? encryptToken(input.accessToken)
+          : existing[0].accessToken,
+        refreshToken: input.refreshToken != null
+          ? encryptToken(input.refreshToken)
+          : existing[0].refreshToken,
         expiresAt: expiresAt ?? existing[0].expiresAt,
         tokenType: input.tokenType ?? existing[0].tokenType,
         scope: input.scope ?? existing[0].scope,
@@ -878,8 +936,8 @@ export async function storeOAuthToken(
       projectKey,
       userId,
       provider: input.provider,
-      accessToken: input.accessToken ?? null,
-      refreshToken: input.refreshToken ?? null,
+      accessToken: encryptToken(input.accessToken),
+      refreshToken: encryptToken(input.refreshToken),
       expiresAt,
       tokenType: input.tokenType ?? null,
       scope: input.scope ?? null,
@@ -911,8 +969,8 @@ export async function getOAuthToken(
   const r = rows[0];
   return {
     provider: r.provider,
-    accessToken: r.accessToken,
-    refreshToken: r.refreshToken,
+    accessToken: decryptToken(r.accessToken),
+    refreshToken: decryptToken(r.refreshToken),
     expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null,
     tokenType: r.tokenType,
     scope: r.scope,
@@ -935,8 +993,8 @@ export async function listOAuthTokens(
 
   return rows.map((r) => ({
     provider: r.provider,
-    accessToken: r.accessToken,
-    refreshToken: r.refreshToken,
+    accessToken: decryptToken(r.accessToken),
+    refreshToken: decryptToken(r.refreshToken),
     expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null,
     tokenType: r.tokenType,
     scope: r.scope,
