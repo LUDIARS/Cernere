@@ -357,6 +357,9 @@ export const projectOauthTokens = pgTable("project_oauth_tokens", {
   projectKey: text("project_key").notNull(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   provider: text("provider").notNull(),
+  // 機密トークンは保存時に暗号化する (RULE.md §7.2)。書込/読出は必ず
+  // project/oauth-token-crypto.ts (encryptToken/decryptToken = encryptSecret 規律) を
+  // 経由すること。users.google_access_token/google_refresh_token と同一規律。
   accessToken: text("access_token"),
   refreshToken: text("refresh_token"),
   expiresAt: timestamp("expires_at", { withTimezone: true }),

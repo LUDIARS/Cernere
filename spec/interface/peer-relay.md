@@ -70,7 +70,7 @@ sequenceDiagram
 | `managed_project.verify_token` | A の project token を B が遠隔検証 |
 | `managed_relay.register_endpoint` | 自 SA WS URL を Cernere registry に登録 |
 | `managed_relay.unregister_endpoint` | 登録解除 |
-| `managed_relay.request_peer` | B の SA WS URL + challenge を取得 (relay_pair 検査) |
+| `managed_relay.request_peer` | B の SA WS URL + challenge を取得 (relay_pair 検査 + user opt-out 検査) |
 | `managed_relay.verify_challenge` | B が受け取った challenge を検証する |
 
 ### relay_pairs テーブル
@@ -89,6 +89,22 @@ CREATE UNIQUE INDEX uq_relay_pairs_from_to ON relay_pairs (from_project_key, to_
 ```
 
 `bidirectional=TRUE` なら A→B と B→A どちらも開通。FALSE なら from→to のみ。
+
+### user opt-out の反映 (個人データ単一情報源)
+
+relay 許可はプロジェクト対だが、relay 経路で流れるのは個々のユーザのデータである。
+`request_peer` は任意で `userId` を受け取れる。**特定ユーザのデータを relay で扱う呼び出しでは
+そのユーザの `userId` を渡すこと。** Cernere は `user_data_optouts` を参照し、そのユーザが端点
+プロジェクト (issuer / target いずれか) を opt-out していれば relay を拒否する
+(`RelayError("user_opted_out")`)。
+
+```json
+{ "module":"managed_relay", "action":"request_peer",
+  "payload": { "target":"projB", "userId":"<uuid>" } }
+```
+
+`userId` 省略時は従来通りプロジェクト対の許可のみで判定する (後方互換)。opt-out / アカウント削除で
+ユーザのデータが下流に流れ続けないための control-plane ゲート。
 
 ## 認証 / 認可の 3 層
 
