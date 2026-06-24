@@ -11,8 +11,12 @@ import postgres from "postgres";
 import { config } from "../config.js";
 import type { ProjectDefinition } from "./schema.js";
 import { COLUMN_TYPE_MAP } from "./schema.js";
+import { assertSafeIdentifier } from "./identifier.js";
 
 function tableNameFor(projectKey: string): string {
+  // projectKey は DDL の識別子 (`project_data_<key>`) に補間されるため、 ここで
+  // 境界検証する。 不正なキーは無言で通さず即 throw (RULE §7.1)。
+  assertSafeIdentifier(projectKey, "projectKey");
   return `project_data_${projectKey}`;
 }
 
@@ -27,6 +31,13 @@ export async function migrateProjectSchema(
   const sql = postgres(config.databaseUrl, { max: 1 });
   const tableName = tableNameFor(projectKey);
   const columns = definition.user_data?.columns ?? {};
+
+  // 列名は DDL に `"${colName}"` で補間される。 `"` 等を含む不正な識別子は
+  // クォートを抜けて DDL injection になりうるため、 補間前にまとめて検証する。
+  // 論理削除カラムも将来再有効化されうるので含めて検証する。
+  for (const colName of Object.keys(columns)) {
+    assertSafeIdentifier(colName, "column");
+  }
 
   try {
     // CREATE TABLE IF NOT EXISTS — 冪等

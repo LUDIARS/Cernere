@@ -5,8 +5,6 @@ import {
   verifyToken,
   generateProjectToken,
   verifyProjectToken,
-  generateUserProjectToken,
-  verifyUserProjectToken,
   extractBearerToken,
 } from "../../src/auth/jwt";
 
@@ -58,42 +56,11 @@ describe("auth/jwt — project token (HS256)", () => {
     const access = generateAccessToken("user-1", "general");
     expect(() => verifyProjectToken(access)).toThrow(/Not a project token/);
   });
-
-  it("rejects a user_for_project token as a project token", () => {
-    const up = generateUserProjectToken("user-1", "memoria", "general");
-    expect(() => verifyProjectToken(up)).toThrow(/Not a project token/);
-  });
 });
 
-describe("auth/jwt — user_for_project token", () => {
-  it("round-trips userId + projectKey + role with kind=user_for_project", () => {
-    const token = generateUserProjectToken("user-7", "memoria", "admin");
-    const claims = verifyUserProjectToken(token);
-    expect(claims.sub).toBe("user-7");
-    expect(claims.projectKey).toBe("memoria");
-    expect(claims.role).toBe("admin");
-    expect(claims.kind).toBe("user_for_project");
-  });
-
-  it("rejects a plain access token (missing kind claim)", () => {
-    const access = generateAccessToken("user-1", "general");
-    expect(() => verifyUserProjectToken(access)).toThrow(/Not a user_for_project token/);
-  });
-
-  it("rejects a project token as a user_for_project token", () => {
-    const proj = generateProjectToken("client-9", "memoria");
-    expect(() => verifyUserProjectToken(proj)).toThrow(/Not a user_for_project token/);
-  });
-
-  it("rejects a forged user_for_project token (wrong secret)", () => {
-    const forged = jwt.sign(
-      { sub: "attacker", projectKey: "memoria", role: "admin", kind: "user_for_project" },
-      "some-other-secret",
-      { algorithm: "HS256" },
-    );
-    expect(() => verifyUserProjectToken(forged)).toThrow(/Invalid or expired user_for_project token/);
-  });
-});
+// NOTE: HS256 版の user×project token (旧 generateUserProjectToken /
+// verifyUserProjectToken) は撤去した。 user×project token は PASETO Ed25519
+// (aud 必須) に一本化したため、 検証は auth/paseto.test.ts を参照。
 
 describe("auth/jwt — extractBearerToken", () => {
   it("extracts the token after 'Bearer '", () => {
