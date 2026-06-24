@@ -48,12 +48,15 @@ WS 上では `module_request` で `managed_project.*` / `managed_relay.*` / `aut
 POST /api/auth/project-token
   Authorization: Bearer <user accessToken>
   { "project_key":"memoria", "hub_url":"https://hub.example.com" }   # project_id でも可 (後方互換)
-→ { "tokenType":"user_for_project", "accessToken":..., "expiresIn":..., "projectKey":..., "userId":..., "alg":"EdDSA"|"HS256" }
+→ { "tokenType":"user_for_project", "accessToken":..., "expiresIn":900, "projectKey":..., "userId":..., "displayName":..., "audience":..., "alg":"EdDSA" }
 ```
 
-- `hub_url` 指定 **かつ** PASETO 有効 → **Ed25519** (`alg:"EdDSA"`、`aud=hub_url`、TTL 15 分)。鍵設定は [paseto-keys.md](paseto-keys.md)。
-- `hub_url` 無し or PASETO 無効 → **HS256** フォールバック (TTL 3600 秒)。
+- 署名は **PASETO Ed25519 必須** (`alg:"EdDSA"`、`aud=hub_url`、TTL 15 分)。鍵設定は [paseto-keys.md](paseto-keys.md)。
+- **`hub_url` は必須**。`aud` を欠くと「service A 向け token を service B が受理する」横断偽造 (confused deputy) を許すため、未指定は `400` で拒否する (fail-closed)。
+- **HS256 フォールバックは撤去済み** (旧: `hub_url` 無し or PASETO 無効時にマスタ `JWT_SECRET` で署名・`aud` 無し)。マスタ署名鍵の leaf 横展開と `aud` 無し横断偽造を許すセキュリティ欠陥だったため。PASETO 鍵未設定のサーバでは本経路は `500` で拒否する (暗黙降格しない、RULE §7.1)。
 - レートリミット `project_user_token:<userId>:<projectKey>` 60/60s。`managed_projects` に `is_active=true` で存在しない `project_key` は拒否。
+
+> **注 (§2 との切り分け)**: サーバ自己認証の project token (§2、`grant_type=project_credentials` → `/ws/project`) は引き続き HS256 (`JWT_SECRET` 共有) を**正当に**使う。撤去したのは本 §3 の user×project フォールバックのみ。
 
 > **設計意図 — secret は per-user / memory-only**: 呼び出し元 (Memoria local backend 等) は**自分用の long-lived secret を持たない**。ログイン中ユーザの user JWT を借りて project ごとの短命トークンを都度発行し、**呼び出し元 process の memory のみ**に保持する (disk / Infisical に残さない、user/AI も値を見ない)。共有 long-lived な service_credential を配るのは NG。
 
@@ -81,8 +84,8 @@ POST /api/auth/project-token
 
 ## サービス側 (受け取る側) の検証
 
-- **PASETO project-token**: `/.well-known/cernere-public-key` から公開鍵を fetch (6h ごと等) してローカル検証。`aud` (= 自分の URL) と `kind="user_for_project"` を必ず照合する。
-- **HS256 token**: 当面は `JWT_SECRET` を共有してローカル HMAC 検証 (`@cernere/id-cache` 等、[../../docs/integration_guide.md](../../docs/integration_guide.md))。
+- **PASETO user×project token (§3)**: `/.well-known/cernere-public-key` から公開鍵を fetch (6h ごと等) してローカル検証。`aud` (= 自分の URL) と `kind="user_for_project"` を必ず照合する。署名鍵を共有しないので leaf 漏洩でも偽造能力は漏れない。
+- **HS256 project token (§2)**: サーバ自己認証の project token (`/ws/project`) は `JWT_SECRET` を共有してローカル HMAC 検証する経路が残る (`@cernere/id-cache` 等、[../../docs/integration_guide.md](../../docs/integration_guide.md))。これは §3 の user×project token とは別物。user×project token を HS256 で受ける旧経路は撤去済み。
 
 > Cernere は実質 `/auth` 系しか開かない。`/oauth/*` や `/ws/service` は**存在しない**。サービス WS は `/ws/project`、公開鍵は `/.well-known/cernere-public-key`。
 
@@ -91,7 +94,8 @@ POST /api/auth/project-token
 | 症状 | 原因 / 対処 |
 |---|---|
 | `project '<key>' not found or inactive` | `managed_projects` 未登録 or `is_active=false`。シード migration / DB を確認。 |
-| project-token が HS256 で返る (EdDSA を期待) | `hub_url` 未指定 or PASETO 鍵未設定。[paseto-keys.md](paseto-keys.md) で有効化し `hub_url` を渡す。 |
+| project-token が `400 hub_url is required` | §3 は `hub_url` 必須 (aud 用)。呼び出し元は参照先サービスの baseUrl を必ず渡す。 |
+| project-token が `500 ... PASETO keys not configured` | サーバに PASETO 鍵が未設定。[paseto-keys.md](paseto-keys.md) で `CERNERE_PASETO_SECRET_KEY`/`_PUBLIC_KEY` を設定する (HS256 へ暗黙降格はしない)。 |
 | WS `/ws/project` が 401 | project token が無効 / 期限切れ。`project_credentials` で再取得。 |
 | peer relay が `deny("not in accept list")` | 受け側 PeerAdapter の `accept` に呼び出し元 projectKey / command が無い。 |
 | OAuth コールバックで CSRF エラー | `state` と Cookie 不一致 / redirect URI 不一致。プロバイダ側設定と `*_REDIRECT_URI` を揃える。 |

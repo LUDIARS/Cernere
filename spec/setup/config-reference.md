@@ -43,7 +43,7 @@ Cernere が実際に読む環境変数の正本テーブル。各キーは下記
 
 | キー | 既定 | 用途 |
 |---|---|---|
-| `CERNERE_PASETO_SECRET_KEY` | (未設定=HS256 fallback) | base64 Ed25519 seed (32B) or seed‖public (64B)。署名鍵 |
+| `CERNERE_PASETO_SECRET_KEY` | (未設定=user×project token 不可) | base64 Ed25519 seed (32B) or seed‖public (64B)。署名鍵。未設定だと `/api/auth/project-token` は `500` (HS256 へ暗黙降格しない) |
 | `CERNERE_PASETO_PUBLIC_KEY` | (同上) | base64 raw 公開鍵 (32B)。検証・公開用 |
 | `CERNERE_PASETO_KID` | `v1` | 現行鍵の kid |
 | `CERNERE_PASETO_PREVIOUS_PUBLIC_KEYS` | (なし) | `kid:base64,...` ローテーション中の旧公開鍵 (検証専用) |
