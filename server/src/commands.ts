@@ -18,6 +18,7 @@ import * as schema from "./db/schema.js";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { AppError } from "./error.js";
 import { getUserState } from "./redis.js";
+import { redactSensitive } from "./lib/redact.js";
 
 /**
  * Layer 2-3 を要求しないコマンド (主に「現在ログイン中であることを必須としない」もの).
@@ -67,7 +68,8 @@ export async function dispatch(
         userId,
         sessionId,
         method,
-        params,
+        // 機密値 (token/secret/password 等) はキー名ベースでマスクしてから記録する。
+        params: redactSensitive(params),
         status,
         error: error ?? null,
       });
@@ -355,6 +357,16 @@ async function userCmd(userId: string, action: string, p?: Record<string, unknow
         expertise: privacy.expertise ? (profile?.expertise ?? []) : undefined,
         hobbies: privacy.hobbies ? (profile?.hobbies ?? []) : undefined,
       };
+    }
+    case "delete_account": {
+      // right to be forgotten — Cernere 一カ所で個人データを完全消去する。
+      // 既定は自分自身の削除。他ユーザを対象にする場合のみ system admin を要求。
+      const targetId = optStr(p, "userId") ?? userId;
+      if (targetId !== userId) {
+        await requireSystemAdmin(userId);
+      }
+      const svc = await import("./project/service.js");
+      return svc.deleteUserAccount(targetId);
     }
     default:
       throw AppError.badRequest(`Unknown user action: ${action}`);

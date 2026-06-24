@@ -163,7 +163,9 @@ export async function dispatchProjectCommand(
     case "managed_relay.request_peer": {
       const { requestPeer } = await import("../project/relay-service.js");
       const target = requireStr(payload, "target");
-      return await requestPeer(projectKey, target);
+      // userId 任意: 指定時はそのユーザの opt-out を relay 許可判定に反映する。
+      const userId = typeof payload.userId === "string" ? payload.userId : undefined;
+      return await requestPeer(projectKey, target, userId);
     }
     case "managed_relay.verify_challenge": {
       // 呼び出し元 (B) は自身の projectKey を WS セッションから提供し、
