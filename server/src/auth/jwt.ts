@@ -33,23 +33,6 @@ export interface ProjectJwtClaims {
   exp: number;
 }
 
-/**
- * 「あるユーザが、 ある project (Memoria Hub 等) を呼ぶための per-user 短命 token」
- * の claims。 `kind: "user_for_project"` で project_credentials 由来の service token と区別する。
- *
- * 既存の Memoria Hub authMiddleware は `payload.sub` を userId として読むので
- * `sub = userId` を維持する。 service 側で「このユーザが本当に許可された
- * project から来ているか」 を区別したい場合は claim `projectKey` を見る。
- */
-export interface UserProjectJwtClaims {
-  sub: string;          // userId
-  projectKey: string;
-  role: string;
-  kind: "user_for_project";
-  iat: number;
-  exp: number;
-}
-
 export function generateAccessToken(userId: string, role: string): string {
   return jwt.sign(
     { sub: userId, role },
@@ -87,41 +70,11 @@ export function generateProjectToken(clientId: string, projectKey: string): stri
 }
 
 /**
- * User × Project の per-call short-lived token を発行する。
- *
- * ・Memoria local backend が「ログイン中ユーザの代わりに Memoria Hub を叩く」
- *   ようなケースに使う。 service 側は HS256 共有鍵でローカル検証する想定。
- * ・disk / Infisical に長持ちする secret を残さない設計のための入口。
- *   発行された token は呼び出し元の process memory にのみ載せて使う。
+ * 注: 「ユーザ × project」 の per-call token (`kind: "user_for_project"`) は
+ * PASETO Ed25519 (aud 必須) に一本化した。 HS256 版 (旧 `generateUserProjectToken` /
+ * `verifyUserProjectToken`) は鍵横展開 + aud 無し横断偽造のリスクがあるため撤去済み。
+ * 発行は `auth/paseto.ts` の `signProjectToken`、 検証は service 側が公開鍵で行う。
  */
-export function generateUserProjectToken(
-  userId: string,
-  projectKey: string,
-  role: string,
-): string {
-  return jwt.sign(
-    { sub: userId, projectKey, role, kind: "user_for_project" },
-    config.jwtSecret,
-    { algorithm: "HS256", expiresIn: `${ACCESS_TOKEN_MINUTES}m` },
-  );
-}
-
-export function verifyUserProjectToken(token: string): UserProjectJwtClaims {
-  try {
-    const claims = jwt.verify(token, config.jwtSecret, { algorithms: ["HS256"] }) as UserProjectJwtClaims;
-    if (claims.kind !== "user_for_project") {
-      throw AppError.unauthorized("Not a user_for_project token");
-    }
-    return claims;
-  } catch (err) {
-    // M-4: 期限切れ / 署名不正 / claim 不正 をユーザー応答では曖昧化したまま、
-    // 内部ログには err.name を残して incident response 時の原因特定を可能にする。
-    if (err instanceof AppError) throw err;
-    devLog("auth.verifyUserProjectToken.failed", { reason: (err as Error)?.name ?? "unknown" });
-    throw AppError.unauthorized("Invalid or expired user_for_project token");
-  }
-}
-
 export function verifyProjectToken(token: string): ProjectJwtClaims {
   try {
     const claims = jwt.verify(token, config.jwtSecret, { algorithms: ["HS256"] }) as ProjectJwtClaims;

@@ -2,6 +2,8 @@
 
 Cernere がサポートする 5 種類の認証経路。すべて最終的に **HS256 JWT (`JWT_SECRET`)** で署名される。
 
+> **別経路 — user×project token は PASETO Ed25519**: 「ログイン中ユーザ × 参照先 project」の短命トークン (`POST /api/auth/project-token`) は本表の 5 経路とは別物で、**PASETO Ed25519 (公開鍵署名・`aud` 必須)** で署名する。マスタ `JWT_SECRET` で署名する旧 HS256 フォールバックは、鍵の leaf 横展開と `aud` 無し横断偽造を許すため撤去した。詳細は [../setup/service-registration.md](../setup/service-registration.md) §3。
+
 | 経路 | 入力 | 出力 | 用途 |
 |---|---|---|---|
 | [user (email/pw)](#1-user-email--password) | email + password | access + refresh | エンドユーザの直接ログイン |

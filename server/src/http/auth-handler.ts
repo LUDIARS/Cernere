@@ -10,7 +10,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import {
-  generateTokenPair, generateToolToken, generateProjectToken, generateUserProjectToken, verifyToken, verifyProjectToken, extractBearerToken, REFRESH_TOKEN_DAYS,
+  generateTokenPair, generateToolToken, generateProjectToken, verifyToken, verifyProjectToken, extractBearerToken, REFRESH_TOKEN_DAYS,
 } from "../auth/jwt.js";
 import { isPasetoEnabled, signProjectToken } from "../auth/paseto.js";
 import { checkRateLimit, redis } from "../redis.js";
@@ -295,7 +295,9 @@ async function me(authHeader: string): Promise<RouteResult> {
  *     ログイン中ユーザの user JWT を借りて、 各 project に対する short-lived token を都度発行する。
  *   ・返した token は呼び出し元 process の memory のみに保持される想定。 disk / Infisical
  *     には残さない。 user/AI も値を見ない (HTTPS+memory 経由でのみ流通)。
- *   ・project 側 (Hub) は HS256 共有鍵で local 検証する既存経路をそのまま使う。
+ *   ・token は **PASETO Ed25519 (aud=hub_url 必須)** で署名する。 project 側 (Hub) は
+ *     `/.well-known/cernere-public-key` の公開鍵でローカル検証する。 旧 HS256 共有鍵
+ *     fallback は鍵横展開 + aud 無し横断偽造のリスクのため撤去済み。
  */
 async function projectUserToken(
   p: Record<string, unknown>,
@@ -325,54 +327,47 @@ async function projectUserToken(
   if (!userRows[0]) throw new Error("Unauthorized: User not found");
   const user = userRows[0];
 
-  // hub_url (= 受け取る service の URL) を受け取って PASETO の aud claim に入れる。
-  // Issue #91 の Phase 1 仕様。 hub_url 未指定 + PASETO 未有効 のときだけ
-  // 旧 HS256 経路にフォールバック (= 段階移行期間の互換)。
+  // hub_url (= 受け取る service の URL) を PASETO の aud claim に入れる。 これは
+  // confused-deputy 防御の要 (「service A 向け token を service B が受理」を防ぐ) なので
+  // **必須**。 旧 HS256 fallback は撤去したため、 未指定/PASETO 未設定は fail-closed。
   const hubUrl = typeof p.hub_url === "string" ? p.hub_url.trim() : "";
   const displayName = (user.displayName ?? user.login ?? "").trim() || `user-${user.id.slice(0, 8)}`;
 
-  if (hubUrl && isPasetoEnabled()) {
-    const tokenTtl = 15 * 60;
-    const accessToken = await signProjectToken({
-      userId: user.id,
-      projectKey: project.key,
-      role: user.role,
-      displayName,
-      audience: hubUrl,
-      ttlSec: tokenTtl,
-    });
-    devLog("auth.projectUserToken.issue", {
-      userId: user.id, projectKey: project.key, audience: hubUrl, ip: ctx.ip, alg: "EdDSA",
-    });
-    return {
-      status: "200 OK",
-      data: {
-        tokenType: "user_for_project",
-        accessToken,
-        expiresIn: tokenTtl,
-        projectKey: project.key,
-        userId: user.id,
-        displayName,
-        audience: hubUrl,
-        alg: "EdDSA",
-      },
-    };
+  // fail-closed: aud 無し token は横断偽造を許すため、 hub_url を必須にする (400)。
+  if (!hubUrl) {
+    throw new Error("hub_url is required for project-token (HS256 fallback removed; aud is mandatory)");
+  }
+  // fail-closed: PASETO 署名鍵が未設定なら暗黙降格せず明示的に拒否する (= 設定不備の
+  // 無言フォールバック禁止 RULE §7.1)。 サーバ構成エラーなので 500 扱い。
+  if (!isPasetoEnabled()) {
+    throw new Error(
+      "project-token signing unavailable: PASETO keys not configured (set CERNERE_PASETO_SECRET_KEY / _PUBLIC_KEY)",
+    );
   }
 
-  // legacy fallback: HS256 (= migration 期間中、 hub_url 渡さない old client 向け)
-  const accessToken = generateUserProjectToken(user.id, project.key, user.role);
+  const tokenTtl = 15 * 60;
+  const accessToken = await signProjectToken({
+    userId: user.id,
+    projectKey: project.key,
+    role: user.role,
+    displayName,
+    audience: hubUrl,
+    ttlSec: tokenTtl,
+  });
   devLog("auth.projectUserToken.issue", {
-    userId: user.id, projectKey: project.key, ip: ctx.ip, alg: "HS256-legacy",
+    userId: user.id, projectKey: project.key, audience: hubUrl, ip: ctx.ip, alg: "EdDSA",
   });
   return {
     status: "200 OK",
     data: {
       tokenType: "user_for_project",
       accessToken,
-      expiresIn: 3600,
+      expiresIn: tokenTtl,
       projectKey: project.key,
       userId: user.id,
-      alg: "HS256",
+      displayName,
+      audience: hubUrl,
+      alg: "EdDSA",
     },
   };
 }
