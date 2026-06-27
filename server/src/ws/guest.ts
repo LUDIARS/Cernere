@@ -9,6 +9,7 @@ import * as schema from "../db/schema.js";
 import { AppError } from "../error.js";
 import { checkRateLimit } from "../redis.js";
 import { generateTokenPair, generateMfaToken, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
+import { hashRefreshToken } from "../auth/token-hash.js";
 
 export interface GuestAuthResult {
   userId?: string;
@@ -65,7 +66,7 @@ async function guestRegister(p: Record<string, unknown>): Promise<GuestAuthResul
   const { accessToken, refreshToken } = generateTokenPair(userId, role);
   const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
-    id: crypto.randomUUID(), userId, refreshToken, expiresAt,
+    id: crypto.randomUUID(), userId, refreshToken: hashRefreshToken(refreshToken), expiresAt,
   });
 
   return {
@@ -107,7 +108,7 @@ async function guestLogin(p: Record<string, unknown>): Promise<GuestAuthResult> 
   const { accessToken, refreshToken } = generateTokenPair(user.id, user.role);
   const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
-    id: crypto.randomUUID(), userId: user.id, refreshToken, expiresAt,
+    id: crypto.randomUUID(), userId: user.id, refreshToken: hashRefreshToken(refreshToken), expiresAt,
   });
 
   return {
