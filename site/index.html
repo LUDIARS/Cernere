@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cernere — 概要</title>
+  <meta name="description" content="Cernere は LUDIARS の汎用認証プラットフォーム & データリレーサーバー。常時接続 WebSocket セッションを基盤に破壊的操作を防御する。" />
+  <link rel="stylesheet" href="assets/style.css" />
+  <script defer src="assets/nav.js"></script>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <div class="tag">LUDIARS Authentication Platform</div>
+      <h1>Cernere</h1>
+      <p>汎用認証プラットフォーム &amp; データリレーサーバー。複数の認証方式（OAuth / パスワード / Passkey / MFA）、組織・チーム管理、外部サービスの動的登録とユーザーデータ委託、そして WebSocket ベースのリアルタイムメッセージリレーを提供する。</p>
+    </section>
+
+    <p class="lead">
+      LUDIARS の全サービスは Cernere を通じてセッションを確立する。Cernere は
+      <strong>常時接続セッション（Always-Connected Session）</strong>を基盤とし、
+      破壊的操作は<strong>認証済みかつ接続中のセッションからのみ</strong>受け付ける。
+      公開 REST は認証境界（<code>/auth</code>・<code>/api/auth/*</code> 等）に限られ、
+      データの参照・変更は WebSocket セッション上の <code>module_request</code> で実行される。
+    </p>
+
+    <h2>役割 — このサービスは何をするか</h2>
+    <div class="grid cols-2">
+      <div class="card">
+        <div class="ico">🔑</div>
+        <h3>統合認証 (IdP)</h3>
+        <p>GitHub / Google OAuth、bcrypt パスワード、WebAuthn Passkey、TOTP/SMS/Email MFA。さらに OIDC Provider として外部 RP に ID トークンを発行する。</p>
+      </div>
+      <div class="card">
+        <div class="ico">🛰️</div>
+        <h3>常時接続セッション基盤</h3>
+        <p>WebSocket 上で 30 秒 ping / 10 秒 pong による生存検証。切断は即 <code>SessionExpired</code> に遷移し、以降の破壊的操作を遮断する。</p>
+      </div>
+      <div class="card">
+        <div class="ico">🧩</div>
+        <h3>サービス動的登録</h3>
+        <p>外部サービス（Schedula / Nuntius 等）を <code>managed_projects</code> に登録し、各サービスのスキーマから <code>project_data_&lt;key&gt;</code> テーブルを実行時生成する。</p>
+      </div>
+      <div class="card">
+        <div class="ico">🗂️</div>
+        <h3>個人データ単一情報源</h3>
+        <p>OAuth トークンやユーザーデータを Cernere に集約。サービスはユーザーの代わりに Cernere へ委託保管し、モジュール単位のオプトアウトを尊重する。</p>
+      </div>
+      <div class="card">
+        <div class="ico">📡</div>
+        <h3>メッセージリレー</h3>
+        <p>同一ユーザーのセッション間リレー（クロスデバイス同期）と、service adapter 同士の peer 直結（<code>relay_pairs</code> + challenge 検証）。</p>
+      </div>
+      <div class="card">
+        <div class="ico">📝</div>
+        <h3>監査ログ</h3>
+        <p>全 <code>module_request</code>（成功・失敗とも）を <code>operation_logs</code> に記録し、完全な監査証跡を提供する。</p>
+      </div>
+    </div>
+
+    <h2>設計の柱 — セキュリティモデル</h2>
+    <p>Cernere のセキュリティは 3 本の柱に基づく。トークンは単体では無効で、生存中の接続と組み合わさって初めて操作が許可される。</p>
+    <div class="grid cols-3">
+      <div class="card"><h3>① 常時接続検証</h3><p>持続接続と ping/pong により、トークン窃取・セッションハイジャックを継続的に無効化する。</p></div>
+      <div class="card"><h3>② 強固な認証</h3><p>接続確立時に JWT / セッション ID を必須化。未認証アップグレードは即拒否。</p></div>
+      <div class="card"><h3>③ 破壊的操作の遮断</h3><p>認証済みアクティブセッション以外からの削除・上書き・権限変更を完全にブロックする。</p></div>
+    </div>
+
+    <h3>破壊的操作の 4 層防御</h3>
+    <table>
+      <thead><tr><th>レイヤー</th><th>検証内容</th><th>失敗時</th></tr></thead>
+      <tbody>
+        <tr><td>Layer 1</td><td>Cookie / Bearer Token 検証</td><td><code>401</code></td></tr>
+        <tr><td>Layer 2</td><td>Redis セッション TTL チェック（7 日）</td><td><code>401</code></td></tr>
+        <tr><td>Layer 3</td><td>ユーザー状態検証（<code>LoggedIn</code> 必須）</td><td><code>403</code></td></tr>
+        <tr><td>Layer 4</td><td>リソース所有権・ロールチェック</td><td><code>403</code></td></tr>
+      </tbody>
+    </table>
+
+    <h2>認可モデル</h2>
+    <div class="grid cols-2">
+      <div class="card">
+        <h3>システムレベル</h3>
+        <table>
+          <tbody>
+            <tr><td><code>admin</code></td><td>初回ログインユーザー。プロジェクト定義・登録の管理。</td></tr>
+            <tr><td><code>general</code></td><td>一般ユーザー。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h3>組織レベル</h3>
+        <table>
+          <tbody>
+            <tr><td><code>owner</code></td><td>組織作成者。組織削除・ownership 移譲。</td></tr>
+            <tr><td><code>admin</code> / <code>maintainer</code></td><td>メンバー管理・プロジェクト有効化。</td></tr>
+            <tr><td><code>member</code></td><td>読み取り専用。自己退出のみ。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <h2>技術スタック</h2>
+    <table>
+      <thead><tr><th>レイヤー</th><th>技術</th></tr></thead>
+      <tbody>
+        <tr><td>サーバー</td><td>TypeScript + uWebSockets.js</td></tr>
+        <tr><td>データベース</td><td>PostgreSQL 17 + Drizzle ORM（22 テーブル）</td></tr>
+        <tr><td>セッションストア</td><td>Redis 7（ioredis / TTL 7 日）</td></tr>
+        <tr><td>認証</td><td>GitHub / Google OAuth · bcrypt · WebAuthn Passkey</td></tr>
+        <tr><td>MFA</td><td>TOTP / SMS (AWS SNS) / Email (AWS SES)</td></tr>
+        <tr><td>トークン</td><td>JWT HS256（access 60 分 / refresh 30 日）· project token は PASETO v4 (EdDSA) + HS256 legacy · OIDC ID トークンは RS256</td></tr>
+        <tr><td>フロントエンド</td><td>React 19 + React Router 7 + TanStack Query + Vite</td></tr>
+      </tbody>
+    </table>
+
+    <h2>トークン署名の一覧</h2>
+    <table>
+      <thead><tr><th>トークン種別</th><th>署名</th><th>鍵 / 保管</th><th>TTL</th></tr></thead>
+      <tbody>
+        <tr><td>user accessToken</td><td>JWT HS256</td><td><code>JWT_SECRET</code></td><td>60 分</td></tr>
+        <tr><td>user refreshToken</td><td>UUID（鍵なし）</td><td>DB <code>refresh_sessions</code></td><td>30 日</td></tr>
+        <tr><td>project token</td><td>PASETO v4 (EdDSA) / HS256 legacy</td><td>EdDSA 秘密鍵 / <code>JWT_SECRET</code></td><td>60 分</td></tr>
+        <tr><td>user_for_project token</td><td>PASETO (EdDSA) / HS256 fallback</td><td>EdDSA / <code>JWT_SECRET</code></td><td>15 分 / 60 分</td></tr>
+        <tr><td>OIDC id_token</td><td>JWT RS256</td><td>OIDC 署名鍵（JWKS 公開）</td><td>60 分</td></tr>
+        <tr><td>authCode</td><td>UUID（one-time）</td><td>Redis</td><td>60 秒（OAuth）/ 300 秒（passkey）</td></tr>
+      </tbody>
+    </table>
+
+    <h2>このサイトの使い方</h2>
+    <ul class="clean">
+      <li>📊 <a href="graph.html">ドメイングラフ</a> — ドメインと機能、その依存関係をインタラクティブに俯瞰する。</li>
+      <li>🔌 <a href="api.html">API リファレンス</a> — REST / WebSocket の全エンドポイントをトグル展開で確認する。</li>
+      <li>🔍 <a href="review.html">仕様↔コード レビュー</a> — <code>spec/</code> の資料と実装の対応状況・乖離点。</li>
+    </ul>
+  </main>
+</body>
+</html>
