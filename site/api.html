@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cernere — API リファレンス</title>
+  <meta name="description" content="Cernere の REST / WebSocket API 全エンドポイント。各項目はトグル展開で詳細・パラメータを確認できる。" />
+  <link rel="stylesheet" href="assets/style.css" />
+  <script defer src="assets/nav.js"></script>
+  <script defer src="assets/api-data.js"></script>
+  <script defer src="assets/api.js"></script>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <div class="tag">API Reference</div>
+      <h1>API リファレンス</h1>
+      <p>REST は認証境界に限定され、データ操作は WebSocket の <code>module_request</code> で行う。各エンドポイントをクリックするとトグル展開し、パラメータ・レスポンス・補足を確認できる。</p>
+    </section>
+
+    <div class="note">
+      セキュリティモデル: 公開 REST は認証 / OIDC / OAuth 境界のみ。参照・変更を含む操作はすべて
+      認証済み WebSocket セッション経由で実行され、<code>operation_logs</code> に記録される。
+    </div>
+
+    <div class="api-controls">
+      <input id="search" class="api-search" type="search" placeholder="エンドポイント / パラメータを検索（例: passkey, organization, oauth_token）" />
+      <button class="btn" data-filter="all">すべて</button>
+      <button class="btn" data-filter="rest">REST</button>
+      <button class="btn" data-filter="ws">WebSocket</button>
+      <button class="btn" id="expand">全て展開</button>
+      <button class="btn" id="collapse">全て折りたたむ</button>
+    </div>
+
+    <div id="api-root"></div>
+    <p id="empty" style="display:none;color:var(--text-faint)">該当するエンドポイントがありません。</p>
+  </main>
+</body>
+</html>
