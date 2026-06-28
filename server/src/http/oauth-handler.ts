@@ -11,6 +11,7 @@ import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { config } from "../config.js";
 import { generateTokenPair, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
+import { hashRefreshToken } from "../auth/token-hash.js";
 import { redis, SESSION_TTL_SECS } from "../redis.js";
 import { logAuthEvent } from "../logging/auth-logger.js";
 import { encryptSecret } from "../lib/crypto/secret-box.js";
@@ -202,7 +203,7 @@ async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader
     const { accessToken, refreshToken } = generateTokenPair(userId, userRole);
     const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
     await db.insert(schema.refreshSessions).values({
-      id: crypto.randomUUID(), userId, refreshToken, expiresAt,
+      id: crypto.randomUUID(), userId, refreshToken: hashRefreshToken(refreshToken), expiresAt,
     });
 
     const authCode = crypto.randomUUID();
@@ -339,7 +340,7 @@ async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader
   const { accessToken, refreshToken } = generateTokenPair(userId, userRole);
   const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
-    id: crypto.randomUUID(), userId, refreshToken, expiresAt,
+    id: crypto.randomUUID(), userId, refreshToken: hashRefreshToken(refreshToken), expiresAt,
   });
 
   // Auth code → Redis (フロントが exchange で取得)
