@@ -39,6 +39,7 @@ import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { redis, checkRateLimit } from "../redis.js";
 import { generateTokenPair, verifyToken, verifyProjectToken, extractBearerToken, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
+import { hashRefreshToken } from "../auth/token-hash.js";
 import { issueAuthCode } from "../auth/auth-code.js";
 import { logUserLogin, logUserLoginFailed } from "../logging/auth-logger.js";
 import { devLog } from "../logging/dev-logger.js";
@@ -317,7 +318,7 @@ async function loginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise
   const { accessToken, refreshToken } = generateTokenPair(user.id, user.role);
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
-    id: crypto.randomUUID(), userId: user.id, refreshToken, expiresAt,
+    id: crypto.randomUUID(), userId: user.id, refreshToken: hashRefreshToken(refreshToken), expiresAt,
   });
   logUserLogin(user.id, user.email ?? user.login, "passkey", { ip: ctx.ip });
   return {

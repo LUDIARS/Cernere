@@ -400,7 +400,9 @@ export async function setModuleOptout(userId: string, projectKey: string, module
         );
       }
     } catch (err) {
-      console.warn(`[optout] データ削除失敗 (${projectKey}/${moduleKey}):`, err);
+      throw new Error(
+        `[optout] データ NULL 化失敗 (${projectKey}/${moduleKey}): ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       await sqlClient.end();
     }

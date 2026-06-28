@@ -13,6 +13,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { generateTokenPair, REFRESH_TOKEN_DAYS } from "./jwt.js";
+import { hashRefreshToken } from "./token-hash.js";
 import { redis } from "../redis.js";
 
 const AUTH_CODE_TTL = 60;
@@ -30,7 +31,7 @@ export async function issueAuthCode(user: AuthCodeUser): Promise<string> {
   await db.insert(schema.refreshSessions).values({
     id: crypto.randomUUID(),
     userId: user.userId,
-    refreshToken,
+    refreshToken: hashRefreshToken(refreshToken),
     expiresAt,
   });
   const authCode = crypto.randomUUID();

@@ -153,14 +153,13 @@ export interface RequestPeerResult {
 /**
  * A から B への呼び出し準備. 成功時は challenge と B の SA URL を返す.
  *
- * `userId` が渡された場合 (= relay 経路で特定ユーザのデータを扱う呼び出し)、
- * そのユーザが端点プロジェクトのいずれかを opt-out していれば relay を拒否する.
- * 省略時は従来通りプロジェクト対の許可のみで判定する (後方互換).
+ * `userId` は必須。 未提供の呼び出しは fail-closed で拒否する。
+ * ユーザが端点プロジェクトのいずれかを opt-out していれば relay を拒否する。
  */
 export async function requestPeer(
   issuerKey: string,
   targetKey: string,
-  userId?: string,
+  userId: string,
 ): Promise<RequestPeerResult> {
   if (!(await isPairAllowed(issuerKey, targetKey))) {
     throw new RelayError(
@@ -168,7 +167,7 @@ export async function requestPeer(
       `relay pair ${issuerKey} → ${targetKey} is not registered or inactive`,
     );
   }
-  if (userId && (await userOptedOutOfRelay(userId, issuerKey, targetKey))) {
+  if (await userOptedOutOfRelay(userId, issuerKey, targetKey)) {
     throw new RelayError(
       "user_opted_out",
       `user ${userId} has opted out of data sharing with one of ${issuerKey}/${targetKey}`,

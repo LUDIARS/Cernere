@@ -12,6 +12,7 @@ import * as schema from "../db/schema.js";
 import {
   generateTokenPair, generateToolToken, generateProjectToken, verifyToken, verifyProjectToken, extractBearerToken, REFRESH_TOKEN_DAYS,
 } from "../auth/jwt.js";
+import { hashRefreshToken } from "../auth/token-hash.js";
 import { isPasetoEnabled, signProjectToken } from "../auth/paseto.js";
 import { checkRateLimit, redis } from "../redis.js";
 import {
@@ -92,7 +93,7 @@ async function register(p: Record<string, unknown>, ctx: RequestCtx): Promise<Ro
   const { accessToken, refreshToken } = generateTokenPair(userId, role);
   const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
-    id: crypto.randomUUID(), userId, refreshToken, expiresAt,
+    id: crypto.randomUUID(), userId, refreshToken: hashRefreshToken(refreshToken), expiresAt,
   });
 
   logUserRegister(userId, email, "email", { ip: ctx.ip });
@@ -158,7 +159,7 @@ async function login(p: Record<string, unknown>, ctx: RequestCtx): Promise<Route
   const { accessToken, refreshToken } = generateTokenPair(user.id, user.role);
   const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
-    id: crypto.randomUUID(), userId: user.id, refreshToken, expiresAt,
+    id: crypto.randomUUID(), userId: user.id, refreshToken: hashRefreshToken(refreshToken), expiresAt,
   });
 
   logUserLogin(user.id, user.email, "email", ctx);
@@ -177,7 +178,7 @@ async function refresh(p: Record<string, unknown>): Promise<RouteResult> {
   if (!rt) throw new Error("refreshToken is required");
 
   const rows = await db.select().from(schema.refreshSessions)
-    .where(eq(schema.refreshSessions.refreshToken, rt)).limit(1);
+    .where(eq(schema.refreshSessions.refreshToken, hashRefreshToken(rt))).limit(1);
   const session = rows[0];
   if (!session || new Date() > session.expiresAt) throw new Error("Unauthorized: Invalid or expired refresh token");
 
@@ -187,7 +188,7 @@ async function refresh(p: Record<string, unknown>): Promise<RouteResult> {
 
   const { accessToken, refreshToken } = generateTokenPair(userRows[0].id, userRows[0].role);
   await db.update(schema.refreshSessions)
-    .set({ refreshToken }).where(eq(schema.refreshSessions.id, session.id));
+    .set({ refreshToken: hashRefreshToken(refreshToken) }).where(eq(schema.refreshSessions.id, session.id));
 
   return { status: "200 OK", data: { accessToken, refreshToken } };
 }
@@ -196,7 +197,7 @@ async function logout(p: Record<string, unknown>): Promise<RouteResult> {
   const rt = p.refreshToken as string | undefined;
   if (rt) {
     await db.delete(schema.refreshSessions)
-      .where(eq(schema.refreshSessions.refreshToken, rt));
+      .where(eq(schema.refreshSessions.refreshToken, hashRefreshToken(rt)));
   }
   return { status: "200 OK", data: { message: "Logged out" } };
 }
