@@ -2,7 +2,10 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 const backendUrl = process.env.VITE_BACKEND_URL ?? "http://localhost:8080";
-const extraHosts = process.env.VITE_ALLOWED_HOSTS?.split(",").filter(Boolean) || [];
+const extraHosts = [
+  ...(process.env.VITE_ALLOWED_HOSTS?.split(",").filter(Boolean) ?? []),
+  ...(process.env.LUDIARS_ALLOWED_HOSTS?.split(",").map(s => s.trim()).filter(Boolean) ?? []),
+];
 
 // Cloudflare Tunnel 越し (例: cernere-d.vtn-game.com) で開く場合、
 // HMR の WebSocket は tunnel hostname + 443/wss で張る必要がある。
