@@ -128,7 +128,11 @@ async function login(p: Record<string, unknown>, ctx: RequestCtx): Promise<Route
   }
 
   devLog("auth.login.user.rateLimit", { email });
+  // per-email: 標的アカウントへの総当たりを絞る。
   await checkRateLimit(`login:${email}`, 10, 900);
+  // per-IP: 1 IP から多数アカウントへ 1 発ずつ撒く credential stuffing を絞る。
+  // NAT/オフィス共有 IP も想定し email 側より緩めに取る。
+  await checkRateLimit(`login-ip:${ctx.ip ?? "unknown"}`, 50, 900);
 
   devLog("auth.login.user.lookup", { email });
   const rows = await db.select().from(schema.users)
@@ -180,15 +184,35 @@ async function refresh(p: Record<string, unknown>): Promise<RouteResult> {
   const rows = await db.select().from(schema.refreshSessions)
     .where(eq(schema.refreshSessions.refreshToken, hashRefreshToken(rt))).limit(1);
   const session = rows[0];
-  if (!session || new Date() > session.expiresAt) throw new Error("Unauthorized: Invalid or expired refresh token");
+  if (!session) throw new Error("Unauthorized: Invalid or expired refresh token");
+
+  // reuse 検出: 既にローテーション済みの refresh token が再提示された。
+  // = 正規クライアントが新 token を持っているのに旧 token が使われた → 盗用の疑い。
+  // 当該ユーザの全 refresh session を失効させ、 攻撃者・正規どちらも再ログインを強制する。
+  if (session.rotatedAt) {
+    await db.delete(schema.refreshSessions)
+      .where(eq(schema.refreshSessions.userId, session.userId));
+    devLog("auth.refresh.reuseDetected", { userId: session.userId });
+    throw new Error("Unauthorized: Refresh token reuse detected; all sessions revoked. Please sign in again.");
+  }
+
+  if (new Date() > session.expiresAt) throw new Error("Unauthorized: Invalid or expired refresh token");
 
   const userRows = await db.select().from(schema.users)
     .where(eq(schema.users.id, session.userId)).limit(1);
   if (!userRows[0]) throw new Error("Unauthorized: User not found");
 
   const { accessToken, refreshToken } = generateTokenPair(userRows[0].id, userRows[0].role);
+  // 旧 session は削除せず rotated_at を刻んで残す (再提示 = reuse を検出するため)。
+  // expires_at を過ぎれば掃除対象。 新 session は別行として sliding expiry で発行。
+  const now = new Date();
+  const newExpiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.update(schema.refreshSessions)
-    .set({ refreshToken: hashRefreshToken(refreshToken) }).where(eq(schema.refreshSessions.id, session.id));
+    .set({ rotatedAt: now }).where(eq(schema.refreshSessions.id, session.id));
+  await db.insert(schema.refreshSessions).values({
+    id: crypto.randomUUID(), userId: session.userId,
+    refreshToken: hashRefreshToken(refreshToken), expiresAt: newExpiresAt,
+  });
 
   return { status: "200 OK", data: { accessToken, refreshToken } };
 }
