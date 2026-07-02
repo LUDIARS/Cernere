@@ -71,6 +71,40 @@ function getRemoteIp(res: uWS.HttpResponse): string | undefined {
   }
 }
 
+/**
+ * WS 認証情報を Sec-WebSocket-Protocol 経由で受け取る。
+ *
+ * URL クエリ (`?token=...`) は reverse proxy / アクセスログ / ブラウザ履歴に
+ * 平文で残るため、 credential は subprotocol に載せるのが安全。 クライアントは
+ *   Sec-WebSocket-Protocol: bearer, <jwt>
+ *   Sec-WebSocket-Protocol: session, <session_id>
+ *   Sec-WebSocket-Protocol: ticket, <ticket>
+ * のように「スキーム, 値」のペアを並べる。 サーバは認識したスキーム名 (値では
+ * ない) だけを echo して upgrade する (echo は必ずクライアント提示リスト内の
+ * 単一 subprotocol でなければならない)。
+ *
+ * 後方互換: 当面は URL クエリも fallback として受理する (呼び出し側で query を
+ * OR する)。 全クライアント (frontend + 各 service) 移行後に query 受理を撤去する。
+ */
+function parseWsAuthProtocol(
+  protoHeader: string | undefined,
+): { creds: Map<string, string>; echo?: string } {
+  const creds = new Map<string, string>();
+  let echo: string | undefined;
+  if (!protoHeader) return { creds };
+  const parts = protoHeader.split(",").map((s) => s.trim()).filter(Boolean);
+  const known = new Set(["bearer", "session", "ticket"]);
+  for (let i = 0; i < parts.length - 1; i++) {
+    const scheme = parts[i];
+    const value = parts[i + 1];
+    if (known.has(scheme) && value && !creds.has(scheme)) {
+      creds.set(scheme, value);
+      if (!echo) echo = scheme; // 最初に認識したスキーム名を echo する
+    }
+  }
+  return { creds, echo };
+}
+
 function readBody(res: uWS.HttpResponse): Promise<string> {
   return new Promise((resolve, reject) => {
     let buffer = "";
@@ -149,12 +183,21 @@ export function createApp() {
     upgrade: async (res, req, context) => {
       const query = req.getQuery();
       const params = new URLSearchParams(query);
-      const token = params.get("token") ?? undefined;
-      const sessionId = params.get("session_id") ?? undefined;
+      const ip = getRemoteIp(res);
 
       const secWsKey = req.getHeader("sec-websocket-key");
       const secWsProtocol = req.getHeader("sec-websocket-protocol");
       const secWsExtensions = req.getHeader("sec-websocket-extensions");
+
+      // header 優先、 URL クエリは deprecated fallback。
+      const { creds, echo } = parseWsAuthProtocol(secWsProtocol);
+      const token = creds.get("bearer") ?? params.get("token") ?? undefined;
+      const sessionId = creds.get("session") ?? params.get("session_id") ?? undefined;
+      if (!creds.size && (params.get("token") || params.get("session_id"))) {
+        devLog("ws.auth.credentialInQuery.deprecated", { path: "/auth", ip });
+      }
+      // header 認証時は echo したスキーム名のみ返す (値を含む生ヘッダは返さない)。
+      const echoProtocol = echo ?? secWsProtocol;
 
       let aborted = false;
       res.onAborted(() => { aborted = true; });
@@ -167,7 +210,7 @@ export function createApp() {
         : { userId: "", sessionId: `guest_${crypto.randomUUID()}`, isGuest: true, promoted: false, closed: false };
 
       res.cork(() => {
-        res.upgrade(userData, secWsKey, secWsProtocol, secWsExtensions, context);
+        res.upgrade(userData, secWsKey, echoProtocol, secWsExtensions, context);
       });
     },
 
@@ -184,12 +227,18 @@ export function createApp() {
     upgrade: async (res, req, context) => {
       const query = req.getQuery();
       const params = new URLSearchParams(query);
-      const token = params.get("token") ?? undefined;
       const ip = getRemoteIp(res);
 
       const secWsKey = req.getHeader("sec-websocket-key");
       const secWsProtocol = req.getHeader("sec-websocket-protocol");
       const secWsExtensions = req.getHeader("sec-websocket-extensions");
+
+      const { creds, echo } = parseWsAuthProtocol(secWsProtocol);
+      const token = creds.get("bearer") ?? params.get("token") ?? undefined;
+      if (!creds.size && params.get("token")) {
+        devLog("ws.auth.credentialInQuery.deprecated", { path: "/ws/project", ip });
+      }
+      const echoProtocol = echo ?? secWsProtocol;
 
       let aborted = false;
       res.onAborted(() => { aborted = true; });
@@ -213,7 +262,7 @@ export function createApp() {
       };
 
       res.cork(() => {
-        res.upgrade(userData, secWsKey, secWsProtocol, secWsExtensions, context);
+        res.upgrade(userData, secWsKey, echoProtocol, secWsExtensions, context);
       });
     },
 
@@ -232,11 +281,18 @@ export function createApp() {
     upgrade: async (res, req, context) => {
       const query = req.getQuery();
       const params = new URLSearchParams(query);
-      const ticket = params.get("ticket") ?? undefined;
+      const ip = getRemoteIp(res);
 
       const secWsKey = req.getHeader("sec-websocket-key");
       const secWsProtocol = req.getHeader("sec-websocket-protocol");
       const secWsExtensions = req.getHeader("sec-websocket-extensions");
+
+      const { creds, echo } = parseWsAuthProtocol(secWsProtocol);
+      const ticket = creds.get("ticket") ?? params.get("ticket") ?? undefined;
+      if (!creds.size && params.get("ticket")) {
+        devLog("ws.auth.credentialInQuery.deprecated", { path: "/auth/composite-ws", ip });
+      }
+      const echoProtocol = echo ?? secWsProtocol;
 
       let aborted = false;
       res.onAborted(() => { aborted = true; });
@@ -258,7 +314,7 @@ export function createApp() {
       };
 
       res.cork(() => {
-        res.upgrade(userData, secWsKey, secWsProtocol, secWsExtensions, context);
+        res.upgrade(userData, secWsKey, echoProtocol, secWsExtensions, context);
       });
     },
 
