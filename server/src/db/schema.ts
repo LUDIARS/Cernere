@@ -58,6 +58,9 @@ export const refreshSessions = pgTable("refresh_sessions", {
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   refreshToken: text("refresh_token").notNull().unique(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  // ローテーション済み検出用。 非 null = この token は既に refresh に使われた
+  // (= 再提示されたら盗用とみなす)。
+  rotatedAt: timestamp("rotated_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   index("idx_refresh_sessions_user_id").on(t.userId),

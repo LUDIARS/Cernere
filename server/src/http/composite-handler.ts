@@ -114,6 +114,8 @@ async function compositeLogin(p: Record<string, unknown>, ctx: CompositeCtx): Pr
 
   devLog("composite.login.rateLimit", { email });
   await checkRateLimit(`login:${email}`, 10, 900);
+  // per-IP: credential stuffing 対策 (auth-handler.login と同ポリシー)。
+  await checkRateLimit(`login-ip:${ctx.ip ?? "unknown"}`, 50, 900);
 
   devLog("composite.login.lookupUser", { email });
   const rows = await db.select().from(schema.users)

@@ -84,14 +84,24 @@ export async function updateLastPing(userId: string, ts: number): Promise<void> 
 
 // ── Rate Limiting ────────────────────────────────────────────
 
+// INCR と EXPIRE を 1 スクリプトに閉じ込め、 atomic に処理する。
+// 旧実装は incr→(別往復)expire だったため、 count===1 の直後にプロセスが
+// 落ちると TTL 無しキーが残り、 そのキーが恒久的にレート上限に張り付く隙があった。
+const RATE_LIMIT_LUA = `
+local c = redis.call('INCR', KEYS[1])
+if c == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return c
+`;
+
 export async function checkRateLimit(
   key: string, maxRequests: number, windowSecs: number,
 ): Promise<void> {
   const redisKey = `ratelimit:${key}`;
-  const count = await redis.incr(redisKey);
-  if (count === 1) {
-    await redis.expire(redisKey, windowSecs);
-  }
+  const count = Number(
+    await redis.eval(RATE_LIMIT_LUA, 1, redisKey, String(windowSecs)),
+  );
   if (count > maxRequests) {
     throw new Error("Rate limit exceeded. Please try again later.");
   }

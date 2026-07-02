@@ -7,7 +7,12 @@ import { config } from "../config.js";
 import { AppError } from "../error.js";
 import { devLog } from "../logging/dev-logger.js";
 
-const ACCESS_TOKEN_MINUTES = 60;
+// user access token はステートレスで即時 revoke できないため、 露出時間を短く保つ。
+// 長期の継続ログインは refresh token (30日) 経由に寄せる。
+const ACCESS_TOKEN_MINUTES = 15;
+// service-to-service token (tool / project HS256) は別枠で 60 分。
+// user のセッション UX とは切り離す。
+const SERVICE_TOKEN_MINUTES = 60;
 const REFRESH_TOKEN_DAYS = 30;
 
 export interface JwtClaims {
@@ -51,7 +56,7 @@ export function generateToolToken(toolClientId: string, ownerUserId: string, sco
   return jwt.sign(
     { sub: toolClientId, owner: ownerUserId, scopes },
     config.jwtSecret,
-    { expiresIn: `${ACCESS_TOKEN_MINUTES}m` },
+    { expiresIn: `${SERVICE_TOKEN_MINUTES}m` },
   );
 }
 
@@ -65,7 +70,7 @@ export function generateProjectToken(clientId: string, projectKey: string): stri
   return jwt.sign(
     { sub: clientId, projectKey, tokenType: "project" },
     config.jwtSecret,
-    { algorithm: "HS256", expiresIn: `${ACCESS_TOKEN_MINUTES}m` },
+    { algorithm: "HS256", expiresIn: `${SERVICE_TOKEN_MINUTES}m` },
   );
 }
 
@@ -100,7 +105,10 @@ export function generateMfaToken(userId: string, role: string): string {
 
 export function verifyToken(token: string): JwtClaims {
   try {
-    return jwt.verify(token, config.jwtSecret) as JwtClaims;
+    // algorithm を HS256 に固定する。 pin しないと将来 verify 側が別 alg を受理する
+    // 余地を残し、 algorithm-confusion の温床になるため明示する
+    // (verifyProjectToken と同じ扱いに揃える)。
+    return jwt.verify(token, config.jwtSecret, { algorithms: ["HS256"] }) as JwtClaims;
   } catch {
     throw AppError.unauthorized("Invalid or expired token");
   }

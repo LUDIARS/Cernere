@@ -12,12 +12,14 @@ import {
 const SECRET = process.env.JWT_SECRET as string;
 
 describe("auth/jwt — access token", () => {
-  it("round-trips sub + role and sets a ~60m expiry", () => {
+  it("round-trips sub + role and sets a 15m expiry", () => {
+    // user access token はステートレスで即時 revoke できないため 15 分に短縮した
+    // (長期継続は refresh token 経由)。 service token (tool/project) は別枠で 60 分。
     const token = generateAccessToken("user-1", "general");
     const claims = verifyToken(token);
     expect(claims.sub).toBe("user-1");
     expect(claims.role).toBe("general");
-    expect(claims.exp - claims.iat).toBe(60 * 60);
+    expect(claims.exp - claims.iat).toBe(15 * 60);
   });
 
   it("rejects a token signed with a different secret (forgery)", () => {
