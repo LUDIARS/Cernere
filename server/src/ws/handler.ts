@@ -119,7 +119,7 @@ export async function handleWsMessage(
         return;
       }
       try {
-        const result = await handleGuestAuthCommand(msg.action, msg.payload);
+        const result = await handleGuestAuthCommand(msg.action, msg.payload, data.ip);
         if (result.userId && result.accessToken && result.refreshToken) {
           const newSessionId = crypto.randomUUID();
           const now = Date.now();

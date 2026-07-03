@@ -24,13 +24,14 @@ export interface GuestAuthResult {
 export async function handleGuestAuthCommand(
   action: string,
   payload: unknown,
+  ip?: string,
 ): Promise<GuestAuthResult> {
   const p = payload as Record<string, unknown> | undefined;
   if (!p) throw AppError.badRequest("Payload required");
 
   switch (action) {
     case "register": return guestRegister(p);
-    case "login": return guestLogin(p);
+    case "login": return guestLogin(p, ip);
     default:
       throw AppError.badRequest(`Guest auth action '${action}' not supported. Use 'register' or 'login'.`);
   }
@@ -77,13 +78,16 @@ async function guestRegister(p: Record<string, unknown>): Promise<GuestAuthResul
   };
 }
 
-async function guestLogin(p: Record<string, unknown>): Promise<GuestAuthResult> {
+async function guestLogin(p: Record<string, unknown>, ip?: string): Promise<GuestAuthResult> {
   const email = p.email as string | undefined;
   const password = p.password as string | undefined;
 
   if (!email || !password) throw AppError.badRequest("email and password are required");
 
+  // per-email: 標的アカウントへの総当たりを絞る。
   await checkRateLimit(`ws_login:${email}`, 10, 900);
+  // per-IP: 1 IP から多数アカウントへ撒く credential stuffing を絞る (REST login と同ポリシー)。
+  await checkRateLimit(`ws_login-ip:${ip ?? "unknown"}`, 50, 900);
 
   const rows = await db.select().from(schema.users)
     .where(eq(schema.users.email, email)).limit(1);
