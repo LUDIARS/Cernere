@@ -52,6 +52,8 @@ export interface WsUserData {
   sessionId: string;
   isGuest: boolean;
   promoted: boolean;
+  /** upgrade 時の接続元 IP (ゲストログインの per-IP レート制限に使う。監査用途)。 */
+  ip?: string;
   /**
    * close 後に send() するレースを防ぐフラグ。close ハンドラで即 true にする。
    * uWS は閉じた WebSocket を触ると例外を投げるため、async の await 挟み後の
@@ -206,8 +208,8 @@ export function createApp() {
       if (aborted) return;
 
       const userData: WsUserData = auth
-        ? { userId: auth.userId, sessionId: auth.sessionId, isGuest: false, promoted: false, closed: false }
-        : { userId: "", sessionId: `guest_${crypto.randomUUID()}`, isGuest: true, promoted: false, closed: false };
+        ? { userId: auth.userId, sessionId: auth.sessionId, isGuest: false, promoted: false, closed: false, ip }
+        : { userId: "", sessionId: `guest_${crypto.randomUUID()}`, isGuest: true, promoted: false, closed: false, ip };
 
       res.cork(() => {
         res.upgrade(userData, secWsKey, echoProtocol, secWsExtensions, context);
