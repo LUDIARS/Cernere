@@ -38,11 +38,12 @@ import { config } from "../config.js";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { redis, checkRateLimit } from "../redis.js";
-import { generateTokenPair, verifyToken, verifyProjectToken, extractBearerToken, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
+import { generateTokenPair, verifyToken, extractBearerToken, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
 import { hashRefreshToken } from "../auth/token-hash.js";
 import { issueAuthCode } from "../auth/auth-code.js";
 import { logUserLogin, logUserLoginFailed } from "../logging/auth-logger.js";
 import { devLog } from "../logging/dev-logger.js";
+import { requireExportAuth } from "./export-auth.js";
 
 interface RouteResult { status: string; data: unknown }
 export interface RequestCtx { ip?: string; userAgent?: string }
@@ -100,29 +101,8 @@ function challengeKey(prefix: string, id: string): string {
   return `passkey:challenge:${prefix}:${id}`;
 }
 
-/**
- * export 用の認可。 admin 限定 (CONTRACTS.md §2)。 2 経路を許す:
- *   1. user accessToken で `users.role === 'admin'` のユーザ (運用者の手動取得)
- *   2. project token (= service-to-service Bearer。 Ostiarius の CERNERE_SERVICE_TOKEN)
- * どちらも満たさなければ 401/403。
- */
-async function requireExportAuth(authHeader: string): Promise<void> {
-  const token = extractBearerToken(authHeader);
-  if (!token) throw new Error("Unauthorized: missing bearer token");
-
-  // (2) service: project token (project_credentials 由来) を先に試す
-  try {
-    verifyProjectToken(token);
-    return; // 有効な project token = service 認証成立
-  } catch { /* user token として再評価 */ }
-
-  // (1) user: accessToken を検証し、 DB の role が admin かを確認
-  const payload = verifyToken(token);
-  if (typeof payload.sub !== "string") throw new Error("Unauthorized: invalid token");
-  const rows = await db.select({ role: schema.users.role })
-    .from(schema.users).where(eq(schema.users.id, payload.sub)).limit(1);
-  if (rows[0]?.role !== "admin") throw new Error("Forbidden: admin required");
-}
+// export 用の認可 (admin / service token) は他の export ルートとも共有するため
+// ./export-auth.ts に切り出し済み (requireExportAuth を import して使う)。
 
 // ─── REGISTER ─────────────────────────────────────────────────────
 
