@@ -24,6 +24,7 @@ import {
   handleOidcDeny,
 } from "./http/oidc-handler.js";
 import { devLog, devError } from "./logging/dev-logger.js";
+import { AppError } from "./error.js";
 import {
   handleWsOpen,
   handleWsMessage,
@@ -135,7 +136,26 @@ function jsonResponse(res: uWS.HttpResponse, status: string, data: unknown): voi
  * 4xx に、それ以外は 500 として扱う (サーバー側の不具合をクライアントに
  * 200/400 で隠蔽しないため)。
  */
+const STATUS_TEXT: Record<number, string> = {
+  400: "400 Bad Request",
+  401: "401 Unauthorized",
+  403: "403 Forbidden",
+  404: "404 Not Found",
+  409: "409 Conflict",
+  429: "429 Too Many Requests",
+  500: "500 Internal Server Error",
+};
+
 function classifyError(err: unknown): { status: string; message: string } {
+  // AppError は statusCode を明示的に持つため、メッセージ文言の正規表現マッチに
+  // 依存せずそのまま使う。 メッセージがどんな文言でも (例: "Invalid or expired
+  // token" のように "Unauthorized" を含まない) 正しい 4xx にマップされる。
+  if (err instanceof AppError) {
+    const status = STATUS_TEXT[err.statusCode] ?? "500 Internal Server Error";
+    const message = err.statusCode >= 500 && !config.isDevelopment ? "Internal server error" : err.message;
+    return { status, message };
+  }
+
   const msg = err instanceof Error ? err.message : String(err ?? "Internal error");
 
   if (/Unauthorized/i.test(msg)) return { status: "401 Unauthorized", message: msg };
