@@ -169,6 +169,58 @@ export async function getProject(key: string) {
   };
 }
 
+// ── Schema Export (定義 shape のみ, project_data_<key> 実データには触れない) ──
+//
+// Foedus (クロスサービス契約/PII レビューア) が、コミット済み JSON の代わりに
+// レビュー時にライブでプロジェクトのスキーマ定義 (shape) を取得するための
+// 読み取り専用ヘルパー。 managedProjects のみ問い合わせ、動的テーブル
+// (project_data_*) には一切アクセスしない。
+
+export interface ProjectSchemaExport {
+  key: string;
+  name: string;
+  description: string;
+  schemaDefinition: ProjectDefinition;
+}
+
+/**
+ * key 指定時: そのプロジェクトを isActive を問わず返す (getProject と同じ挙動 —
+ *   明示的に狙って呼んでいるので inactive でも隠さない)。見つからなければ 404。
+ * key 省略時: listProjects と同じ「全件 select → isActive で絞る」 方式で
+ *   active プロジェクトのみ返す。
+ */
+export async function exportProjectSchemaDefinitions(key?: string): Promise<ProjectSchemaExport[]> {
+  const cols = {
+    key: dbSchema.managedProjects.key,
+    name: dbSchema.managedProjects.name,
+    description: dbSchema.managedProjects.description,
+    schemaDefinition: dbSchema.managedProjects.schemaDefinition,
+    isActive: dbSchema.managedProjects.isActive,
+  };
+
+  if (key) {
+    const rows = await db.select(cols).from(dbSchema.managedProjects)
+      .where(eq(dbSchema.managedProjects.key, key)).limit(1);
+    if (rows.length === 0) throw AppError.notFound("Project not found");
+    return rows.map((r) => ({
+      key: r.key,
+      name: r.name,
+      description: r.description,
+      schemaDefinition: r.schemaDefinition as ProjectDefinition,
+    }));
+  }
+
+  const rows = await db.select(cols).from(dbSchema.managedProjects);
+  return rows
+    .filter((r) => r.isActive)
+    .map((r) => ({
+      key: r.key,
+      name: r.name,
+      description: r.description,
+      schemaDefinition: r.schemaDefinition as ProjectDefinition,
+    }));
+}
+
 export async function registerProject(payload: unknown, userId?: string) {
   let definition: ProjectDefinition;
 
