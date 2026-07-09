@@ -9,6 +9,7 @@ import uWS from "uWebSockets.js";
 import { config } from "./config.js";
 import { handleAuthRoute } from "./http/auth-handler.js";
 import { handlePasskeyRoute } from "./http/passkey-handler.js";
+import { exportProjectSchemas } from "./http/project-schema-handler.js";
 import { getPublicKeys } from "./auth/paseto.js";
 import { handleCompositeRoute } from "./http/composite-handler.js";
 import { handleOAuthRoute } from "./http/oauth-handler.js";
@@ -409,6 +410,39 @@ export function createApp() {
         console.error("[http] passkey/export 500:", err);
       } else {
         devLog("http.passkey.export.error", { status, message });
+      }
+      jsonResponse(res, status, { error: message });
+    }
+  });
+
+  // ── Project schema export (GET): スキーマ定義 shape のみ (admin/service 限定) ──
+  // Foedus (クロスサービス契約/PII レビューア) がコミット済み JSON の代わりに
+  // レビュー時にライブでスキーマ shape (カラム名/型/module) を取得するための
+  // エンドポイント。 PII フィールド構造を恒久的な git 記録として残さないための
+  // 変更。 project_data_<key> の実データ行は返さない (project-schema-handler.ts /
+  // exportProjectSchemaDefinitions を参照)。 ?key=<projectKey> で単一プロジェクトに
+  // 絞り込み可能 (省略時は active 全件)。
+  app.get("/api/admin/projects/schema-export", async (res, req) => {
+    const authHeader = req.getHeader("authorization") ?? "";
+    const query = req.getQuery() ?? "";
+    const ip = getRemoteIp(res);
+    let aborted = false;
+    res.onAborted(() => { aborted = true; });
+
+    devLog("http.project.schema-export.begin", { ip });
+    try {
+      const result = await exportProjectSchemas(authHeader, query);
+      if (aborted) return;
+      devLog("http.project.schema-export.ok", { status: result.status });
+      jsonResponse(res, result.status, result.data);
+    } catch (err) {
+      if (aborted) return;
+      const { status, message } = classifyError(err);
+      if (status === "500 Internal Server Error") {
+        devError("http.project.schema-export.500", err, { ip });
+        console.error("[http] admin/projects/schema-export 500:", err);
+      } else {
+        devLog("http.project.schema-export.error", { status, message });
       }
       jsonResponse(res, status, { error: message });
     }
