@@ -58,11 +58,24 @@ export async function dispatchProjectCommand(
     }
     // ─── managed_project: project_data_{key} へのユーザーデータアクセス ───
     // projectKey は WS セッションで bind されており、payload では受け取らない
-    // (他プロジェクトの書き換えを防止)。
+    // (他プロジェクトの書き換えを防止)。書き込み系 (set/delete) は常に自分の
+    // projectKey にのみ作用する — targetProjectKey は読み取り専用でしか受け付けない。
     case "managed_project.get_user_data": {
-      const svc = await import("../project/service.js");
       const userId = requireStr(payload, "userId");
       const columns = Array.isArray(payload.columns) ? payload.columns as string[] : undefined;
+      const targetProjectKey = typeof payload.targetProjectKey === "string"
+        ? payload.targetProjectKey
+        : undefined;
+
+      // targetProjectKey が自分自身と異なる場合のみ、他プロジェクトの data_sharing
+      // 許可を経由するクロスプロジェクト読み取りに回す。省略時/自分自身の場合は
+      // 既存の自己データ読み取りのまま (挙動変更なし)。
+      if (targetProjectKey && targetProjectKey !== projectKey) {
+        const { getSharedUserColumns } = await import("../project/data-sharing.js");
+        return getSharedUserColumns(projectKey, targetProjectKey, userId, columns);
+      }
+
+      const svc = await import("../project/service.js");
       return svc.getUserColumns(projectKey, userId, columns);
     }
     case "managed_project.set_user_data": {
