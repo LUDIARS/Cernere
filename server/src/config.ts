@@ -98,6 +98,27 @@ export const config = {
   isProduction: isProduction(),
   isDevelopment: isDevelopment(),
 
+  // ── Composite 認証: authCode 送信先の許可リスト ───────────
+  // composite ログインは authCode を postMessage の origin / redirect_uri へ
+  // 返す。 これらは呼び出し元 URL のクエリ由来 (= 攻撃者が細工しうる) なので、
+  // 完全一致の origin 許可リストで検証する (OIDC の redirect_uri と同じ思想。
+  // 部分一致・ワイルドカードは open redirect / token 横取りの温床のため不採用)。
+  // CERNERE_COMPOSITE_ALLOWED_ORIGINS はカンマ区切りの first-party origin。
+  // 例: "https://memoria.ludiars.com,https://dash.ludiars.com"。
+  // FRONTEND_URL 自身の origin は常に許可 (Cernere 自ページからの呼び出し)。
+  compositeAllowedOrigins: (() => {
+    const toOrigin = (s: string): string | null => {
+      try { return new URL(s).origin; } catch { return null; }
+    };
+    const frontendOrigin = toOrigin(env("FRONTEND_URL", "http://localhost:5173"));
+    const fromEnv = env("CERNERE_COMPOSITE_ALLOWED_ORIGINS", "")
+      .split(",").map((s) => s.trim()).filter(Boolean)
+      .map(toOrigin);
+    return Array.from(
+      new Set([frontendOrigin, ...fromEnv].filter((s): s is string => !!s && s !== "null")),
+    );
+  })(),
+
   // ── WebAuthn / Passkey ────────────────────────────────────
   // RP ID は eTLD+1 (例: cernere.example.com → cernere.example.com、
   // または親ドメイン example.com)。 ブラウザは window.location.origin を見て
