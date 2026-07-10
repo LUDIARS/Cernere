@@ -15,6 +15,7 @@ import { hashRefreshToken } from "../auth/token-hash.js";
 import { redis, SESSION_TTL_SECS } from "../redis.js";
 import { logAuthEvent } from "../logging/auth-logger.js";
 import { encryptSecret } from "../lib/crypto/secret-box.js";
+import { isCompositeTargetAllowed } from "../auth/composite-redirect.js";
 
 const CSRF_COOKIE = "cernere_csrf_state";
 const SESSION_COOKIE = "ars_session";
@@ -217,6 +218,15 @@ async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader
     // composite:<origin>:<uuid> から origin を抽出
     const compositeOrigin = stateParam!.split(":").slice(1, -1).join(":");
     if (aborted) return;
+    // VULNWEB-001: 送信先 origin を許可リストで検証。 不正なら authCode を渡さず
+    // エラーへ返す (Redis の authCode は未使用のまま TTL 失効させる)。
+    if (!isCompositeTargetAllowed(compositeOrigin)) {
+      logAuthEvent({ event: "user.oauth.failed", userId, provider: "github", composite: true, reason: "redirect target not allowlisted", ip: ctx.ip, userAgent: ctx.userAgent });
+      redirect(res, `${config.frontendUrl}?authError=${encodeURIComponent("Invalid redirect target")}`, [
+        deleteCookieHeader(CSRF_COOKIE),
+      ]);
+      return;
+    }
     redirect(res, `${config.frontendUrl}/composite/callback?code=${authCode}&origin=${encodeURIComponent(compositeOrigin)}`, [
       deleteCookieHeader(CSRF_COOKIE),
     ]);
@@ -357,6 +367,14 @@ async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader
   // Composite flow: composite callback にリダイレクト
   if (isCompositeGoogle) {
     const compositeOrigin = stateParam!.split(":").slice(1, -1).join(":");
+    // VULNWEB-001: 送信先 origin を許可リストで検証。 不正なら authCode を渡さない。
+    if (!isCompositeTargetAllowed(compositeOrigin)) {
+      logAuthEvent({ event: "user.oauth.failed", userId, provider: "google", composite: true, reason: "redirect target not allowlisted", ip: ctx.ip, userAgent: ctx.userAgent });
+      redirect(res, `${frontend}?authError=${encodeURIComponent("Invalid redirect target")}`, [
+        deleteCookieHeader(CSRF_COOKIE),
+      ]);
+      return;
+    }
     redirect(res, `${frontend}/composite/callback?code=${authCode}&origin=${encodeURIComponent(compositeOrigin)}`, [
       deleteCookieHeader(CSRF_COOKIE),
     ]);

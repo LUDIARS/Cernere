@@ -25,6 +25,7 @@ import {
   type AuthenticationResponseJSON,
 } from "@simplewebauthn/browser";
 import { collectDeviceFingerprint } from "../../lib/device-fingerprint";
+import { fetchAllowedOrigins, isTargetAllowed } from "../../lib/composite-redirect";
 
 const API_BASE = "";
 
@@ -99,6 +100,7 @@ export function CompositeLoginPage() {
 
   const wsRef = useRef<WebSocket | null>(null);
   const retryTimerRef = useRef<number | null>(null);
+  const allowedOriginsRef = useRef<string[]>([]);
 
   // ── アンマウント時の掃除 ──
   useEffect(() => {
@@ -112,14 +114,45 @@ export function CompositeLoginPage() {
     };
   }, []);
 
+  // ── 送信先 (origin / redirect_uri) をサーバ許可リストで事前検証 (VULNWEB-001) ──
+  // 不正な送信先ならログイン UI を出す前に停止し、 authCode を発行させない。
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const allowed = await fetchAllowedOrigins();
+      if (cancelled) return;
+      allowedOriginsRef.current = allowed;
+      const target = origin ?? redirectUri;
+      if (!target) {
+        setError("送信先が指定されていません (origin / redirect_uri が必要です)。");
+      } else if (!isTargetAllowed(target, allowed)) {
+        setError("許可されていない送信先です。この画面は安全に続行できません。");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [origin, redirectUri]);
+
   const completeAuth = (authCode: string) => {
+    const allowed = allowedOriginsRef.current;
+    // 権威はサーバ許可リスト。 postMessage/redirect の直前で必ず再検証し、
+    // 許可外の送信先へ authCode を渡さない (fail-closed)。
     if (origin && window.opener) {
-      window.opener.postMessage({ type: "cernere:auth", authCode }, origin);
+      if (!isTargetAllowed(origin, allowed)) {
+        setError("許可されていない送信先のため認証を中止しました。");
+        return;
+      }
+      window.opener.postMessage({ type: "cernere:auth", authCode }, new URL(origin).origin);
       window.close();
     } else if (redirectUri) {
+      if (!isTargetAllowed(redirectUri, allowed)) {
+        setError("許可されていないリダイレクト先のため認証を中止しました。");
+        return;
+      }
       const url = new URL(redirectUri);
       url.searchParams.set("code", authCode);
       window.location.href = url.toString();
+    } else {
+      setError("送信先が指定されていません。");
     }
   };
 
