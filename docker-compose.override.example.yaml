@@ -1,0 +1,23 @@
+# Local override テンプレート — コピーして docker-compose.override.yaml を作る。
+#
+#   cp docker-compose.override.example.yaml docker-compose.override.yaml
+#   npx tsx scripts/generate-paseto-keypair.ts   # 生成した鍵を下の <...> に貼る
+#
+# docker-compose.override.yaml は .gitignore 済み。**秘密鍵を含むため絶対にコミットしない。**
+# PASETO keypair をローカル注入し、DATABASE_URL/REDIS_URL を infra_default に向けて
+# Infisical の本番 URL 無しで Cernere を起動できるようにする。
+services:
+  backend-dev:
+    environment:
+      DATABASE_URL: "postgresql://cernere:cernere@infra-postgres-1:5432/cernere"
+      REDIS_URL: "redis://infra-redis-1:6379/1"
+      CERNERE_PASETO_SECRET_KEY: "<generate-paseto-keypair.ts が出力した secret key>"
+      CERNERE_PASETO_PUBLIC_KEY: "<generate-paseto-keypair.ts が出力した public key>"
+      CERNERE_PASETO_KID: "v1"
+    networks:
+      - default
+      - infra_default
+
+networks:
+  infra_default:
+    external: true
