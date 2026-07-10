@@ -12,8 +12,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@ludiars/vestigium": "^0.1.0",
     "@aws-sdk/client-ses": "^3.1030.0",
+    "@ludiars/vestigium": "^0.1.0",
     "@simplewebauthn/server": "^13.3.0",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.45.1",
@@ -22,8 +22,8 @@
     "nodemailer": "^8.0.5",
     "paseto": "^3.1.4",
     "postgres": "^3.4.8",
-    "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.63.0",
     "uuid": "^13.0.0",
+    "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.63.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -32,7 +32,7 @@
     "@types/node": "^22.0.0",
     "@types/nodemailer": "^8.0.0",
     "@types/uuid": "^10.0.0",
-    "drizzle-kit": "^0.31.0",
+    "drizzle-kit": "^0.18.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.0",
     "vitest": "^4.1.7"
