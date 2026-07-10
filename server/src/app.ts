@@ -12,6 +12,7 @@ import { handlePasskeyRoute } from "./http/passkey-handler.js";
 import { exportProjectSchemas } from "./http/project-schema-handler.js";
 import { getPublicKeys } from "./auth/paseto.js";
 import { handleCompositeRoute } from "./http/composite-handler.js";
+import { compositeAllowedOrigins } from "./auth/composite-redirect.js";
 import { handleOAuthRoute } from "./http/oauth-handler.js";
 import {
   handleOidcDiscovery,
@@ -495,6 +496,17 @@ export function createApp() {
       }
       jsonResponse(res, status, { error: message });
     }
+  });
+
+  // ── Composite Auth: GET /api/auth/composite/allowed-origins ──
+  // フロント (CompositeLoginPage / CompositeCallbackPage) が authCode の送信先
+  // (postMessage origin / redirect_uri) を forward 前に検証するための許可リスト。
+  // 権威はサーバ側 config。 許可リストは秘密ではないため認証不要・キャッシュ可。
+  app.get("/api/auth/composite/allowed-origins", (res) => {
+    res.cork(() => {
+      res.writeHeader("cache-control", "public, max-age=300");
+      jsonResponse(res, "200 OK", { origins: compositeAllowedOrigins() });
+    });
   });
 
   // ── Auth REST: GET /api/auth/me ─────────────────────────
