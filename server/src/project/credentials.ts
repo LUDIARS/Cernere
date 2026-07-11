@@ -8,6 +8,11 @@ export async function hashProjectSecret(clientSecret: string): Promise<string> {
   return bcrypt.hash(clientSecret, BCRYPT_COST);
 }
 
+/** 保存済みの一方向 hash に対して project secret を検証する。 */
+export async function verifyProjectSecret(clientSecret: string, hash: string): Promise<boolean> {
+  return bcrypt.compare(clientSecret, hash);
+}
+
 /** DB保存用hashと、一度だけ呼び出し元へ返す平文secretを発行する。 */
 export async function issueProjectSecret(): Promise<{
   clientSecret: string;

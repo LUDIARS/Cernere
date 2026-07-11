@@ -49,12 +49,11 @@ Content-Type: application/json
 ```
 
 Cernereは`project_credential_issuers`でissuerをfail-closedに検査する。Exから受け取った
-平文はレスポンスへ返さず、現行認証用bcrypt hashを`managed_projects`へ、AES-256-GCM暗号文と
-起動履歴を`project_launch_credentials`へ永続化する。同じactiveな`launch_id`の再送は
-保存済み暗号文を復号して冪等応答し、新しい起動では旧credentialを無効化する。
-暗号化鍵`CERNERE_SECRET_KEY`が未設定・不正な場合は発行全体を拒否し、平文保存へ降格しない。
+平文はレスポンスへ返さず、現行認証用と履歴照合用のbcrypt hashだけを永続化する。同じactiveな
+`launch_id + secret`の再送は冪等応答し、異なるsecretなら409を返す。新しい起動では
+`credential_generation`を増やし、旧secretだけでなく旧JWTと旧WebSocket操作も無効化する。
 
-> `client_secret` は共有 long-lived secret なので、これ自体は「サービスのサーバが Cernere に対して自分を名乗る」用途に限定する。エンドユーザ操作のための token は下記 project-token を使う。
+> ExがGLABへ注入する`client_secret`は起動単位であり、Ex自身のissuer credentialとは別物。issuer credentialはGLABへ継承しない。エンドユーザ操作のためのtokenは下記project-tokenを使う。
 
 ## 2. サーバ認証 → project token (HS256)
 

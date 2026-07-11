@@ -288,6 +288,7 @@ export const managedProjects = pgTable("managed_projects", {
   description: text("description").notNull().default(""),
   clientId: text("client_id").notNull().unique(),
   clientSecretHash: text("client_secret_hash").notNull(),
+  credentialGeneration: integer("credential_generation").notNull().default(0),
   schemaDefinition: jsonb("schema_definition").notNull().default({}),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -312,7 +313,7 @@ export const projectCredentialIssuers = pgTable("project_credential_issuers", {
 
 /**
  * Ex 等の launcher が発行させた project credential の永続履歴。
- * client_secret_encrypted は secret-box (AES-256-GCM) 済みの値だけを保存する。
+ * client secret は一方向 hash のみを保存する。encrypted は旧行の遅延移行専用。
  */
 export const projectLaunchCredentials = pgTable("project_launch_credentials", {
   id: uuid("id").primaryKey(),
@@ -322,7 +323,9 @@ export const projectLaunchCredentials = pgTable("project_launch_credentials", {
     .references(() => managedProjects.key, { onDelete: "cascade" }),
   launchId: uuid("launch_id").notNull(),
   clientId: text("client_id").notNull(),
-  clientSecretEncrypted: text("client_secret_encrypted").notNull(),
+  clientSecretHash: text("client_secret_hash"),
+  clientSecretEncrypted: text("client_secret_encrypted"),
+  credentialGeneration: integer("credential_generation").notNull().default(0),
   issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
 }, (t) => [

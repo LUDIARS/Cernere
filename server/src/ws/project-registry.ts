@@ -16,7 +16,11 @@ interface ConnectionEntry {
   connectionId: string;
   clientId: string;
   connectedAt: Date;
+  credentialGeneration: number;
+  close: () => void;
 }
+
+export type ProjectConnectionInfo = Omit<ConnectionEntry, "close">;
 
 interface ProjectStatus {
   /** 現在 OPEN な接続数 */
@@ -31,14 +35,20 @@ const connections = new Map<string, Map<string, ConnectionEntry>>();
 const lastDisconnectedAt = new Map<string, Date>();
 const lastConnectedAt = new Map<string, Date>();
 
-export function addConnection(projectKey: string, connectionId: string, clientId: string): void {
+export function addConnection(
+  projectKey: string,
+  connectionId: string,
+  clientId: string,
+  credentialGeneration: number,
+  close: () => void,
+): void {
   let map = connections.get(projectKey);
   if (!map) {
     map = new Map();
     connections.set(projectKey, map);
   }
   const now = new Date();
-  map.set(connectionId, { connectionId, clientId, connectedAt: now });
+  map.set(connectionId, { connectionId, clientId, connectedAt: now, credentialGeneration, close });
   lastConnectedAt.set(projectKey, now);
   devLog("project-registry.add", {
     projectKey,
@@ -46,6 +56,20 @@ export function addConnection(projectKey: string, connectionId: string, clientId
     clientId,
     total: map.size,
   });
+}
+
+/** このプロセスに接続中の旧世代セッションを、credential 更新直後に閉じる。 */
+export function closeConnectionsBeforeGeneration(projectKey: string, currentGeneration: number): void {
+  const map = connections.get(projectKey);
+  if (!map) return;
+  for (const entry of map.values()) {
+    if (entry.credentialGeneration >= currentGeneration) continue;
+    try {
+      entry.close();
+    } catch {
+      // DB 世代検査も各 request で実行するため、close 失敗時も fail-closed を維持できる。
+    }
+  }
 }
 
 export function removeConnection(projectKey: string, connectionId: string): void {
@@ -88,8 +112,8 @@ export function getAllProjectStatus(): Map<string, ProjectStatus> {
 }
 
 /** 単一プロジェクトの接続詳細 (admin 用、clientId/connectedAt まで返す) */
-export function getProjectConnections(projectKey: string): ConnectionEntry[] {
+export function getProjectConnections(projectKey: string): ProjectConnectionInfo[] {
   const map = connections.get(projectKey);
   if (!map) return [];
-  return Array.from(map.values());
+  return Array.from(map.values(), ({ close: _close, ...entry }) => entry);
 }

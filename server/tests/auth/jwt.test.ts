@@ -47,10 +47,11 @@ describe("auth/jwt — access token", () => {
 
 describe("auth/jwt — project token (HS256)", () => {
   it("round-trips clientId + projectKey with tokenType=project", () => {
-    const token = generateProjectToken("client-9", "memoria");
+    const token = generateProjectToken("client-9", "memoria", 7);
     const claims = verifyProjectToken(token);
     expect(claims.sub).toBe("client-9");
     expect(claims.projectKey).toBe("memoria");
+    expect(claims.credentialGeneration).toBe(7);
     expect(claims.tokenType).toBe("project");
   });
 

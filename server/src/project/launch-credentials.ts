@@ -2,8 +2,9 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as dbSchema from "../db/schema.js";
 import { AppError } from "../error.js";
-import { decryptSecret, encryptSecret } from "../lib/crypto/secret-box.js";
-import { hashProjectSecret } from "./credentials.js";
+import { decryptSecret } from "../lib/crypto/secret-box.js";
+import { closeConnectionsBeforeGeneration } from "../ws/project-registry.js";
+import { hashProjectSecret, verifyProjectSecret } from "./credentials.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -16,16 +17,12 @@ export interface ProjectLaunchCredential {
   idempotent: boolean;
 }
 
-/** 平文・認証用hash・DB保存用暗号文を同時に生成する。 */
+/** 起動secretから、復元不能な認証・履歴照合用hashだけを生成する。 */
 export async function createLaunchCredentialMaterial(clientSecret: string): Promise<{
   clientSecretHash: string;
-  clientSecretEncrypted: string;
 }> {
   const clientSecretHash = await hashProjectSecret(clientSecret);
-  return {
-    clientSecretHash,
-    clientSecretEncrypted: encryptSecret(clientSecret),
-  };
+  return { clientSecretHash };
 }
 
 /**
@@ -70,13 +67,16 @@ export async function issueProjectLaunchCredential(
       key: dbSchema.managedProjects.key,
       clientId: dbSchema.managedProjects.clientId,
       active: dbSchema.managedProjects.isActive,
+      credentialGeneration: dbSchema.managedProjects.credentialGeneration,
     }).from(dbSchema.managedProjects)
       .where(eq(dbSchema.managedProjects.key, targetProjectKey)).limit(1);
     if (targets.length === 0 || !targets[0].active) throw AppError.notFound("Target project not found");
 
     const previous = await tx.select({
       clientId: dbSchema.projectLaunchCredentials.clientId,
+      hash: dbSchema.projectLaunchCredentials.clientSecretHash,
       encrypted: dbSchema.projectLaunchCredentials.clientSecretEncrypted,
+      credentialGeneration: dbSchema.projectLaunchCredentials.credentialGeneration,
       issuedAt: dbSchema.projectLaunchCredentials.issuedAt,
       revokedAt: dbSchema.projectLaunchCredentials.revokedAt,
     }).from(dbSchema.projectLaunchCredentials)
@@ -89,25 +89,45 @@ export async function issueProjectLaunchCredential(
       if (previous[0].revokedAt) {
         throw AppError.conflict("launch credential has already been superseded");
       }
-      if (decryptSecret(previous[0].encrypted) !== clientSecret) {
+      const secretMatches = previous[0].hash
+        ? await verifyProjectSecret(clientSecret, previous[0].hash)
+        : previous[0].encrypted !== null && decryptSecret(previous[0].encrypted) === clientSecret;
+      if (!secretMatches) {
         throw AppError.conflict("launch_id was already used with a different credential");
+      }
+      if (!previous[0].hash) {
+        const clientSecretHash = await hashProjectSecret(clientSecret);
+        await tx.update(dbSchema.projectLaunchCredentials).set({
+          clientSecretHash,
+          clientSecretEncrypted: null,
+        }).where(and(
+          eq(dbSchema.projectLaunchCredentials.issuerProjectKey, issuerProjectKey),
+          eq(dbSchema.projectLaunchCredentials.targetProjectKey, targetProjectKey),
+          eq(dbSchema.projectLaunchCredentials.launchId, launchId),
+        ));
       }
       return {
         clientId: previous[0].clientId,
         issuedAt: previous[0].issuedAt,
+        credentialGeneration: previous[0].credentialGeneration,
         idempotent: true,
       };
     }
 
     const material = await createLaunchCredentialMaterial(clientSecret);
     const now = new Date();
-    await tx.update(dbSchema.projectLaunchCredentials).set({ revokedAt: now })
+    const credentialGeneration = targets[0].credentialGeneration + 1;
+    await tx.update(dbSchema.projectLaunchCredentials).set({
+      revokedAt: now,
+      clientSecretEncrypted: null,
+    })
       .where(and(
         eq(dbSchema.projectLaunchCredentials.targetProjectKey, targetProjectKey),
         isNull(dbSchema.projectLaunchCredentials.revokedAt),
       ));
     await tx.update(dbSchema.managedProjects).set({
       clientSecretHash: material.clientSecretHash,
+      credentialGeneration,
       updatedAt: now,
     }).where(eq(dbSchema.managedProjects.key, targetProjectKey));
     await tx.insert(dbSchema.projectLaunchCredentials).values({
@@ -116,16 +136,23 @@ export async function issueProjectLaunchCredential(
       issuerProjectKey,
       launchId,
       clientId: targets[0].clientId,
-      clientSecretEncrypted: material.clientSecretEncrypted,
+      clientSecretHash: material.clientSecretHash,
+      clientSecretEncrypted: null,
+      credentialGeneration,
       issuedAt: now,
     });
 
     return {
       clientId: targets[0].clientId,
       issuedAt: now,
+      credentialGeneration,
       idempotent: false,
     };
   });
+
+  if (!issued.idempotent) {
+    closeConnectionsBeforeGeneration(targetProjectKey, issued.credentialGeneration);
+  }
 
   return {
     targetProjectKey,

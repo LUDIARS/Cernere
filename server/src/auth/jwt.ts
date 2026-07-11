@@ -33,6 +33,8 @@ export interface ToolJwtClaims {
 export interface ProjectJwtClaims {
   sub: string;      // client_id
   projectKey: string;
+  /** 旧tokenとの移行互換のため省略時は0として扱う。 */
+  credentialGeneration?: number;
   tokenType: "project";
   iat: number;
   exp: number;
@@ -66,9 +68,13 @@ export function generateToolToken(toolClientId: string, ownerUserId: string, sco
  * 検証を委譲する設計. これにより Cernere 内に RSA 鍵管理 / JWKS 機構を
  * 持たずに済む.
  */
-export function generateProjectToken(clientId: string, projectKey: string): string {
+export function generateProjectToken(
+  clientId: string,
+  projectKey: string,
+  credentialGeneration = 0,
+): string {
   return jwt.sign(
-    { sub: clientId, projectKey, tokenType: "project" },
+    { sub: clientId, projectKey, credentialGeneration, tokenType: "project" },
     config.jwtSecret,
     { algorithm: "HS256", expiresIn: `${SERVICE_TOKEN_MINUTES}m` },
   );
