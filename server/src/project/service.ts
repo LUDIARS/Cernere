@@ -6,7 +6,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import bcrypt from "bcryptjs";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as dbSchema from "../db/schema.js";
@@ -17,6 +16,7 @@ import { migrateProjectSchema } from "./schema-migrator.js";
 import { encryptToken, decryptToken } from "./oauth-token-crypto.js";
 import * as cache from "./user-data-cache.js";
 import { getAllProjectStatus, getProjectConnections, getProjectStatus } from "../ws/project-registry.js";
+import { issueProjectSecret } from "./credentials.js";
 
 // ── Project definition helpers ───────────────────────────────
 
@@ -253,8 +253,7 @@ export async function registerProject(payload: unknown, userId?: string) {
   }
 
   const clientId = `proj_${definition.project.key}_${crypto.randomUUID().slice(0, 8)}`;
-  const clientSecret = crypto.randomUUID();
-  const clientSecretHash = await bcrypt.hash(clientSecret, 12);
+  const { clientSecret, clientSecretHash } = await issueProjectSecret();
 
   await db.insert(dbSchema.managedProjects).values({
     key: definition.project.key,
@@ -276,6 +275,32 @@ export async function registerProject(payload: unknown, userId?: string) {
     clientSecret,
     tableCreated: result.created,
     columnsAdded: result.columnsAdded,
+  };
+}
+
+/**
+ * managed project の long-lived secret を再発行する。
+ * 平文はこの戻り値で一度だけ返し、DB には bcrypt hash だけを保存する。
+ */
+export async function rotateProjectSecret(key: string) {
+  const rows = await db.select({
+    key: dbSchema.managedProjects.key,
+    clientId: dbSchema.managedProjects.clientId,
+  }).from(dbSchema.managedProjects)
+    .where(eq(dbSchema.managedProjects.key, key)).limit(1);
+  if (rows.length === 0) throw AppError.notFound("Project not found");
+
+  const { clientSecret, clientSecretHash } = await issueProjectSecret();
+  await db.update(dbSchema.managedProjects).set({
+    clientSecretHash,
+    updatedAt: new Date(),
+  }).where(eq(dbSchema.managedProjects.key, key));
+
+  return {
+    message: "Project secret rotated",
+    key: rows[0].key,
+    clientId: rows[0].clientId,
+    clientSecret,
   };
 }
 
