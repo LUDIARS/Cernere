@@ -29,6 +29,31 @@ npx tsx scripts/rotate-project-secret.ts --project glab
 
 ログイン済みsystem adminはWSの `managed_project.rotate_secret { key }` でも同じ操作を行える。
 
+### Excubitorによる起動時credential
+
+Excubitor自身は一度だけproject secretを発行し、Cernere用Infisical projectへ
+`EXCUBITOR_CERNERE_CLIENT_ID` / `EXCUBITOR_CERNERE_CLIENT_SECRET`として保存する。
+以後、GLAB起動時はExが次の認証endpointを呼び、GLAB用credentialを毎回rotateする。
+
+```http
+POST /api/auth/project-launch-credential
+Content-Type: application/json
+
+{
+  "client_id": "<Excubitor client id>",
+  "client_secret": "<Excubitor client secret>",
+  "target_project_key": "glab",
+  "launch_id": "<UUID>",
+  "target_client_secret": "<Exが起動ごとに生成した32文字以上のsecret>"
+}
+```
+
+Cernereは`project_credential_issuers`でissuerをfail-closedに検査する。Exから受け取った
+平文はレスポンスへ返さず、現行認証用bcrypt hashを`managed_projects`へ、AES-256-GCM暗号文と
+起動履歴を`project_launch_credentials`へ永続化する。同じactiveな`launch_id`の再送は
+保存済み暗号文を復号して冪等応答し、新しい起動では旧credentialを無効化する。
+暗号化鍵`CERNERE_SECRET_KEY`が未設定・不正な場合は発行全体を拒否し、平文保存へ降格しない。
+
 > `client_secret` は共有 long-lived secret なので、これ自体は「サービスのサーバが Cernere に対して自分を名乗る」用途に限定する。エンドユーザ操作のための token は下記 project-token を使う。
 
 ## 2. サーバ認証 → project token (HS256)
