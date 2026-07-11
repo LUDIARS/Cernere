@@ -2,7 +2,7 @@
 
 LUDIARS 認証プラットフォーム Cernere の仕様書。AIFormat
 [`FORMAT_SPEC.md`](https://github.com/LUDIARS/AIFormat/blob/main/FORMAT_SPEC.md)
-の 6 分類フォルダ（data / feature / interface / plan / setup / test）に整理する。
+の 7 分類フォルダ（data / faq / feature / interface / plan / setup / test）に整理する。
 
 ## 目次
 
@@ -37,6 +37,8 @@ LUDIARS 認証プラットフォーム Cernere の仕様書。AIFormat
 ### `plan/` — 実装計画書（作業ドキュメント）
 | ドキュメント | 範囲 |
 |---|---|
+| [passkey-default-authentication.md](plan/passkey-default-authentication.md) | **Proposed**: passkey/email/hybrid モード・Device Credential・ローテーション・手動回復設計 |
+| [project-authentication.md](plan/project-authentication.md) | **Proposed**: Project公開鍵認証・短命session・ユーザー委譲・peer assertion設計 |
 | [commit-plan.md](plan/commit-plan.md) | Issue #49/#63/#64 のコミット計画 |
 | [migration-to-typescript.md](plan/migration-to-typescript.md) | Rust → Node.js 移行履歴 |
 
