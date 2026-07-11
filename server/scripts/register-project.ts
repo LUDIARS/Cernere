@@ -28,7 +28,8 @@
  * 出力される client_id / client_secret は、登録対象サービス側の Infisical
  * secret (例: CERNERE_CLIENT_ID / CERNERE_CLIENT_SECRET、キー名はサービスの
  * 実装に合わせる) に保存し、/ws/project 接続の認証情報として使わせること。
- * client_secret は再表示できないため、紛失時は再登録 (delete → register) が必要。
+ * client_secret は再表示できないため、紛失時は
+ * `tsx scripts/rotate-project-secret.ts --project <key>` で再発行する。
  */
 
 import fs from "node:fs";

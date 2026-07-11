@@ -19,6 +19,16 @@
 
 登録は admin による DB 直挿入、またはシード migration (例: `017_memoria_managed_project_seed.sql` / `020_legatus_managed_project_seed.sql`) で行う。`client_secret` は bcrypt ハッシュにして `client_secret_hash` に格納する。
 
+シード migration が作った project の初回secret取得、またはsecret紛失時の再発行は、
+対象DBの `DATABASE_URL` を設定して `server/` から次を実行する。旧secretは即時無効になり、
+新しい平文secretはこの出力で一度だけ表示される。
+
+```bash
+npx tsx scripts/rotate-project-secret.ts --project glab
+```
+
+ログイン済みsystem adminはWSの `managed_project.rotate_secret { key }` でも同じ操作を行える。
+
 > `client_secret` は共有 long-lived secret なので、これ自体は「サービスのサーバが Cernere に対して自分を名乗る」用途に限定する。エンドユーザ操作のための token は下記 project-token を使う。
 
 ## 2. サーバ認証 → project token (HS256)

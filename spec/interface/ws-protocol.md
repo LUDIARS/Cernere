@@ -109,6 +109,7 @@ sequenceDiagram
 | `auth.login` / `auth.register` / `auth.mfa-verify` | composite 認証の relay (ブラウザ → サービス → Cernere) |
 | `managed_project.get_user_data` / `set_user_data` / `delete_user_data` | 動的テーブルの user データ操作 |
 | `managed_project.update_schema` | プロジェクト自身のスキーマ更新 |
+| `managed_project.rotate_secret` | system admin限定。project secretを再発行し、平文を一度だけ返す |
 | `managed_project.store_oauth_token` 他 | OAuth トークンを Cernere に預ける ([oauth-token-storage.md](oauth-token-storage.md)) |
 | `managed_project.verify_token` | peer から渡された project token のリモート検証 ([peer-relay.md](peer-relay.md)) |
 | `managed_relay.register_endpoint` 他 | サービス間直接通信の調停 ([peer-relay.md](peer-relay.md)) |
