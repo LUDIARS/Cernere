@@ -174,6 +174,10 @@ sequenceDiagram
 
 GLAB はこの経路で `vantan_user` の `profile` module（名前・役職・学科）を初回登録する。
 
+GLABのproject credential自体は固定配布せず、Excubitorがspawn直前に
+`POST /api/auth/project-launch-credential`を呼んで取得する。Cernereは発行履歴を
+暗号化してDBへ永続化し、現行credentialだけを有効にする。
+
 ## エラー応答
 
 REST はステータスコードを `400 / 401 / 403 / 404 / 429 / 500` で返す ([server/src/app.ts](../../server/src/app.ts) の `classifyError`)。

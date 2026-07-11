@@ -207,6 +207,34 @@ WebAuthn / FIDO2 公開鍵（1 user に複数可）。
 
 - INDEX: `idx_managed_projects_client_id` (client_id)
 
+### `project_credential_issuers`
+起動時にtarget projectのcredentialを更新できるlauncher projectの許可リスト。
+
+| 列 | 型 | 制約 / 既定 |
+|---|---|---|
+| target_project_key | text | PKの一部、FK → managed_projects.key (CASCADE) |
+| issuer_project_key | text | PKの一部、FK → managed_projects.key (CASCADE) |
+| is_active | boolean | NOT NULL, default true |
+| created_at | timestamptz | NOT NULL, default now() |
+| updated_at | timestamptz | NOT NULL, default now() |
+
+### `project_launch_credentials`
+launcherが生成してCernereへ渡した起動単位credentialの暗号化履歴。
+
+| 列 | 型 | 制約 / 既定 |
+|---|---|---|
+| id | uuid | PK |
+| target_project_key | text | FK → managed_projects.key (CASCADE) |
+| issuer_project_key | text | FK → managed_projects.key (CASCADE) |
+| launch_id | uuid | NOT NULL |
+| client_id | text | NOT NULL |
+| client_secret_encrypted | text | NOT NULL、AES-256-GCM (`v1:`形式) |
+| issued_at | timestamptz | NOT NULL, default now() |
+| revoked_at | timestamptz | nullなら現行credential |
+
+- UNIQUE: `(issuer_project_key, target_project_key, launch_id)`
+- targetごとに`revoked_at IS NULL`は最大1行
+
 ### `project_definition_history`
 プロジェクト定義の版履歴。
 
