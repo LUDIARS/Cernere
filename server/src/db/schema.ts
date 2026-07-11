@@ -296,6 +296,42 @@ export const managedProjects = pgTable("managed_projects", {
   index("idx_managed_projects_client_id").on(t.clientId),
 ]);
 
+/** project credential を起動時に再発行できる issuer の許可リスト。 */
+export const projectCredentialIssuers = pgTable("project_credential_issuers", {
+  targetProjectKey: text("target_project_key").notNull()
+    .references(() => managedProjects.key, { onDelete: "cascade" }),
+  issuerProjectKey: text("issuer_project_key").notNull()
+    .references(() => managedProjects.key, { onDelete: "cascade" }),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.targetProjectKey, t.issuerProjectKey] }),
+  index("idx_project_credential_issuers_issuer").on(t.issuerProjectKey),
+]);
+
+/**
+ * Ex 等の launcher が発行させた project credential の永続履歴。
+ * client_secret_encrypted は secret-box (AES-256-GCM) 済みの値だけを保存する。
+ */
+export const projectLaunchCredentials = pgTable("project_launch_credentials", {
+  id: uuid("id").primaryKey(),
+  targetProjectKey: text("target_project_key").notNull()
+    .references(() => managedProjects.key, { onDelete: "cascade" }),
+  issuerProjectKey: text("issuer_project_key").notNull()
+    .references(() => managedProjects.key, { onDelete: "cascade" }),
+  launchId: uuid("launch_id").notNull(),
+  clientId: text("client_id").notNull(),
+  clientSecretEncrypted: text("client_secret_encrypted").notNull(),
+  issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+}, (t) => [
+  uniqueIndex("uq_project_launch_credentials_request")
+    .on(t.issuerProjectKey, t.targetProjectKey, t.launchId),
+  index("idx_project_launch_credentials_target_issued")
+    .on(t.targetProjectKey, t.issuedAt),
+]);
+
 // ── Relay Pairs (service adapter 同士の peer 許可) ────────────
 //
 // 2 つの managedProject が直接 WS で繋がる許可リスト.

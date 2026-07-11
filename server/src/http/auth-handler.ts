@@ -50,6 +50,7 @@ export async function handleAuthRoute(
     case "exchange": return exchange(parseBody(body));
     case "me": return me(authHeader);
     case "project-token": return projectUserToken(parseBody(body), authHeader, ctx);
+    case "project-launch-credential": return projectLaunchCredential(parseBody(body), ctx);
     default:
       return { status: "404 Not Found", data: { error: `Unknown auth action: ${action}` } };
   }
@@ -449,4 +450,45 @@ async function projectLogin(clientId: string | undefined, clientSecret: string |
       },
     },
   };
+}
+
+/** Excubitor等の認可済launcherが、target projectの起動credentialを毎回発行する。 */
+async function projectLaunchCredential(
+  p: Record<string, unknown>,
+  ctx: RequestCtx,
+): Promise<RouteResult> {
+  const clientId = p.client_id as string | undefined;
+  const clientSecret = p.client_secret as string | undefined;
+  const targetProjectKey = p.target_project_key as string | undefined;
+  const launchId = p.launch_id as string | undefined;
+  const targetClientSecret = p.target_client_secret as string | undefined;
+  if (!clientId || !clientSecret || !targetProjectKey || !launchId || !targetClientSecret) {
+    throw new Error(
+      "client_id, client_secret, target_project_key, launch_id, and target_client_secret are required",
+    );
+  }
+
+  await checkRateLimit(`project_launch_credential:${clientId}`, 30, 300);
+  const rows = await db.select().from(schema.managedProjects)
+    .where(eq(schema.managedProjects.clientId, clientId)).limit(1);
+  const issuer = rows[0];
+  if (!issuer || !issuer.isActive || !await bcrypt.compare(clientSecret, issuer.clientSecretHash)) {
+    logProjectLoginFailed(clientId, "invalid launch issuer credentials", ctx);
+    throw new Error("Unauthorized: Invalid project credentials");
+  }
+
+  const { issueProjectLaunchCredential } = await import("../project/launch-credentials.js");
+  const credential = await issueProjectLaunchCredential(
+    issuer.key,
+    targetProjectKey,
+    launchId,
+    targetClientSecret,
+  );
+  devLog("auth.projectLaunchCredential.issued", {
+    issuerProjectKey: issuer.key,
+    targetProjectKey,
+    launchId,
+    idempotent: credential.idempotent,
+  });
+  return { status: "201 Created", data: credential };
 }

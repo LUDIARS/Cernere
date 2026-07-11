@@ -9,6 +9,7 @@ Cernere がサポートする 5 種類の認証経路。すべて最終的に **
 | [user (email/pw)](#1-user-email--password) | email + password | access + refresh | エンドユーザの直接ログイン |
 | [user (OAuth)](#2-user-oauth-github--google) | GitHub / Google code | access + refresh | SNS 連携ログイン |
 | [project](#3-project-credentials) | client_id + client_secret | project token | サービスのサーバ認証 |
+| project launch | launcher project credential | 起動対象project credential | Excubitorによる起動時rotate |
 | [tool](#4-tool-client-credentials) | client_id + client_secret | tool token | CLI / API ツール認証 |
 | [composite](#5-composite-埋め込みログイン) | email + pw + デバイス本人確認 | one-time authCode | サービス内 SPA 埋め込みログイン |
 
