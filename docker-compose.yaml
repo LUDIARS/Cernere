@@ -80,6 +80,7 @@ services:
       INFISICAL_ENVIRONMENT: "${INFISICAL_ENVIRONMENT:-dev}"
       INFISICAL_CLIENT_ID: "${INFISICAL_CLIENT_ID:-}"
       INFISICAL_CLIENT_SECRET: "${INFISICAL_CLIENT_SECRET:-}"
+      NODE_AUTH_TOKEN: "${NODE_AUTH_TOKEN:-}"
     # pnpm v10 系は ERR_PNPM_IGNORED_BUILDS で esbuild postinstall を拒否し続ける
     # (workspace.yaml の onlyBuiltDependencies を書いても効かない version がある)。
     # 当面 pnpm v9 に pin して回避。 v10 の strict build script 仕様が安定したら戻す。
