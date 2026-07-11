@@ -77,7 +77,7 @@ services:
       LISTEN_PORT: "8080"
       NODE_ENV: "development"
       CI: "true"
-      DATABASE_URL: "${CERNERE_DOCKER_DATABASE_URL:-postgresql://cernere:cernere@infra-postgres-1:5432/cernere}"
+      DATABASE_URL: "${CERNERE_DOCKER_DATABASE_URL:-postgresql://cernere_user:cernere@infra-postgres-1:5432/cernere}"
       REDIS_URL: "${CERNERE_DOCKER_REDIS_URL:-redis://infra-redis-1:6379/1}"
       JWT_SECRET: "${JWT_SECRET:-}"
       GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID:-}"

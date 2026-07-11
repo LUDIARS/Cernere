@@ -5,7 +5,7 @@
 services:
   backend-dev:
     environment:
-      DATABASE_URL: "postgresql://cernere:cernere@infra-postgres-1:5432/cernere"
+      DATABASE_URL: "postgresql://cernere_user:cernere@infra-postgres-1:5432/cernere"
       REDIS_URL: "redis://infra-redis-1:6379/1"
       CERNERE_PASETO_SECRET_KEY: "IztdsZMdEV1l5A18byfNXJ/cFRkmC36hZoqa3RrWA5Q="
       CERNERE_PASETO_PUBLIC_KEY: "8W71rV8GDGP0J9Sz9+FfcaRfnblGQUe3NXRW5vj1ow4="
