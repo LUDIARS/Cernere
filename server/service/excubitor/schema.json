@@ -1,0 +1,11 @@
+{
+  "project": {
+    "key": "excubitor",
+    "name": "Excubitor",
+    "description": "LUDIARS service launcher and operations control plane"
+  },
+  "data_sharing": [],
+  "user_data": {
+    "columns": {}
+  }
+}

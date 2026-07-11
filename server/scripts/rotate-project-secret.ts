@@ -24,10 +24,14 @@ async function main(): Promise<void> {
   }
 
   const result = await rotateProjectSecret(project);
+  const envPrefix = project.toUpperCase().replace(/[^A-Z0-9]/g, "_");
   console.log(`\n${result.message}:\n`);
   console.log(`  key            : ${result.key}`);
   console.log(`  client_id      : ${result.clientId}`);
   console.log(`  client_secret  : ${result.clientSecret}   <-- shown ONCE, store it now`);
+  console.log("\nSuggested Cernere Infisical keys for an Excubitor launcher:");
+  console.log(`  ${envPrefix}_CERNERE_CLIENT_ID`);
+  console.log(`  ${envPrefix}_CERNERE_CLIENT_SECRET`);
   console.log("\nThe previous secret is invalid immediately. Store the new value in the consuming service's secret manager.\n");
   process.exit(0);
 }
