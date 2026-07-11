@@ -6,7 +6,7 @@
 --   保証する.
 -- - client_secret は migration からは復元できない random UUID を bcrypt
 --   で hash した値を入れる. 運用開始前に admin が
---     POST /api/admin/projects/:key/rotate-secret
+--     server/ で npx tsx scripts/rotate-project-secret.ts --project <key>
 --   を叩いて plaintext を受け取り、各サービスの .env に
 --     CERNERE_PROJECT_ID / CERNERE_PROJECT_SECRET
 --   として配布する.
