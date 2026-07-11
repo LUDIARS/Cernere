@@ -45,15 +45,15 @@ function detectOs(ua: string, platform: string): string {
 function detectBrowser(ua: string): { browser: string; version: string } {
   // 順序が重要: Edge → Chrome → Safari の順に判定
   const edge = /Edg\/(\d+(\.\d+)?)/.exec(ua);
-  if (edge) return { browser: "Edge", version: edge[1] };
+  if (edge) return { browser: "Edge", version: edge[1] ?? "" };
   const opera = /OPR\/(\d+(\.\d+)?)/.exec(ua);
-  if (opera) return { browser: "Opera", version: opera[1] };
+  if (opera) return { browser: "Opera", version: opera[1] ?? "" };
   const firefox = /Firefox\/(\d+(\.\d+)?)/.exec(ua);
-  if (firefox) return { browser: "Firefox", version: firefox[1] };
+  if (firefox) return { browser: "Firefox", version: firefox[1] ?? "" };
   const chrome = /Chrome\/(\d+(\.\d+)?)/.exec(ua);
-  if (chrome) return { browser: "Chrome", version: chrome[1] };
+  if (chrome) return { browser: "Chrome", version: chrome[1] ?? "" };
   const safari = /Version\/(\d+(\.\d+)?).*Safari/.exec(ua);
-  if (safari) return { browser: "Safari", version: safari[1] };
+  if (safari) return { browser: "Safari", version: safari[1] ?? "" };
   return { browser: "Unknown", version: "" };
 }
 
