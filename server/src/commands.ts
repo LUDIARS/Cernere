@@ -508,6 +508,10 @@ async function managedProjectCmd(userId: string, action: string, p?: Record<stri
       await requireSystemAdmin(userId);
       return svc.updateProjectSchema(requireStr(p, "key"), p, userId);
     }
+    case "rotate_secret": {
+      await requireSystemAdmin(userId);
+      return svc.rotateProjectSecret(requireStr(p, "key"));
+    }
     case "definition_history":
       return svc.getDefinitionHistory(requireStr(p, "key"));
     case "list_optouts":

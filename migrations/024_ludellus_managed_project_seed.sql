@@ -14,8 +14,9 @@
 -- (server/src/project/schema-migrator.ts / ensureUserProjectRow を参照)。
 --
 -- - client_secret は migration から復元できない random UUID を bcrypt で hash。
---   運用開始前に admin が POST /api/admin/projects/ludellus/rotate-secret で
---   plaintext を受け取り、Ludellus 側 (renderer の Cernere クライアント) へ配布。
+--   運用開始前に server/ で
+--     npx tsx scripts/rotate-project-secret.ts --project ludellus
+--   を実行して plaintext を一度だけ受け取り、Ludellus 側へ配布。
 -- - project_data_ludellus は runtime の register/update_schema(migrateProjectSchema)
 --   が生成するテーブルと同形を、admin 操作を待たず冪等に先行生成する。
 --   admin が後で同一定義で register しても IF NOT EXISTS で安全。
