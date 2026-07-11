@@ -23,8 +23,7 @@
  * --modules は繰り返し指定可能 (例: --modules profile --modules contact)。
  * 省略時は「そのプロジェクトの全モジュール」を共有する定義になる — 通常は
  * 明示的に絞り込むことを推奨する。--access は read (既定) | readwrite。
- * readwrite を指定しても Cernere 側に実際の書き込み共有 API はまだ無いため、
- * 現時点では read と同じ効果 (将来の書き込み共有実装に備えた宣言のみ)。
+ * readwrite は managed_project.set_user_data の targetProjectKey 経路も許可する。
  *
  * このスクリプトは秘密情報を発行しない (client_id/client_secret は
  * register-project.ts で別途発行済みのものをそのまま使う)。

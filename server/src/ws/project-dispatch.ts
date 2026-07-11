@@ -57,9 +57,9 @@ export async function dispatchProjectCommand(
       );
     }
     // ─── managed_project: project_data_{key} へのユーザーデータアクセス ───
-    // projectKey は WS セッションで bind されており、payload では受け取らない
-    // (他プロジェクトの書き換えを防止)。書き込み系 (set/delete) は常に自分の
-    // projectKey にのみ作用する — targetProjectKey は読み取り専用でしか受け付けない。
+    // projectKey は WS セッションで bind される。targetProjectKey を省略した操作は
+    // 常に自己 project に限定し、別 project の read/write は data_sharing grant を
+    // fail-closed で検査する。delete は引き続き自己 project のみ。
     case "managed_project.get_user_data": {
       const userId = requireStr(payload, "userId");
       const columns = Array.isArray(payload.columns) ? payload.columns as string[] : undefined;
@@ -84,6 +84,13 @@ export async function dispatchProjectCommand(
       const data = payload.data as Record<string, unknown> | undefined;
       if (!data || typeof data !== "object") {
         throw new Error("Missing or invalid field: data");
+      }
+      const targetProjectKey = typeof payload.targetProjectKey === "string"
+        ? payload.targetProjectKey
+        : undefined;
+      if (targetProjectKey && targetProjectKey !== projectKey) {
+        const { setSharedUserColumns } = await import("../project/data-sharing.js");
+        return setSharedUserColumns(projectKey, targetProjectKey, userId, data);
       }
       return svc.setUserData(projectKey, userId, data);
     }
