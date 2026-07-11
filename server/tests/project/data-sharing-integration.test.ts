@@ -19,11 +19,13 @@ vi.mock("../../src/db/connection.js", () => ({
 // 実データ取得 (postgres 直叩き) は getUserColumns 側の責務なので、ここでは
 // 「正しい引数で呼ばれたか」だけを検証し、実 DB には触れない。
 const mockGetUserColumns = vi.fn();
+const mockSetUserData = vi.fn();
 vi.mock("../../src/project/service.js", () => ({
   getUserColumns: (...args: unknown[]) => mockGetUserColumns(...args),
+  setUserData: (...args: unknown[]) => mockSetUserData(...args),
 }));
 
-const { getSharedUserColumns } = await import("../../src/project/data-sharing.js");
+const { getSharedUserColumns, setSharedUserColumns } = await import("../../src/project/data-sharing.js");
 
 function targetRow(definition: ProjectDefinition, isActive = true) {
   return [{ key: definition.project.key, isActive, schemaDefinition: definition }];
@@ -33,6 +35,7 @@ describe("getSharedUserColumns (data_sharing enforcement, db + service delegatio
   beforeEach(() => {
     mockManagedProjectRow.mockReset();
     mockGetUserColumns.mockReset();
+    mockSetUserData.mockReset();
   });
 
   it("rejects a caller project that is NOT listed in the target's data_sharing", async () => {
@@ -93,5 +96,67 @@ describe("getSharedUserColumns (data_sharing enforcement, db + service delegatio
     await expect(getSharedUserColumns("aedilis", "vantan_user", "user-1"))
       .rejects.toThrow(/not found/i);
     expect(mockGetUserColumns).not.toHaveBeenCalled();
+  });
+});
+
+describe("setSharedUserColumns (readwrite enforcement, db + service delegation mocked)", () => {
+  beforeEach(() => {
+    mockManagedProjectRow.mockReset();
+    mockSetUserData.mockReset().mockResolvedValue({ ok: true, updated: ["name"] });
+  });
+
+  it("delegates an allowed profile update to the target project", async () => {
+    const target: ProjectDefinition = {
+      project: { key: "vantan_user", name: "Vantan User", description: "" },
+      data_sharing: [{ project_key: "glab", access: "readwrite", modules: ["profile"] }],
+      user_data: {
+        columns: {
+          name: { type: "text", module: "profile", nullable: false },
+          internal_note: { type: "text", module: "admin", nullable: true },
+        },
+      },
+    };
+    mockManagedProjectRow.mockReturnValue(targetRow(target));
+
+    await setSharedUserColumns("glab", "vantan_user", "user-1", { name: "Neco" });
+
+    expect(mockSetUserData).toHaveBeenCalledWith(
+      "vantan_user",
+      "user-1",
+      { name: "Neco" },
+    );
+  });
+
+  it("rejects a read-only grant", async () => {
+    const target: ProjectDefinition = {
+      project: { key: "vantan_user", name: "Vantan User", description: "" },
+      data_sharing: [{ project_key: "glab", access: "read", modules: ["profile"] }],
+      user_data: { columns: { name: { type: "text", module: "profile", nullable: false } } },
+    };
+    mockManagedProjectRow.mockReturnValue(targetRow(target));
+
+    await expect(setSharedUserColumns("glab", "vantan_user", "user-1", { name: "Neco" }))
+      .rejects.toThrow(/no readwrite data_sharing grant/);
+    expect(mockSetUserData).not.toHaveBeenCalled();
+  });
+
+  it("rejects any column outside the granted modules", async () => {
+    const target: ProjectDefinition = {
+      project: { key: "vantan_user", name: "Vantan User", description: "" },
+      data_sharing: [{ project_key: "glab", access: "readwrite", modules: ["profile"] }],
+      user_data: {
+        columns: {
+          name: { type: "text", module: "profile", nullable: false },
+          internal_note: { type: "text", module: "admin", nullable: true },
+        },
+      },
+    };
+    mockManagedProjectRow.mockReturnValue(targetRow(target));
+
+    await expect(setSharedUserColumns("glab", "vantan_user", "user-1", {
+      name: "Neco",
+      internal_note: "blocked",
+    })).rejects.toThrow(/not writable/);
+    expect(mockSetUserData).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { resolveSharedColumnNames } from "../../src/project/data-sharing.js";
+import {
+  resolveSharedColumnNames,
+  resolveSharedWritableColumnNames,
+} from "../../src/project/data-sharing.js";
 import { dataShareDefinitionSchema, type ProjectDefinition } from "../../src/project/schema.js";
 
 function makeTargetDefinition(overrides: Partial<ProjectDefinition> = {}): ProjectDefinition {
@@ -89,5 +92,26 @@ describe("resolveSharedColumnNames", () => {
 
     const target = makeTargetDefinition({ data_sharing: [parsed] });
     expect(() => resolveSharedColumnNames("aedilis", target)).not.toThrow();
+  });
+});
+
+describe("resolveSharedWritableColumnNames", () => {
+  it("allows only columns covered by a matching readwrite grant", () => {
+    const target = makeTargetDefinition({
+      data_sharing: [{ project_key: "glab", access: "readwrite", modules: ["profile"] }],
+    });
+    expect(resolveSharedWritableColumnNames(
+      "glab",
+      target,
+      ["name", "department_name", "internal_note"],
+    )).toEqual(["name", "department_name"]);
+  });
+
+  it("rejects a read-only grant", () => {
+    const target = makeTargetDefinition({
+      data_sharing: [{ project_key: "glab", access: "read", modules: ["profile"] }],
+    });
+    expect(() => resolveSharedWritableColumnNames("glab", target, ["name"]))
+      .toThrow(/no readwrite data_sharing grant/);
   });
 });

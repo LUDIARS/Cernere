@@ -1,0 +1,20 @@
+{
+  "project": {
+    "key": "glab",
+    "name": "GLAB",
+    "description": "Vantan Game Academy GLAB operations hub"
+  },
+
+  "endpoint": {
+    "url": "http://localhost:5187",
+    "frontend_url": "http://localhost:5187",
+    "same_server": true,
+    "bridge_path": "/glab"
+  },
+
+  "data_sharing": [],
+
+  "user_data": {
+    "columns": {}
+  }
+}

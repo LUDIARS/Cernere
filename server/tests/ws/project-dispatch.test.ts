@@ -6,8 +6,10 @@ vi.mock("../../src/project/service.js", () => ({
 }));
 
 const mockGetSharedUserColumns = vi.fn();
+const mockSetSharedUserColumns = vi.fn();
 vi.mock("../../src/project/data-sharing.js", () => ({
   getSharedUserColumns: (...args: unknown[]) => mockGetSharedUserColumns(...args),
+  setSharedUserColumns: (...args: unknown[]) => mockSetSharedUserColumns(...args),
 }));
 
 const { dispatchProjectCommand } = await import("../../src/ws/project-dispatch.js");
@@ -16,6 +18,7 @@ describe("dispatchProjectCommand — managed_project.get_user_data routing", () 
   beforeEach(() => {
     mockGetUserColumns.mockReset().mockResolvedValue({ ok: "self" });
     mockGetSharedUserColumns.mockReset().mockResolvedValue({ ok: "shared" });
+    mockSetSharedUserColumns.mockReset().mockResolvedValue({ ok: true, updated: ["name"] });
   });
 
   it("self-read (no targetProjectKey) uses the existing self-scoped path, unchanged", async () => {
@@ -67,5 +70,26 @@ describe("dispatchProjectCommand — managed_project.get_user_data routing", () 
       targetProjectKey: "vantan_user",
     });
     expect(result).toEqual({ department_name: "IT" });
+  });
+});
+
+describe("dispatchProjectCommand — managed_project.set_user_data routing", () => {
+  beforeEach(() => {
+    mockSetSharedUserColumns.mockReset().mockResolvedValue({ ok: true, updated: ["name"] });
+  });
+
+  it("routes a differing targetProjectKey through readwrite data_sharing enforcement", async () => {
+    const result = await dispatchProjectCommand("glab", "managed_project", "set_user_data", {
+      userId: "user-1",
+      targetProjectKey: "vantan_user",
+      data: { name: "Neco" },
+    });
+    expect(mockSetSharedUserColumns).toHaveBeenCalledWith(
+      "glab",
+      "vantan_user",
+      "user-1",
+      { name: "Neco" },
+    );
+    expect(result).toEqual({ ok: true, updated: ["name"] });
   });
 });

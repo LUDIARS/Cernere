@@ -159,6 +159,20 @@ sequenceDiagram
 - `ticket` 自体は 10 分 TTL。完了 / 期限切れで Redis から削除
 - 詳細: [identity-verification.md](identity-verification.md)
 
+## クロスプロジェクト user data
+
+`managed_project.get_user_data` / `managed_project.set_user_data` は
+`payload.targetProjectKey` を指定するとクロスプロジェクトアクセスになる。
+対象 project の `schema_definition.data_sharing` が caller project を許可し、要求列の
+`module` が grant 範囲内である場合だけ実行する。
+
+- 読み取り: `access: read` または `readwrite`
+- 書き込み: `access: readwrite` のみ
+- 書き込み要求に範囲外の列が 1 つでもあれば、部分更新せず要求全体を拒否する
+- `targetProjectKey` 省略時または caller と同じ場合は従来どおり自己 project の操作になる
+
+GLAB はこの経路で `vantan_user` の `profile` module（名前・役職・学科）を初回登録する。
+
 ## エラー応答
 
 REST はステータスコードを `400 / 401 / 403 / 404 / 429 / 500` で返す ([server/src/app.ts](../../server/src/app.ts) の `classifyError`)。
