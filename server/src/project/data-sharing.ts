@@ -7,8 +7,8 @@
  * project_data_<key> を読める経路が存在しなかった。このファイルはその読み取り
  * 経路を実装する。
  *
- * スコープ: 読み取りのみ。access: "readwrite" が宣言されていても、実際に書き込む
- * API はここでは提供しない (書き込み共有は別タスク)。
+ * 読み取りは access: "read" / "readwrite"、書き込みは "readwrite" のみ許可する。
+ * module と列の範囲を解決してから既存の project data 操作へ委譲する。
  */
 
 import { eq } from "drizzle-orm";
@@ -16,7 +16,7 @@ import { db } from "../db/connection.js";
 import * as dbSchema from "../db/schema.js";
 import { AppError } from "../error.js";
 import type { ProjectDefinition } from "./schema.js";
-import { getUserColumns } from "./service.js";
+import { getUserColumns, setUserData } from "./service.js";
 
 type ColumnMap = Record<string, { type: string; module?: string; _deleted?: boolean }>;
 
@@ -68,6 +68,36 @@ export function resolveSharedColumnNames(
 }
 
 /**
+ * targetDefinition が callerProjectKey に readwrite 共有している列名を解決する。
+ * 読み取り専用 grant は書き込み権限へ昇格させない。
+ */
+export function resolveSharedWritableColumnNames(
+  callerProjectKey: string,
+  targetDefinition: ProjectDefinition,
+  requestedColumns: string[],
+): string[] {
+  const entry = (targetDefinition.data_sharing ?? []).find((share) =>
+    share.project_key === callerProjectKey && share.access === "readwrite");
+  if (!entry) {
+    throw AppError.forbidden(
+      `Project "${callerProjectKey}" has no readwrite data_sharing grant on project "${targetDefinition.project.key}"`,
+    );
+  }
+
+  const columns = extractColumns(targetDefinition);
+  const allowedModules = entry.modules && entry.modules.length > 0
+    ? new Set(entry.modules)
+    : null;
+
+  return requestedColumns.filter((columnName) => {
+    const column = columns[columnName];
+    if (!column || column._deleted) return false;
+    if (!allowedModules) return true;
+    return column.module !== undefined && allowedModules.has(column.module);
+  });
+}
+
+/**
  * callerProjectKey が、targetProjectKey の data_sharing 許可範囲内で
  * そのユーザーのデータを読み取る。
  *
@@ -95,4 +125,40 @@ export async function getSharedUserColumns(
   // 実データ取得は既存の getUserColumns (SQL) にそのまま委譲し、
   // ここでは「どのカラムを読んでよいか」の解決だけを担う。
   return getUserColumns(targetProjectKey, userId, allowedColumns);
+}
+
+/** callerProjectKey の readwrite grant 範囲内で targetProjectKey のユーザ列を更新する。 */
+export async function setSharedUserColumns(
+  callerProjectKey: string,
+  targetProjectKey: string,
+  userId: string,
+  data: Record<string, unknown>,
+): Promise<{ ok: true; updated: string[] }> {
+  const rows = await db.select().from(dbSchema.managedProjects)
+    .where(eq(dbSchema.managedProjects.key, targetProjectKey)).limit(1);
+  if (rows.length === 0 || !rows[0].isActive) {
+    throw AppError.notFound("Project not found");
+  }
+
+  const requestedColumns = Object.keys(data);
+  if (requestedColumns.length === 0) {
+    throw AppError.badRequest("No columns to update");
+  }
+
+  const targetDefinition = rows[0].schemaDefinition as ProjectDefinition;
+  const allowedColumns = resolveSharedWritableColumnNames(
+    callerProjectKey,
+    targetDefinition,
+    requestedColumns,
+  );
+  if (allowedColumns.length !== requestedColumns.length) {
+    const allowed = new Set(allowedColumns);
+    const denied = requestedColumns.filter((columnName) => !allowed.has(columnName));
+    throw AppError.forbidden(`Columns are not writable through data_sharing: ${denied.join(", ")}`);
+  }
+
+  const allowedData = Object.fromEntries(
+    allowedColumns.map((columnName) => [columnName, data[columnName]]),
+  );
+  return setUserData(targetProjectKey, userId, allowedData);
 }
