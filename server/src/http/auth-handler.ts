@@ -434,7 +434,11 @@ async function projectLogin(clientId: string | undefined, clientSecret: string |
     logProjectLoginFailed(clientId, "invalid credentials", ctx);
     throw new Error("Unauthorized: Invalid project credentials");
   }
-  const accessToken = generateProjectToken(project.clientId, project.key);
+  const accessToken = generateProjectToken(
+    project.clientId,
+    project.key,
+    project.credentialGeneration,
+  );
   logProjectLogin(project.key, project.clientId, ctx);
   return {
     status: "200 OK",

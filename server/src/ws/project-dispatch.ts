@@ -152,9 +152,10 @@ export async function dispatchProjectCommand(
     // Cernere に投げて { valid, projectKey, clientId } を取得する.
     case "managed_project.verify_token": {
       const token = requireStr(payload, "token");
-      const { verifyProjectToken } = await import("../auth/jwt.js");
+      const { resolveProjectWsAuth } = await import("./project-handler.js");
       try {
-        const claims = verifyProjectToken(token);
+        const claims = await resolveProjectWsAuth(token);
+        if (!claims) return { valid: false };
         return {
           valid: true,
           projectKey: claims.projectKey,

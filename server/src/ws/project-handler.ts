@@ -24,6 +24,8 @@ import { addConnection, removeConnection } from "./project-registry.js";
 export interface ProjectWsUserData {
   clientId: string;
   projectKey: string;
+  credentialGeneration: number;
+  tokenExpiresAt: number;
   connectionId: string;
   /** close 後の send を防ぐフラグ (uWS は閉じたソケット操作で throw) */
   closed: boolean;
@@ -45,6 +47,7 @@ interface ServerMessage {
 
 const PING_INTERVAL_MS = 30_000;
 const pingTimers = new Map<string, ReturnType<typeof setInterval>>();
+const expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function send(ws: uWS.WebSocket<ProjectWsUserData>, msg: ServerMessage): void {
   let data: ProjectWsUserData | undefined;
@@ -59,6 +62,44 @@ function send(ws: uWS.WebSocket<ProjectWsUserData>, msg: ServerMessage): void {
   } catch {
     data.closed = true;
   }
+}
+
+function close(ws: uWS.WebSocket<ProjectWsUserData>, code: number, reason: string): void {
+  let data: ProjectWsUserData | undefined;
+  try {
+    data = ws.getUserData();
+  } catch {
+    return;
+  }
+  if (data.closed) return;
+  data.closed = true;
+  try {
+    ws.end(code, reason);
+  } catch {
+    // close handler または次回DB検査で接続状態を収束させる。
+  }
+}
+
+export async function isCurrentProjectSession(
+  clientId: string,
+  projectKey: string,
+  credentialGeneration: number,
+): Promise<boolean> {
+  const rows = await db.select({
+    key: schema.managedProjects.key,
+    clientId: schema.managedProjects.clientId,
+    isActive: schema.managedProjects.isActive,
+    credentialGeneration: schema.managedProjects.credentialGeneration,
+  })
+    .from(schema.managedProjects)
+    .where(eq(schema.managedProjects.clientId, clientId))
+    .limit(1);
+  const project = rows[0];
+  return Boolean(
+    project?.isActive
+    && project.key === projectKey
+    && project.credentialGeneration === credentialGeneration,
+  );
 }
 
 /**
@@ -79,18 +120,12 @@ export async function resolveProjectWsAuth(
     const claims = verifyProjectToken(token);
     // プロジェクトの DB レコードと突き合わせ. clientId / projectKey
     // のいずれかが managed_projects の値と食い違うトークンは拒否.
-    const rows = await db.select({
-      key: schema.managedProjects.key,
-      clientId: schema.managedProjects.clientId,
-      isActive: schema.managedProjects.isActive,
-    })
-      .from(schema.managedProjects)
-      .where(eq(schema.managedProjects.clientId, claims.sub))
-      .limit(1);
-    const proj = rows[0];
-    if (!proj) return null;
-    if (!proj.isActive) return null;
-    if (claims.projectKey && claims.projectKey !== proj.key) return null;
+    const current = await isCurrentProjectSession(
+      claims.sub,
+      claims.projectKey,
+      claims.credentialGeneration ?? 0,
+    );
+    if (!current) return null;
     return claims;
   } catch {
     return null;
@@ -101,7 +136,13 @@ export async function resolveProjectWsAuth(
 
 export function handleProjectWsOpen(ws: uWS.WebSocket<ProjectWsUserData>): void {
   const data = ws.getUserData();
-  addConnection(data.projectKey, data.connectionId, data.clientId);
+  addConnection(
+    data.projectKey,
+    data.connectionId,
+    data.clientId,
+    data.credentialGeneration,
+    () => close(ws, 4001, "project credential rotated"),
+  );
   send(ws, {
     type: "connected",
     connection_id: data.connectionId,
@@ -114,6 +155,10 @@ export function handleProjectWsOpen(ws: uWS.WebSocket<ProjectWsUserData>): void 
     send(ws, { type: "ping", ts: Math.floor(Date.now() / 1000) });
   }, PING_INTERVAL_MS);
   pingTimers.set(data.connectionId, timer);
+
+  const expiresInMs = Math.max(0, data.tokenExpiresAt * 1000 - Date.now());
+  const expiryTimer = setTimeout(() => close(ws, 4001, "project token expired"), expiresInMs);
+  expiryTimers.set(data.connectionId, expiryTimer);
 }
 
 // ── message ───────────────────────────────────────────────
@@ -122,6 +167,11 @@ export async function handleProjectWsMessage(
   ws: uWS.WebSocket<ProjectWsUserData>,
   message: ArrayBuffer,
 ): Promise<void> {
+  try {
+    if (ws.getUserData().closed) return;
+  } catch {
+    return;
+  }
   let msg: ClientMessage;
   try {
     msg = JSON.parse(Buffer.from(message).toString());
@@ -134,8 +184,18 @@ export async function handleProjectWsMessage(
 
   if (msg.type === "module_request" && msg.module && msg.action) {
     try {
-      const { dispatchProjectCommand } = await import("./project-dispatch.js");
       const data = ws.getUserData();
+      const current = data.tokenExpiresAt * 1000 > Date.now()
+        && await isCurrentProjectSession(
+          data.clientId,
+          data.projectKey,
+          data.credentialGeneration,
+        );
+      if (!current) {
+        close(ws, 4001, "project session expired or revoked");
+        return;
+      }
+      const { dispatchProjectCommand } = await import("./project-dispatch.js");
       const result = await dispatchProjectCommand(
         data.projectKey,
         msg.module,
@@ -172,6 +232,11 @@ export function handleProjectWsClose(ws: uWS.WebSocket<ProjectWsUserData>): void
   if (timer) {
     clearInterval(timer);
     pingTimers.delete(data.connectionId);
+  }
+  const expiryTimer = expiryTimers.get(data.connectionId);
+  if (expiryTimer) {
+    clearTimeout(expiryTimer);
+    expiryTimers.delete(data.connectionId);
   }
   removeConnection(data.projectKey, data.connectionId);
   logProjectWsDisconnect(data.projectKey, data.clientId, data.connectionId);

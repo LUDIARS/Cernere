@@ -281,6 +281,8 @@ export function createApp() {
       const userData: ProjectWsUserData = {
         clientId: claims.sub,
         projectKey: claims.projectKey,
+        credentialGeneration: claims.credentialGeneration ?? 0,
+        tokenExpiresAt: claims.exp,
         connectionId: `proj_${crypto.randomUUID()}`,
         closed: false,
       };
