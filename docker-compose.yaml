@@ -64,8 +64,10 @@ services:
       - "${LISTEN_PORT:-8080}:8080"
     volumes:
       - ./server:/app/server
+      - ./lib/vestigium:/app/lib/vestigium
       - ./migrations:/app/migrations
       - backend-node-modules:/app/server/node_modules
+      - backend-vestigium-node-modules:/app/lib/vestigium/node_modules
     environment:
       # .env 廃止 — secret は bootstrap.ts が host 経由で渡された INFISICAL_* env から
       # 自前で Infisical fetch する (env-cli/src/env-file.ts).
@@ -94,7 +96,7 @@ services:
     # pnpm v10 系は ERR_PNPM_IGNORED_BUILDS で esbuild postinstall を拒否し続ける
     # (workspace.yaml の onlyBuiltDependencies を書いても効かない version がある)。
     # 当面 pnpm v9 に pin して回避。 v10 の strict build script 仕様が安定したら戻す。
-    command: sh -c "apt-get update -qq && apt-get install -y -qq git > /dev/null && npm i -g pnpm@9 && pnpm install --no-frozen-lockfile && npx tsx watch src/bootstrap.ts"
+    command: sh -c "apt-get update -qq && apt-get install -y -qq git > /dev/null && npm i -g pnpm@9 && cd /app/lib/vestigium && npm ci --ignore-scripts && npm run build && cd /app/server && pnpm install --no-frozen-lockfile && npx tsx watch src/bootstrap.ts"
     networks:
       - default
       - infra_default
@@ -131,4 +133,5 @@ networks:
 
 volumes:
   backend-node-modules:
+  backend-vestigium-node-modules:
   frontend-node-modules:

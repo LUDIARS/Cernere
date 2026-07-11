@@ -15,8 +15,8 @@ importers:
         specifier: ^3.1030.0
         version: 3.1030.0
       '@ludiars/vestigium':
-        specifier: ^0.1.0
-        version: 0.1.0(pino@9.14.0)
+        specifier: file:../lib/vestigium
+        version: file:../lib/vestigium(pino@9.14.0)
       '@simplewebauthn/server':
         specifier: ^13.3.0
         version: 13.3.0
@@ -382,11 +382,14 @@ packages:
   '@levischuck/tiny-cbor@0.2.11':
     resolution: {integrity: sha512-llBRm4dT4Z89aRsm6u2oEZ8tfwL/2l6BwpZ7JcyieouniDECM5AqNgr/y08zalEIvW3RSK4upYyybDcmjXqAow==}
 
-  '@ludiars/vestigium@0.1.0':
-    resolution: {integrity: sha512-tyd4nRSw1rVaYEB0rItn7iSY5x3MTO1rVIBINtP96YwkgzQALhexNNebbNTPR5cRGTIczs0nqhzgcMsBa7zTvA==, tarball: https://npm.pkg.github.com/download/@ludiars/vestigium/0.1.0/969fceb59eec5e8e02627b884efe99c0ae79096c}
+  '@ludiars/vestigium@file:../lib/vestigium':
+    resolution: {directory: ../lib/vestigium, type: directory}
     hasBin: true
     peerDependencies:
       pino: ^9.0.0
+    peerDependenciesMeta:
+      pino:
+        optional: true
 
   '@napi-rs/wasm-runtime@1.1.4':
     resolution: {integrity: sha512-3NQNNgA1YSlJb/kMH1ildASP9HW7/7kYnRI2szWJaofaS1hWmbGI4H+d3+22aGzXXN9IJ+n+GiFVcGipJP18ow==}
@@ -475,42 +478,36 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [linux]
-    libc: [glibc]
 
   '@rolldown/binding-linux-arm64-musl@1.0.2':
     resolution: {integrity: sha512-QVLO/czFMdoMFSqlX3bcswcJNm/23r+qoa/jgtmFc/qEp6/jXmIkDjF/XIo8dPfGaiwy1xfQn8o77L79GeXFgw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [linux]
-    libc: [musl]
 
   '@rolldown/binding-linux-ppc64-gnu@1.0.2':
     resolution: {integrity: sha512-hgO5Abm0w5UL6FEa2iFnZqo2KlK7TQ5QhV5x09hujBf7t5KzHQ1VmfPuTpqRy/rNlSxua3eWH374xxiVrP+lcA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [ppc64]
     os: [linux]
-    libc: [glibc]
 
   '@rolldown/binding-linux-s390x-gnu@1.0.2':
     resolution: {integrity: sha512-fy8rXxuYEu602abC8MUNaPjYLIFzReOaEIEMKMUa0rFEUxNpVXhs15KSSQ4qlqSaM7B6rcj9rDZgADh/IGDzLQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [s390x]
     os: [linux]
-    libc: [glibc]
 
   '@rolldown/binding-linux-x64-gnu@1.0.2':
     resolution: {integrity: sha512-0+bOkiQ779+r1WpoHOWHqncvyySci0vKph+myNDYb+im6meJAzHQXay6oEgnkHuUGouM1LKTZwqKpBow6Kj7CQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [linux]
-    libc: [glibc]
 
   '@rolldown/binding-linux-x64-musl@1.0.2':
     resolution: {integrity: sha512-mjSkrzZK5Qsl0a9d1JgILOiuZOSDTVdKENcSXBoqbzSrspLR/4/IRVDo5wd2GgZjNss/viBFJdeq+j7qH2nypw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [linux]
-    libc: [musl]
 
   '@rolldown/binding-openharmony-arm64@1.0.2':
     resolution: {integrity: sha512-1v5vHasdfQAZoEHakBV72LIFAC9JjnymsiKxp+GEr/ma3+NJCPSaYK+qavInOovJkgwFrs7GccX2d6IgDA3Z5w==}
@@ -1016,28 +1013,24 @@ packages:
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [linux]
-    libc: [glibc]
 
   lightningcss-linux-arm64-musl@1.32.0:
     resolution: {integrity: sha512-UpQkoenr4UJEzgVIYpI80lDFvRmPVg6oqboNHfoH4CQIfNA+HOrZ7Mo7KZP02dC6LjghPQJeBsvXhJod/wnIBg==}
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [linux]
-    libc: [musl]
 
   lightningcss-linux-x64-gnu@1.32.0:
     resolution: {integrity: sha512-V7Qr52IhZmdKPVr+Vtw8o+WLsQJYCTd8loIfpDaMRWGUZfBOYEJeyJIkqGIDMZPwPx24pUMfwSxxI8phr/MbOA==}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [linux]
-    libc: [glibc]
 
   lightningcss-linux-x64-musl@1.32.0:
     resolution: {integrity: sha512-bYcLp+Vb0awsiXg/80uCRezCYHNg1/l3mt0gzHnWV9XP1W5sKa5/TCdGWaR/zBM2PeF/HbsQv/j2URNOiVuxWg==}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [linux]
-    libc: [musl]
 
   lightningcss-win32-arm64-msvc@1.32.0:
     resolution: {integrity: sha512-8SbC8BR40pS6baCM8sbtYDSwEVQd4JlFTOlaD3gWGHfThTcABnNDBda6eTZeqbofalIJhFx0qKzgHJmcPTnGdw==}
@@ -1260,7 +1253,7 @@ packages:
     hasBin: true
 
   uWebSockets.js@https://codeload.github.com/uNetworking/uWebSockets.js/tar.gz/d584e6247998f725e86db77130de139eda936473:
-    resolution: {gitHosted: true, tarball: https://codeload.github.com/uNetworking/uWebSockets.js/tar.gz/d584e6247998f725e86db77130de139eda936473}
+    resolution: {tarball: https://codeload.github.com/uNetworking/uWebSockets.js/tar.gz/d584e6247998f725e86db77130de139eda936473}
     version: 20.63.0
 
   undici-types@6.21.0:
@@ -1808,10 +1801,11 @@ snapshots:
 
   '@levischuck/tiny-cbor@0.2.11': {}
 
-  '@ludiars/vestigium@0.1.0(pino@9.14.0)':
+  '@ludiars/vestigium@file:../lib/vestigium(pino@9.14.0)':
     dependencies:
-      pino: 9.14.0
       zod: 3.25.76
+    optionalDependencies:
+      pino: 9.14.0
 
   '@napi-rs/wasm-runtime@1.1.4(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)':
     dependencies:
@@ -1922,7 +1916,8 @@ snapshots:
       tslib: 2.8.1
       tsyringe: 4.10.0
 
-  '@pinojs/redact@0.4.0': {}
+  '@pinojs/redact@0.4.0':
+    optional: true
 
   '@rolldown/binding-android-arm64@1.0.2':
     optional: true
@@ -2345,7 +2340,8 @@ snapshots:
 
   assertion-error@2.0.1: {}
 
-  atomic-sleep@1.0.0: {}
+  atomic-sleep@1.0.0:
+    optional: true
 
   bcryptjs@3.0.3: {}
 
@@ -2559,7 +2555,8 @@ snapshots:
 
   obug@2.1.1: {}
 
-  on-exit-leak-free@2.1.2: {}
+  on-exit-leak-free@2.1.2:
+    optional: true
 
   paseto@3.1.4: {}
 
@@ -2574,8 +2571,10 @@ snapshots:
   pino-abstract-transport@2.0.0:
     dependencies:
       split2: 4.2.0
+    optional: true
 
-  pino-std-serializers@7.1.0: {}
+  pino-std-serializers@7.1.0:
+    optional: true
 
   pino@9.14.0:
     dependencies:
@@ -2590,6 +2589,7 @@ snapshots:
       safe-stable-stringify: 2.5.0
       sonic-boom: 4.2.1
       thread-stream: 3.2.0
+    optional: true
 
   postcss@8.5.15:
     dependencies:
@@ -2599,7 +2599,8 @@ snapshots:
 
   postgres@3.4.9: {}
 
-  process-warning@5.0.0: {}
+  process-warning@5.0.0:
+    optional: true
 
   pvtsutils@1.3.6:
     dependencies:
@@ -2607,9 +2608,11 @@ snapshots:
 
   pvutils@1.1.5: {}
 
-  quick-format-unescaped@4.0.4: {}
+  quick-format-unescaped@4.0.4:
+    optional: true
 
-  real-require@0.2.0: {}
+  real-require@0.2.0:
+    optional: true
 
   redis-errors@1.2.0: {}
 
@@ -2644,7 +2647,8 @@ snapshots:
 
   safe-buffer@5.2.1: {}
 
-  safe-stable-stringify@2.5.0: {}
+  safe-stable-stringify@2.5.0:
+    optional: true
 
   semver@7.7.4: {}
 
@@ -2653,6 +2657,7 @@ snapshots:
   sonic-boom@4.2.1:
     dependencies:
       atomic-sleep: 1.0.0
+    optional: true
 
   source-map-js@1.2.1: {}
 
@@ -2663,7 +2668,8 @@ snapshots:
 
   source-map@0.6.1: {}
 
-  split2@4.2.0: {}
+  split2@4.2.0:
+    optional: true
 
   stackback@0.0.2: {}
 
@@ -2676,6 +2682,7 @@ snapshots:
   thread-stream@3.2.0:
     dependencies:
       real-require: 0.2.0
+    optional: true
 
   tinybench@2.9.0: {}
 
