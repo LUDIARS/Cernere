@@ -15,3 +15,8 @@ export type {
   MachineInfo,
   BrowserInfo,
 } from "./device-fingerprint.js";
+export {
+  buildCompositePasskeyLoginUrl,
+  CompositePasskeyPopup,
+} from "./CompositePasskeyPopup.js";
+export type { CompositePasskeyPopupProps } from "./CompositePasskeyPopup.js";
