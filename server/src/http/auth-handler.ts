@@ -23,6 +23,8 @@ import {
   logProjectLoginFailed,
 } from "../logging/auth-logger.js";
 import { devLog } from "../logging/dev-logger.js";
+import { issueAuthCodeForUserId } from "../auth/auth-code.js";
+import { isCompositeTargetAllowed } from "../auth/composite-redirect.js";
 
 interface RouteResult {
   status: string;
@@ -49,6 +51,7 @@ export async function handleAuthRoute(
     case "verify": return verify(parseBody(body), ctx);
     case "exchange": return exchange(parseBody(body));
     case "me": return me(authHeader);
+    case "composite-session-code": return compositeSessionCode(parseBody(body), authHeader);
     case "project-token": return projectUserToken(parseBody(body), authHeader, ctx);
     case "project-launch-credential": return projectLaunchCredential(parseBody(body), ctx);
     default:
@@ -286,6 +289,47 @@ async function exchange(p: Record<string, unknown>): Promise<RouteResult> {
     hasAccessToken: !!parsed.accessToken,
   });
   return { status: "200 OK", data: parsed };
+}
+
+/**
+ * 既存の Cernere セッション (Bearer accessToken) から、 呼び出し元サービス用の
+ * composite authCode を「無操作で」発行する (silent SSO)。
+ *
+ * 用途: 一度 Cernere にログイン済みのユーザが GLab 等を開いたとき、 passkey/パスワードの
+ * 再入力なしで authCode を得て `POST /api/auth/exchange` に渡せるようにする。
+ *
+ * 防御: (1) accessToken を検証、 (2) 送信先 `target` (origin / redirect_uri) を
+ * composite 許可リストで完全一致検証 (VULNWEB-001 と同じ authority)。 いずれか失敗で 401/400。
+ */
+async function compositeSessionCode(
+  p: Record<string, unknown>,
+  authHeader: string,
+): Promise<RouteResult> {
+  const token = extractBearerToken(authHeader);
+  if (!token) return { status: "401 Unauthorized", data: { error: "no_session" } };
+
+  let userId: string;
+  try {
+    userId = verifyToken(token).sub;
+  } catch {
+    return { status: "401 Unauthorized", data: { error: "invalid_session" } };
+  }
+
+  // 発行のたびに refresh_sessions 行が増えるため、 有効セッション保持者による
+  // スパム発行を rate limit で抑止する (login/register と同じ流儀)。
+  await checkRateLimit(`session-code:${userId}`, 10, 60);
+
+  const target = typeof p.target === "string" ? p.target : "";
+  if (!target) return { status: "400 Bad Request", data: { error: "target is required" } };
+  if (!isCompositeTargetAllowed(target)) {
+    return { status: "403 Forbidden", data: { error: "target_not_allowed" } };
+  }
+
+  const authCode = await issueAuthCodeForUserId(userId);
+  if (!authCode) return { status: "401 Unauthorized", data: { error: "user_not_found" } };
+
+  devLog("auth.compositeSessionCode.issued", { userId });
+  return { status: "200 OK", data: { authCode } };
 }
 
 async function me(authHeader: string): Promise<RouteResult> {
