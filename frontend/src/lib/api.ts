@@ -23,12 +23,45 @@ function getRefreshToken(): string | null {
 export function setTokens(access: string, refresh: string) {
   localStorage.setItem("accessToken", access);
   localStorage.setItem("refreshToken", refresh);
+  // 「このブラウザは一度アクセス済み」の永続印。 ログアウト (clearTokens) では
+  // 消さないので、 再訪時にログイン画面を既定表示する判定に使う。
+  localStorage.setItem("cernere_returning", "1");
 }
 
 export function clearTokens() {
   localStorage.removeItem("accessToken");
   localStorage.removeItem("refreshToken");
   localStorage.removeItem("user");
+  // cernere_returning は残す (アクセス形跡は保持し、 次回もログインを優先表示)。
+}
+
+/**
+ * インフラ (Cloudflare Tunnel 等) が全訪問者に付ける cookie。
+ * 「アクセスした形跡」の判定に数えると初訪問でも常に true になるため除外する。
+ */
+const INFRA_COOKIE_NAMES = new Set(["__cf_bm", "_cfuvid", "cf_clearance", "__cflb", "__cfruid"]);
+
+/**
+ * このブラウザに「アクセスした形跡」があるか。
+ * - 過去にログイン/登録した永続印 (cernere_returning)
+ * - 現行/残存セッション (accessToken / user)
+ * - インフラ由来を除く first-party cookie
+ * のいずれかがあれば true。 ログイン画面の既定タブ判定 (returning→Login / 新規→Register) に使う。
+ */
+export function hasAccessRecord(): boolean {
+  try {
+    if (localStorage.getItem("cernere_returning")) return true;
+    if (localStorage.getItem("accessToken") || localStorage.getItem("user")) return true;
+    if (typeof document !== "undefined") {
+      const meaningful = document.cookie.split(";")
+        .map((c) => c.split("=")[0]?.trim())
+        .filter((name) => name && !INFRA_COOKIE_NAMES.has(name));
+      if (meaningful.length > 0) return true;
+    }
+  } catch {
+    // localStorage 不可 (プライベートモード等) は「形跡なし」扱い。
+  }
+  return false;
 }
 
 export function getStoredUser(): { id: string; name: string; email: string; role: string } | null {
