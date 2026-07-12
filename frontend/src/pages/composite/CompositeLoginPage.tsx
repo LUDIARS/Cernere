@@ -26,6 +26,7 @@ import {
 } from "@simplewebauthn/browser";
 import { collectDeviceFingerprint } from "../../lib/device-fingerprint";
 import { fetchAllowedOrigins, isTargetAllowed } from "../../lib/composite-redirect";
+import { getAccessToken } from "../../lib/api";
 
 const API_BASE = "";
 
@@ -85,7 +86,17 @@ export function CompositeLoginPage() {
   const params = new URLSearchParams(window.location.search);
   const origin = params.get("origin");
   const redirectUri = params.get("redirect_uri");
-  const passkeyOnly = params.get("auth_mode") === "passkey";
+  // スマホは passkey が端末に無い (PC で登録したパスキーは持ち込めない) ことが多い。
+  // その場合 passkey 指定でもパスワードフォームを出し、 スマホのパスワードマネージャの
+  // 自動入力で入れるようにする。 PC では従来どおり passkey 専用のまま。
+  const isMobile = typeof navigator !== "undefined" &&
+    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  const passkeyOnly = params.get("auth_mode") === "passkey" && !isMobile;
+
+  // 新規登録は Cernere 単体の登録画面へ誘導し、 登録後は呼び出し元 (GLab 等) の
+  // origin へ戻す (?redirect=)。 これで「初回登録後に手動で戻る」 が不要になる。
+  const returnTarget = origin ?? redirectUri ?? "";
+  const registerHref = `/login?mode=register${returnTarget ? `&redirect=${encodeURIComponent(returnTarget)}` : ""}`;
 
   const [mode, setMode] = useState<"login" | "register" | "device">("login");
   const [name, setName] = useState("");
@@ -128,9 +139,31 @@ export function CompositeLoginPage() {
         setError("送信先が指定されていません (origin / redirect_uri が必要です)。");
       } else if (!isTargetAllowed(target, allowed)) {
         setError("許可されていない送信先です。この画面は安全に続行できません。");
+      } else {
+        // silent SSO — 既に Cernere ログイン済み (accessToken 保持) なら、 passkey/
+        // パスワードの再入力なしで authCode を発行し、 呼び出し元 (GLab 等) へ返す。
+        // 失敗 / 未ログインなら通常の対話ログイン UI にフォールバックする。
+        const token = getAccessToken();
+        if (token) {
+          try {
+            const res = await fetch(`${API_BASE}/api/auth/composite-session-code`, {
+              method: "POST",
+              headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+              body: JSON.stringify({ target }),
+            });
+            if (!cancelled && res.ok) {
+              const body = await res.json().catch(() => null) as { authCode?: string } | null;
+              if (body?.authCode) { completeAuth(body.authCode); return; }
+            }
+          } catch {
+            /* 対話フローにフォールバック */
+          }
+        }
       }
     })();
     return () => { cancelled = true; };
+    // completeAuth は同一 render の closure で参照 (effect は render 後に走るため定義済み)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin, redirectUri]);
 
   const completeAuth = (authCode: string) => {
@@ -426,7 +459,12 @@ export function CompositeLoginPage() {
             {(["login", "register"] as const).map((m) => (
               <button
                 key={m}
-                onClick={() => { setMode(m); setError(""); setInfo(""); }}
+                onClick={() => {
+                  // 新規登録は composite (埋め込み) では行わず、 Cernere 単体の
+                  // 登録画面へ誘導する (device 検証 / MFA を含む完全なフロー)。
+                  if (m === "register") { window.location.href = registerHref; return; }
+                  setMode(m); setError(""); setInfo("");
+                }}
                 style={{
                   flex: 1,
                   padding: "0.5rem",
@@ -496,6 +534,8 @@ export function CompositeLoginPage() {
                 <label>Email</label>
                 <input
                   type="email"
+                  name="email"
+                  autoComplete="username"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="user@example.com"
@@ -507,6 +547,8 @@ export function CompositeLoginPage() {
                 <label>Password</label>
                 <input
                   type="password"
+                  name="password"
+                  autoComplete={mode === "register" ? "new-password" : "current-password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="8+ characters"
@@ -663,6 +705,17 @@ export function CompositeLoginPage() {
             >
               🔐 Passkey でログイン (Face ID / Touch ID / Windows Hello)
             </button>
+
+            {/* 新規登録導線: 埋め込み (特に passkey 専用) では登録できないため、
+                Cernere 単体の登録画面へ誘導する。 */}
+            <div style={{ textAlign: "center", marginTop: "0.25rem", marginBottom: "0.5rem" }}>
+              <a
+                href={registerHref}
+                style={{ fontSize: "0.8rem", color: "var(--text-muted)", textDecoration: "underline" }}
+              >
+                アカウントをお持ちでない方は新規登録
+              </a>
+            </div>
 
             {/* Google */}
             {!passkeyOnly && <a
