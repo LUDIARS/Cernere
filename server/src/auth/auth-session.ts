@@ -42,6 +42,12 @@ export interface AuthSession {
   /** 作成元の ip (監査用) */
   ip?: string;
   userAgent?: string;
+  /**
+   * 認証経路がプロジェクト発の (project_credentials → composite WS) ものなら
+   * その projectKey を保持. 認証完了時 ensureUserProjectRow を回すのに使う.
+   * 直接 REST `/api/auth/composite/...` で来た場合は undefined.
+   */
+  projectKey?: string;
   createdAt: number;
 }
 
@@ -53,7 +59,7 @@ function key(ticket: string): string {
 
 export async function createAuthSession(
   user: AuthSessionUser,
-  ctx: { ip?: string; userAgent?: string } = {},
+  ctx: { ip?: string; userAgent?: string; projectKey?: string } = {},
 ): Promise<AuthSession> {
   const ticket = crypto.randomUUID();
   const session: AuthSession = {
@@ -62,6 +68,7 @@ export async function createAuthSession(
     user,
     ip: ctx.ip,
     userAgent: ctx.userAgent,
+    projectKey: ctx.projectKey,
     createdAt: Date.now(),
   };
   await redis.set(key(ticket), JSON.stringify(session), "EX", AUTH_SESSION_TTL);

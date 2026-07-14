@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cernere — 仕様↔コード レビュー</title>
+  <meta name="description" content="spec/ の資料と実装コードの対応状況・乖離点のレビュー結果。" />
+  <link rel="stylesheet" href="assets/style.css" />
+  <script defer src="assets/nav.js"></script>
+</head>
+<body>
+  <main class="wrap narrow">
+    <section class="hero">
+      <div class="tag">Spec ↔ Code Review</div>
+      <h1>仕様↔コード レビュー</h1>
+      <p><code>spec/</code> 配下の全資料を実装（<code>server/src/**</code>・<code>migrations/**</code>）と突き合わせた対応状況。総合判定は <strong>強い一致（STRONG MATCH）</strong>。コードと矛盾する仕様は見つからず、乖離は主にドキュメントの追従漏れとテスト基盤の未着手に限られる。</p>
+    </section>
+
+    <h2>総評</h2>
+    <ul>
+      <li>実装済み機能はすべて仕様の記述と一致。<strong>仕様とコードの矛盾は 0 件</strong>。</li>
+      <li>旧 <code>RS256 + JWKS</code> 機構は仕様どおり撤去済み。project token は PASETO v4 (EdDSA) + HS256 legacy、OIDC id_token のみ RS256（鍵は分離）。</li>
+      <li>主な乖離は <strong>(1) <code>oidc_clients</code> がデータスキーマ仕様に未記載</strong>、<strong>(2) テスト基盤が仕様の設計に未到達</strong>の 2 点。いずれも仕様側でも既知。</li>
+    </ul>
+
+    <h2>ドキュメント別の対応状況</h2>
+    <table>
+      <thead><tr><th>仕様ドキュメント</th><th>判定</th><th>備考</th></tr></thead>
+      <tbody>
+        <tr><td><code>spec/README.md</code></td><td class="m-match">一致</td><td>トークン署名表・Redis キー命名を実装で確認。</td></tr>
+        <tr><td><code>data/schema.md</code></td><td class="m-partial">一部</td><td><code>oidc_clients</code> 未記載（21 → 実際は 22 テーブル）。他 21 テーブルは一致。</td></tr>
+        <tr><td><code>feature/identity-verification.md</code></td><td class="m-match">一致</td><td>SHA-256 フィンガープリント・異常検知・6 桁/10分/5回・geo 不使用まで一致。</td></tr>
+        <tr><td><code>feature/oidc-provider.md</code></td><td class="m-match">一致</td><td>RS256・PKCE S256 限定・Redis キー・RP 管理を確認（データ仕様の記載漏れのみ）。</td></tr>
+        <tr><td><code>feature/project-connection-registry.md</code></td><td class="m-match">一致</td><td>in-memory レジストリ・connectionCount・監査ログ。プロセスローカル制約も明記どおり。</td></tr>
+        <tr><td><code>feature/project-management.md</code></td><td class="m-match">一致</td><td>動的テーブル生成・論理削除・版履歴・WS コマンド。</td></tr>
+        <tr><td><code>feature/user-auth-project-open.md</code></td><td class="m-match">一致</td><td>authCode 60s/単回 GETDEL・HS256+UUID リフレッシュ。</td></tr>
+        <tr><td><code>feature/user-project-row.md</code></td><td class="m-match">一致</td><td>ensureUserProjectRow 冪等・テーブル名サニタイズ。</td></tr>
+        <tr><td><code>interface/auth-flows.md</code></td><td class="m-match">一致</td><td>5 経路すべて実装。レート制限・MFA ゲート・リフレッシュローテーション。</td></tr>
+        <tr><td><code>interface/oauth-token-storage.md</code></td><td class="m-match">一致</td><td>project_oauth_tokens の複合一意・UPSERT・projectKey 束縛。</td></tr>
+        <tr><td><code>interface/peer-relay.md</code></td><td class="m-match">一致</td><td>JWKS 撤去・verify_token round-trip・challenge 60s/単回・fail-closed。</td></tr>
+        <tr><td><code>interface/security_design.md</code></td><td class="m-match">一致</td><td>4 層防御・状態機械・ping/pong・operation_logs（finally で記録）。</td></tr>
+        <tr><td><code>interface/ws-protocol.md</code></td><td class="m-match">一致</td><td>3 経路・メッセージ種別・composite 状態機械。</td></tr>
+        <tr><td><code>setup/service-registration.md</code></td><td class="m-match">一致</td><td>bcrypt secret・hub_url による PASETO/HS256 分岐・relay_pairs。</td></tr>
+        <tr><td><code>test/test-design.md</code></td><td class="m-partial">一部</td><td>7 種別のうち CI 稼働は build + unit のみ。smoke/integration/WS/migration は仕様でも「未着手」。</td></tr>
+        <tr><td><code>secrets-runtime.md</code></td><td class="m-partial">設計のみ</td><td>@cernere/secret-agent 等は P1–P3 の後続設計。現コードと矛盾なし。</td></tr>
+      </tbody>
+    </table>
+
+    <h2>乖離点と推奨対応</h2>
+    <table>
+      <thead><tr><th>項目</th><th>重大度</th><th>内容</th><th>推奨</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>oidc_clients</code> 未記載</td><td class="m-partial">Medium</td>
+          <td><code>server/src/db/schema.ts:333</code> / <code>migrations/023_oidc_clients.sql</code> に存在するが <code>spec/data/schema.md</code> の一覧に無い。</td>
+          <td><code>data/schema.md</code> に同テーブルの列定義を追記し「22 テーブル」に更新。</td>
+        </tr>
+        <tr>
+          <td>テスト基盤の未到達</td><td class="m-partial">Medium</td>
+          <td>仕様の 7 種別に対し CI は build + unit のみ。smoke / integration / WS / migration は未実装。</td>
+          <td>仕様の計画どおり段階的に CI へ追加（既知の遅延）。</td>
+        </tr>
+        <tr>
+          <td>secrets-runtime 未実装</td><td>Low</td>
+          <td>シークレット管理ライブラリ群は設計文書段階（Phase P1–P3）。</td>
+          <td>準備が整い次第、設計フェーズに沿って実装。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="note">
+      補足: <code>docs/service_interface.md</code> は WS メソッド一覧として有用だが、<code>managed_project</code> /
+      <code>profile</code> / <code>oidc_client</code> モジュールや <code>user.search</code> / <code>maintainer</code> ロールなど
+      最新の実装より記載が古い。最新の網羅は本サイトの
+      <a href="api.html">API リファレンス</a> を参照のこと。
+    </div>
+
+    <h2>機能カバレッジ（抜粋）</h2>
+    <p class="lead">凡例: ✅ 実装・検証済み / △ 実装あり・テスト限定 / ❌ 実装あり・CI テスト無し</p>
+    <table>
+      <thead><tr><th>機能</th><th>仕様</th><th>状態</th></tr></thead>
+      <tbody>
+        <tr><td>メール/パスワードログイン</td><td>auth-flows §1</td><td>✅</td></tr>
+        <tr><td>OAuth (GitHub/Google)</td><td>auth-flows §2</td><td>△</td></tr>
+        <tr><td>プロジェクト / ツール資格情報認証</td><td>auth-flows §3,4</td><td>✅ / △</td></tr>
+        <tr><td>Composite（埋め込み）認証</td><td>auth-flows §5</td><td>❌</td></tr>
+        <tr><td>authCode ワンタイム交換</td><td>user-auth-project-open</td><td>✅</td></tr>
+        <tr><td>本人確認（デバイス）</td><td>identity-verification</td><td>❌(統合)</td></tr>
+        <tr><td>OIDC Provider (RS256/PKCE)</td><td>oidc-provider</td><td>✅</td></tr>
+        <tr><td>プロジェクト動的管理</td><td>project-management</td><td>△</td></tr>
+        <tr><td>OAuth トークン集中保管</td><td>oauth-token-storage</td><td>❌(統合)</td></tr>
+        <tr><td>Peer リレー（challenge 検証）</td><td>peer-relay</td><td>✅(unit)</td></tr>
+        <tr><td>4 層防御 / 監査ログ</td><td>security_design</td><td>△</td></tr>
+      </tbody>
+    </table>
+
+    <p class="lead">このレビューは <code>spec/</code> 全 24 ドキュメントと <code>server/src/**</code> の突合に基づく（実施日 2026-06-18）。</p>
+  </main>
+</body>
+</html>

@@ -11,8 +11,11 @@ import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { config } from "../config.js";
 import { generateTokenPair, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
+import { hashRefreshToken } from "../auth/token-hash.js";
 import { redis, SESSION_TTL_SECS } from "../redis.js";
 import { logAuthEvent } from "../logging/auth-logger.js";
+import { encryptSecret } from "../lib/crypto/secret-box.js";
+import { isCompositeTargetAllowed } from "../auth/composite-redirect.js";
 
 const CSRF_COOKIE = "cernere_csrf_state";
 const SESSION_COOKIE = "ars_session";
@@ -201,7 +204,7 @@ async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader
     const { accessToken, refreshToken } = generateTokenPair(userId, userRole);
     const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
     await db.insert(schema.refreshSessions).values({
-      id: crypto.randomUUID(), userId, refreshToken, expiresAt,
+      id: crypto.randomUUID(), userId, refreshToken: hashRefreshToken(refreshToken), expiresAt,
     });
 
     const authCode = crypto.randomUUID();
@@ -215,6 +218,15 @@ async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader
     // composite:<origin>:<uuid> から origin を抽出
     const compositeOrigin = stateParam!.split(":").slice(1, -1).join(":");
     if (aborted) return;
+    // VULNWEB-001: 送信先 origin を許可リストで検証。 不正なら authCode を渡さず
+    // エラーへ返す (Redis の authCode は未使用のまま TTL 失効させる)。
+    if (!isCompositeTargetAllowed(compositeOrigin)) {
+      logAuthEvent({ event: "user.oauth.failed", userId, provider: "github", composite: true, reason: "redirect target not allowlisted", ip: ctx.ip, userAgent: ctx.userAgent });
+      redirect(res, `${config.frontendUrl}?authError=${encodeURIComponent("Invalid redirect target")}`, [
+        deleteCookieHeader(CSRF_COOKIE),
+      ]);
+      return;
+    }
     redirect(res, `${config.frontendUrl}/composite/callback?code=${authCode}&origin=${encodeURIComponent(compositeOrigin)}`, [
       deleteCookieHeader(CSRF_COOKIE),
     ]);
@@ -311,8 +323,12 @@ async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader
     userRole = userRows[0].role;
     await db.update(schema.users).set({
       displayName: gUser.name, avatarUrl: gUser.picture, email: gUser.email,
-      googleAccessToken: tokenData.access_token,
-      googleRefreshToken: tokenData.refresh_token ?? userRows[0].googleRefreshToken,
+      // 機密トークンは保存時に暗号化する (RULE.md §7.2)。refresh_token が
+      // 今回返らない場合は既存 (暗号化済み) 値をそのまま保持する。
+      googleAccessToken: encryptSecret(tokenData.access_token),
+      googleRefreshToken: tokenData.refresh_token
+        ? encryptSecret(tokenData.refresh_token)
+        : userRows[0].googleRefreshToken,
       googleTokenExpiresAt: Math.floor(Date.now() / 1000) + tokenData.expires_in,
       lastLoginAt: now, updatedAt: now,
     }).where(eq(schema.users.id, userId));
@@ -323,8 +339,8 @@ async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader
     await db.insert(schema.users).values({
       id: userId, googleId: gUser.id, login: gUser.email.split("@")[0],
       displayName: gUser.name, avatarUrl: gUser.picture, email: gUser.email,
-      role: userRole, googleAccessToken: tokenData.access_token,
-      googleRefreshToken: tokenData.refresh_token,
+      role: userRole, googleAccessToken: encryptSecret(tokenData.access_token),
+      googleRefreshToken: tokenData.refresh_token ? encryptSecret(tokenData.refresh_token) : null,
       googleTokenExpiresAt: Math.floor(Date.now() / 1000) + tokenData.expires_in,
       lastLoginAt: now, createdAt: now, updatedAt: now,
     });
@@ -334,7 +350,7 @@ async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader
   const { accessToken, refreshToken } = generateTokenPair(userId, userRole);
   const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
-    id: crypto.randomUUID(), userId, refreshToken, expiresAt,
+    id: crypto.randomUUID(), userId, refreshToken: hashRefreshToken(refreshToken), expiresAt,
   });
 
   // Auth code → Redis (フロントが exchange で取得)
@@ -351,6 +367,14 @@ async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader
   // Composite flow: composite callback にリダイレクト
   if (isCompositeGoogle) {
     const compositeOrigin = stateParam!.split(":").slice(1, -1).join(":");
+    // VULNWEB-001: 送信先 origin を許可リストで検証。 不正なら authCode を渡さない。
+    if (!isCompositeTargetAllowed(compositeOrigin)) {
+      logAuthEvent({ event: "user.oauth.failed", userId, provider: "google", composite: true, reason: "redirect target not allowlisted", ip: ctx.ip, userAgent: ctx.userAgent });
+      redirect(res, `${frontend}?authError=${encodeURIComponent("Invalid redirect target")}`, [
+        deleteCookieHeader(CSRF_COOKIE),
+      ]);
+      return;
+    }
     redirect(res, `${frontend}/composite/callback?code=${authCode}&origin=${encodeURIComponent(compositeOrigin)}`, [
       deleteCookieHeader(CSRF_COOKIE),
     ]);

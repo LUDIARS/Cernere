@@ -1,6 +1,6 @@
 # Cernere 認証パッケージ一覧
 
-Cernere の認証基盤は、TypeScript (Hono) コアサーバーと複数の TypeScript パッケージで構成されています。
+Cernere の認証基盤は、TypeScript (uWebSockets.js) コアサーバーと複数の TypeScript パッケージで構成されています。
 各パッケージの役割と依存関係を以下に記載します。
 
 ---
@@ -9,7 +9,7 @@ Cernere の認証基盤は、TypeScript (Hono) コアサーバーと複数の Ty
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  cernere (TypeScript / Hono)  ← コア認証サーバー      │
+│  cernere (TypeScript / uWebSockets.js) ← コア認証     │
 │  JWT・OAuth・MFA・セッション管理・WebSocket           │
 └──────────────┬──────────────────────────────────────┘
                │ HTTP API
@@ -39,7 +39,7 @@ Cernere の認証基盤は、TypeScript (Hono) コアサーバーと複数の Ty
 | 項目 | 値 |
 |------|-----|
 | 言語 | TypeScript |
-| フレームワーク | Hono (Node.js) |
+| HTTP/WS サーバー | uWebSockets.js (Node.js) |
 | ORM | Drizzle ORM |
 | パッケージ名 | `cernere-server` (package.json) |
 | バージョン | 0.2.0 |
@@ -52,12 +52,12 @@ Cernere の認証基盤は、TypeScript (Hono) コアサーバーと複数の Ty
 
 | 機能 | 実装 | ファイル |
 |------|------|---------|
-| パスワード認証 | bcryptjs (12 rounds) | `server/src/auth/routes.ts` |
+| パスワード認証 | bcryptjs (12 rounds) | `server/src/http/auth-handler.ts` |
 | JWT | アクセストークン (60分) / リフレッシュトークン (30日) | `server/src/auth/jwt.ts` |
-| GitHub OAuth | OAuth 2.0 Authorization Code Flow | `server/src/auth/oauth-github.ts` |
-| Google OAuth | OAuth 2.0 Authorization Code Flow | `server/src/auth/oauth-google.ts` |
+| GitHub OAuth | OAuth 2.0 Authorization Code Flow | `server/src/http/oauth-handler.ts` |
+| Google OAuth | OAuth 2.0 Authorization Code Flow | `server/src/http/oauth-handler.ts` |
 | Redis セッション | Cookie ベース / TTL 7日間 | `server/src/redis.ts` |
-| Tool Client 認証 | Client ID + Client Secret (`client_credentials`) | `server/src/auth/routes.ts` |
+| Tool Client 認証 | Client ID + Client Secret (`client_credentials`) | `server/src/http/auth-handler.ts` |
 | レート制限 | Redis ベース (登録: 5回/10分, ログイン: 10回/15分) | `server/src/redis.ts` |
 
 ### 主な依存パッケージ
@@ -66,7 +66,8 @@ Cernere の認証基盤は、TypeScript (Hono) コアサーバーと複数の Ty
 |-----------|------|
 | `jsonwebtoken` | JWT 署名・検証 |
 | `bcryptjs` | パスワードハッシュ |
-| `hono` | Web フレームワーク + WebSocket |
+| `uWebSockets.js` | HTTP / WebSocket サーバー |
+| `paseto` | PASETO v4 (project-token 公開鍵経路) |
 | `drizzle-orm` | PostgreSQL ORM |
 | `ioredis` | Redis クライアント |
 

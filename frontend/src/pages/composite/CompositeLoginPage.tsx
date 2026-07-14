@@ -9,8 +9,7 @@
  *   1. POST /api/auth/composite/login (or register) で資格情報検証
  *      → { ticket, wsPath } を取得
  *   2. WS `/auth/composite-ws?ticket=...` に接続
- *   3. ブラウザが fingerprint (Geolocation 含む) を収集 → WS から送信
- *      → パーミッションが取れるまで何度でも再試行可能
+ *   3. ブラウザが fingerprint (machine + browser 情報のみ) を収集 → WS から送信
  *   4. サーバーから state / authenticated / error メッセージを受信
  *   5. authenticated を受け取ったら auth_code を親ウィンドウに返す
  *
@@ -20,7 +19,14 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import {
+  startAuthentication,
+  type PublicKeyCredentialRequestOptionsJSON,
+  type AuthenticationResponseJSON,
+} from "@simplewebauthn/browser";
 import { collectDeviceFingerprint } from "../../lib/device-fingerprint";
+import { fetchAllowedOrigins, isTargetAllowed } from "../../lib/composite-redirect";
+import { getAccessToken } from "../../lib/api";
 
 const API_BASE = "";
 
@@ -28,7 +34,6 @@ type Anomaly =
   | "new_device"
   | "new_os"
   | "new_browser"
-  | "new_location"
   | "new_ip"
   | "missing_fingerprint";
 
@@ -66,7 +71,6 @@ const ANOMALY_LABELS: Record<Anomaly, string> = {
   new_device: "新しいデバイス",
   new_os: "新しい OS",
   new_browser: "新しいブラウザ",
-  new_location: "普段と異なる地域",
   new_ip: "普段と異なるネットワーク",
   missing_fingerprint: "デバイス情報を取得できませんでした",
 };
@@ -82,6 +86,17 @@ export function CompositeLoginPage() {
   const params = new URLSearchParams(window.location.search);
   const origin = params.get("origin");
   const redirectUri = params.get("redirect_uri");
+  // スマホは passkey が端末に無い (PC で登録したパスキーは持ち込めない) ことが多い。
+  // その場合 passkey 指定でもパスワードフォームを出し、 スマホのパスワードマネージャの
+  // 自動入力で入れるようにする。 PC では従来どおり passkey 専用のまま。
+  const isMobile = typeof navigator !== "undefined" &&
+    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  const passkeyOnly = params.get("auth_mode") === "passkey" && !isMobile;
+
+  // 新規登録は Cernere 単体の登録画面へ誘導し、 登録後は呼び出し元 (GLab 等) の
+  // origin へ戻す (?redirect=)。 これで「初回登録後に手動で戻る」 が不要になる。
+  const returnTarget = origin ?? redirectUri ?? "";
+  const registerHref = `/login?mode=register${returnTarget ? `&redirect=${encodeURIComponent(returnTarget)}` : ""}`;
 
   const [mode, setMode] = useState<"login" | "register" | "device">("login");
   const [name, setName] = useState("");
@@ -97,6 +112,7 @@ export function CompositeLoginPage() {
 
   const wsRef = useRef<WebSocket | null>(null);
   const retryTimerRef = useRef<number | null>(null);
+  const allowedOriginsRef = useRef<string[]>([]);
 
   // ── アンマウント時の掃除 ──
   useEffect(() => {
@@ -110,24 +126,76 @@ export function CompositeLoginPage() {
     };
   }, []);
 
+  // ── 送信先 (origin / redirect_uri) をサーバ許可リストで事前検証 (VULNWEB-001) ──
+  // 不正な送信先ならログイン UI を出す前に停止し、 authCode を発行させない。
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const allowed = await fetchAllowedOrigins();
+      if (cancelled) return;
+      allowedOriginsRef.current = allowed;
+      const target = origin ?? redirectUri;
+      if (!target) {
+        setError("送信先が指定されていません (origin / redirect_uri が必要です)。");
+      } else if (!isTargetAllowed(target, allowed)) {
+        setError("許可されていない送信先です。この画面は安全に続行できません。");
+      } else {
+        // silent SSO — 既に Cernere ログイン済み (accessToken 保持) なら、 passkey/
+        // パスワードの再入力なしで authCode を発行し、 呼び出し元 (GLab 等) へ返す。
+        // 失敗 / 未ログインなら通常の対話ログイン UI にフォールバックする。
+        const token = getAccessToken();
+        if (token) {
+          try {
+            const res = await fetch(`${API_BASE}/api/auth/composite-session-code`, {
+              method: "POST",
+              headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+              body: JSON.stringify({ target }),
+            });
+            if (!cancelled && res.ok) {
+              const body = await res.json().catch(() => null) as { authCode?: string } | null;
+              if (body?.authCode) { completeAuth(body.authCode); return; }
+            }
+          } catch {
+            /* 対話フローにフォールバック */
+          }
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+    // completeAuth は同一 render の closure で参照 (effect は render 後に走るため定義済み)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [origin, redirectUri]);
+
   const completeAuth = (authCode: string) => {
+    const allowed = allowedOriginsRef.current;
+    // 権威はサーバ許可リスト。 postMessage/redirect の直前で必ず再検証し、
+    // 許可外の送信先へ authCode を渡さない (fail-closed)。
     if (origin && window.opener) {
-      window.opener.postMessage({ type: "cernere:auth", authCode }, origin);
+      if (!isTargetAllowed(origin, allowed)) {
+        setError("許可されていない送信先のため認証を中止しました。");
+        return;
+      }
+      window.opener.postMessage({ type: "cernere:auth", authCode }, new URL(origin).origin);
       window.close();
     } else if (redirectUri) {
+      if (!isTargetAllowed(redirectUri, allowed)) {
+        setError("許可されていないリダイレクト先のため認証を中止しました。");
+        return;
+      }
       const url = new URL(redirectUri);
       url.searchParams.set("code", authCode);
       window.location.href = url.toString();
+    } else {
+      setError("送信先が指定されていません。");
     }
   };
 
   /** fingerprint を収集して WS に送信。失敗時は setTimeout で再試行。 */
-  const collectAndSendFingerprint = async (ws: WebSocket) => {
+  const collectAndSendFingerprint = (ws: WebSocket) => {
     setFingerprintStatus("collecting");
     try {
-      // パーミッションを強制的に要求しながら収集
-      const fp = await collectDeviceFingerprint({ requestGeo: true, geoTimeoutMs: 15000 });
-      const hasSomething = !!(fp.machine || fp.browser || fp.geo);
+      const fp = collectDeviceFingerprint();
+      const hasSomething = !!(fp.machine || fp.browser);
       if (!hasSomething) {
         throw new Error("empty fingerprint");
       }
@@ -138,10 +206,9 @@ export function CompositeLoginPage() {
       setFingerprintStatus("failed");
       const msg = err instanceof Error ? err.message : "fingerprint collection failed";
       setError(`デバイス情報の取得に失敗しました: ${msg}。再試行します…`);
-      // 3秒後に再試行 (パーミッションダイアログ / ネットワーク復旧を待つ)
       retryTimerRef.current = window.setTimeout(() => {
         if (ws.readyState === WebSocket.OPEN) {
-          void collectAndSendFingerprint(ws);
+          collectAndSendFingerprint(ws);
         }
       }, 3000);
     }
@@ -154,7 +221,7 @@ export function CompositeLoginPage() {
         if (msg.state === "pending_device") {
           // fingerprint 未送信なら収集して送信
           if (fingerprintStatus !== "sent") {
-            void collectAndSendFingerprint(ws);
+            collectAndSendFingerprint(ws);
           }
         } else if (msg.state === "challenge_pending") {
           setChallenge(msg.data ?? {});
@@ -193,7 +260,7 @@ export function CompositeLoginPage() {
             // fingerprint 空エラーなら直ちに再収集
             retryTimerRef.current = window.setTimeout(() => {
               if (ws.readyState === WebSocket.OPEN) {
-                void collectAndSendFingerprint(ws);
+                collectAndSendFingerprint(ws);
               }
             }, 500);
           }
@@ -288,6 +355,45 @@ export function CompositeLoginPage() {
     }
   };
 
+  /** Passkey (FaceID / TouchID / Windows Hello / 物理キー) でログイン。
+   *  Cernere の通常 /api/auth/passkey/login-begin で options を取り、 ブラウザの
+   *  生体認証ダイアログを開く。 verify は /api/auth/passkey/composite-login-finish
+   *  で authCode を発行する経路 (= JWT は返さず、 親サービスに postMessage する) */
+  const handlePasskeyLogin = async () => {
+    setError("");
+    setInfo("");
+    setLoading(true);
+    try {
+      const beginRes = await fetch(`${API_BASE}/api/auth/passkey/login-begin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email || "" }),
+      });
+      const beginData = await beginRes.json() as
+        { options: PublicKeyCredentialRequestOptionsJSON; challengeOwner: string; error?: string };
+      if (!beginRes.ok) throw new Error(beginData.error || "Passkey login start failed");
+
+      const assertion: AuthenticationResponseJSON = await startAuthentication({ optionsJSON: beginData.options });
+
+      const finishRes = await fetch(`${API_BASE}/api/auth/passkey/composite-login-finish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ response: assertion, challengeOwner: beginData.challengeOwner }),
+      });
+      const finishData = await finishRes.json() as { authCode?: string; error?: string };
+      if (!finishRes.ok || !finishData.authCode) {
+        throw new Error(finishData.error || "Passkey login failed");
+      }
+
+      completeAuth(finishData.authCode);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Passkey login failed";
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleResend = () => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -333,12 +439,16 @@ export function CompositeLoginPage() {
             Cernere
           </h1>
           <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
-            {mode === "device" ? "本人確認が必要です" : "Sign in to continue"}
+            {passkeyOnly
+              ? "Passkey でログイン"
+              : mode === "device"
+                ? "本人確認が必要です"
+                : "Sign in to continue"}
           </p>
         </div>
 
         {/* Tab switcher */}
-        {mode !== "device" && (
+        {!passkeyOnly && mode !== "device" && (
           <div
             style={{
               display: "flex",
@@ -349,7 +459,12 @@ export function CompositeLoginPage() {
             {(["login", "register"] as const).map((m) => (
               <button
                 key={m}
-                onClick={() => { setMode(m); setError(""); setInfo(""); }}
+                onClick={() => {
+                  // 新規登録は composite (埋め込み) では行わず、 Cernere 単体の
+                  // 登録画面へ誘導する (device 検証 / MFA を含む完全なフロー)。
+                  if (m === "register") { window.location.href = registerHref; return; }
+                  setMode(m); setError(""); setInfo("");
+                }}
                 style={{
                   flex: 1,
                   padding: "0.5rem",
@@ -399,7 +514,7 @@ export function CompositeLoginPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
+        {!passkeyOnly && <form onSubmit={handleSubmit}>
           {mode === "register" && (
             <div className="form-group">
               <label>Name</label>
@@ -419,6 +534,8 @@ export function CompositeLoginPage() {
                 <label>Email</label>
                 <input
                   type="email"
+                  name="email"
+                  autoComplete="username"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="user@example.com"
@@ -430,6 +547,8 @@ export function CompositeLoginPage() {
                 <label>Password</label>
                 <input
                   type="password"
+                  name="password"
+                  autoComplete={mode === "register" ? "new-password" : "current-password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="8+ characters"
@@ -539,14 +658,14 @@ export function CompositeLoginPage() {
 
           {mode !== "device" && fingerprintStatus === "collecting" && (
             <p style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "0.5rem", textAlign: "center" }}>
-              デバイス情報を収集中... (位置情報の許可が必要です)
+              デバイス情報を収集中...
             </p>
           )}
-        </form>
+        </form>}
 
         {mode !== "device" && (
           <>
-            <div
+            {!passkeyOnly && <div
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -559,10 +678,47 @@ export function CompositeLoginPage() {
               <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
               <span>or</span>
               <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+            </div>}
+
+            {/* Passkey (Face ID / Touch ID / Windows Hello / Android 生体 / 物理キー) */}
+            <button
+              type="button"
+              onClick={handlePasskeyLogin}
+              disabled={loading}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "0.5rem",
+                width: "100%",
+                padding: "0.6rem",
+                background: "var(--bg-surface-2)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-sm)",
+                color: "var(--text)",
+                fontSize: "0.875rem",
+                fontWeight: 500,
+                marginBottom: "0.5rem",
+                cursor: loading ? "not-allowed" : "pointer",
+                opacity: loading ? 0.6 : 1,
+              }}
+            >
+              🔐 Passkey でログイン (Face ID / Touch ID / Windows Hello)
+            </button>
+
+            {/* 新規登録導線: 埋め込み (特に passkey 専用) では登録できないため、
+                Cernere 単体の登録画面へ誘導する。 */}
+            <div style={{ textAlign: "center", marginTop: "0.25rem", marginBottom: "0.5rem" }}>
+              <a
+                href={registerHref}
+                style={{ fontSize: "0.8rem", color: "var(--text-muted)", textDecoration: "underline" }}
+              >
+                アカウントをお持ちでない方は新規登録
+              </a>
             </div>
 
             {/* Google */}
-            <a
+            {!passkeyOnly && <a
               href={googleAuthUrl}
               style={{
                 display: "flex",
@@ -588,10 +744,10 @@ export function CompositeLoginPage() {
                 <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335" />
               </svg>
               Continue with Google
-            </a>
+            </a>}
 
             {/* GitHub */}
-            <a
+            {!passkeyOnly && <a
               href={githubAuthUrl}
               style={{
                 display: "flex",
@@ -613,7 +769,7 @@ export function CompositeLoginPage() {
                 <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
               </svg>
               Continue with GitHub
-            </a>
+            </a>}
           </>
         )}
       </div>

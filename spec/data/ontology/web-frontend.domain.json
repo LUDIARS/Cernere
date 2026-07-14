@@ -1,0 +1,27 @@
+{
+  "name": "web-frontend",
+  "description": "React 19 / React Router 7 ベースの管理 UI。ログイン・ダッシュボード・組織/チーム管理・データオプトアウト画面と、トークン保持・WS クエリ・認証コンテキストのクライアントライブラリ。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)frontend/src/pages/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/lib/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/hooks/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/contexts/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/components/[^/]+$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"web-frontend\" domain: React 19 / React Router 7 ベースの管理 UI。ログイン・ダッシュボード・組織/チーム管理・データオプトアウト画面と、トークン保持・WS クエリ・認証コンテキストのクライアントライブラリ。"
+}

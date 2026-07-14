@@ -12,6 +12,8 @@ import * as schema from "../db/schema.js";
 import {
   generateTokenPair, generateToolToken, generateProjectToken, verifyToken, verifyProjectToken, extractBearerToken, REFRESH_TOKEN_DAYS,
 } from "../auth/jwt.js";
+import { hashRefreshToken } from "../auth/token-hash.js";
+import { isPasetoEnabled, signProjectToken } from "../auth/paseto.js";
 import { checkRateLimit, redis } from "../redis.js";
 import {
   logUserLogin,
@@ -20,6 +22,9 @@ import {
   logProjectLogin,
   logProjectLoginFailed,
 } from "../logging/auth-logger.js";
+import { devLog } from "../logging/dev-logger.js";
+import { issueAuthCodeForUserId } from "../auth/auth-code.js";
+import { isCompositeTargetAllowed } from "../auth/composite-redirect.js";
 
 interface RouteResult {
   status: string;
@@ -37,14 +42,18 @@ export async function handleAuthRoute(
   authHeader: string,
   ctx: RequestCtx = {},
 ): Promise<RouteResult> {
+  devLog("auth.route", { action, ip: ctx.ip });
   switch (action) {
     case "register": return register(parseBody(body), ctx);
     case "login": return login(parseBody(body), ctx);
     case "refresh": return refresh(parseBody(body));
     case "logout": return logout(parseBody(body));
-    case "verify": return verify(parseBody(body));
+    case "verify": return verify(parseBody(body), ctx);
     case "exchange": return exchange(parseBody(body));
     case "me": return me(authHeader);
+    case "composite-session-code": return compositeSessionCode(parseBody(body), authHeader);
+    case "project-token": return projectUserToken(parseBody(body), authHeader, ctx);
+    case "project-launch-credential": return projectLaunchCredential(parseBody(body), ctx);
     default:
       return { status: "404 Not Found", data: { error: `Unknown auth action: ${action}` } };
   }
@@ -59,22 +68,27 @@ async function register(p: Record<string, unknown>, ctx: RequestCtx): Promise<Ro
   const name = p.name as string | undefined;
   const email = p.email as string | undefined;
   const password = p.password as string | undefined;
+  devLog("auth.register.begin", { email, ip: ctx.ip });
 
   if (!name || !email || !password) throw new Error("name, email, password are required");
   if (password.length < 8) throw new Error("Password must be at least 8 characters");
 
+  devLog("auth.register.rateLimit", { email });
   await checkRateLimit(`register:${email}`, 5, 600);
 
+  devLog("auth.register.checkExisting", { email });
   const existing = await db.select({ id: schema.users.id })
     .from(schema.users).where(eq(schema.users.email, email)).limit(1);
   if (existing.length > 0) throw new Error("Registration failed. Please check your input and try again.");
 
+  devLog("auth.register.hashPassword");
   const passwordHash = await bcrypt.hash(password, 12);
   const countResult = await db.select({ count: sql<number>`count(*)` }).from(schema.users);
   const role = Number(countResult[0]?.count ?? 0) === 0 ? "admin" : "general";
   const userId = crypto.randomUUID();
   const now = new Date();
 
+  devLog("auth.register.insertUser", { userId, role });
   await db.insert(schema.users).values({
     id: userId, login: name, displayName: name, email, role, passwordHash,
     createdAt: now, updatedAt: now,
@@ -83,7 +97,7 @@ async function register(p: Record<string, unknown>, ctx: RequestCtx): Promise<Ro
   const { accessToken, refreshToken } = generateTokenPair(userId, role);
   const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
-    id: crypto.randomUUID(), userId, refreshToken, expiresAt,
+    id: crypto.randomUUID(), userId, refreshToken: hashRefreshToken(refreshToken), expiresAt,
   });
 
   logUserRegister(userId, email, "email", { ip: ctx.ip });
@@ -100,32 +114,44 @@ async function register(p: Record<string, unknown>, ctx: RequestCtx): Promise<Ro
 async function login(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
   // Tool client login
   if (p.grant_type === "client_credentials") {
+    devLog("auth.login.toolClient", { clientId: p.client_id });
     return toolLogin(p.client_id as string, p.client_secret as string);
   }
   // Project login (managed_projects)
   if (p.grant_type === "project_credentials") {
+    devLog("auth.login.project", { clientId: p.client_id });
     return projectLogin(p.client_id as string, p.client_secret as string, ctx);
   }
 
   const email = p.email as string | undefined;
   const password = p.password as string | undefined;
+  devLog("auth.login.user.begin", { email, ip: ctx.ip });
   if (!email || !password) {
     logUserLoginFailed(email, "email", "missing credentials", ctx);
     throw new Error("email and password are required");
   }
 
+  devLog("auth.login.user.rateLimit", { email });
+  // per-email: 標的アカウントへの総当たりを絞る。
   await checkRateLimit(`login:${email}`, 10, 900);
+  // per-IP: 1 IP から多数アカウントへ 1 発ずつ撒く credential stuffing を絞る。
+  // NAT/オフィス共有 IP も想定し email 側より緩めに取る。
+  await checkRateLimit(`login-ip:${ctx.ip ?? "unknown"}`, 50, 900);
 
+  devLog("auth.login.user.lookup", { email });
   const rows = await db.select().from(schema.users)
     .where(eq(schema.users.email, email)).limit(1);
   const user = rows[0];
   if (!user || !user.passwordHash) {
+    devLog("auth.login.user.notFound", { email });
     logUserLoginFailed(email, "email", "invalid credentials", ctx);
     throw new Error("Unauthorized: Invalid email or password");
   }
 
+  devLog("auth.login.user.verify", { userId: user.id });
   const valid = await bcrypt.compare(password, user.passwordHash);
   if (!valid) {
+    devLog("auth.login.user.invalid", { userId: user.id });
     logUserLoginFailed(email, "email", "invalid credentials", ctx);
     throw new Error("Unauthorized: Invalid email or password");
   }
@@ -141,7 +167,7 @@ async function login(p: Record<string, unknown>, ctx: RequestCtx): Promise<Route
   const { accessToken, refreshToken } = generateTokenPair(user.id, user.role);
   const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
-    id: crypto.randomUUID(), userId: user.id, refreshToken, expiresAt,
+    id: crypto.randomUUID(), userId: user.id, refreshToken: hashRefreshToken(refreshToken), expiresAt,
   });
 
   logUserLogin(user.id, user.email, "email", ctx);
@@ -160,17 +186,37 @@ async function refresh(p: Record<string, unknown>): Promise<RouteResult> {
   if (!rt) throw new Error("refreshToken is required");
 
   const rows = await db.select().from(schema.refreshSessions)
-    .where(eq(schema.refreshSessions.refreshToken, rt)).limit(1);
+    .where(eq(schema.refreshSessions.refreshToken, hashRefreshToken(rt))).limit(1);
   const session = rows[0];
-  if (!session || new Date() > session.expiresAt) throw new Error("Unauthorized: Invalid or expired refresh token");
+  if (!session) throw new Error("Unauthorized: Invalid or expired refresh token");
+
+  // reuse 検出: 既にローテーション済みの refresh token が再提示された。
+  // = 正規クライアントが新 token を持っているのに旧 token が使われた → 盗用の疑い。
+  // 当該ユーザの全 refresh session を失効させ、 攻撃者・正規どちらも再ログインを強制する。
+  if (session.rotatedAt) {
+    await db.delete(schema.refreshSessions)
+      .where(eq(schema.refreshSessions.userId, session.userId));
+    devLog("auth.refresh.reuseDetected", { userId: session.userId });
+    throw new Error("Unauthorized: Refresh token reuse detected; all sessions revoked. Please sign in again.");
+  }
+
+  if (new Date() > session.expiresAt) throw new Error("Unauthorized: Invalid or expired refresh token");
 
   const userRows = await db.select().from(schema.users)
     .where(eq(schema.users.id, session.userId)).limit(1);
   if (!userRows[0]) throw new Error("Unauthorized: User not found");
 
   const { accessToken, refreshToken } = generateTokenPair(userRows[0].id, userRows[0].role);
+  // 旧 session は削除せず rotated_at を刻んで残す (再提示 = reuse を検出するため)。
+  // expires_at を過ぎれば掃除対象。 新 session は別行として sliding expiry で発行。
+  const now = new Date();
+  const newExpiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.update(schema.refreshSessions)
-    .set({ refreshToken }).where(eq(schema.refreshSessions.id, session.id));
+    .set({ rotatedAt: now }).where(eq(schema.refreshSessions.id, session.id));
+  await db.insert(schema.refreshSessions).values({
+    id: crypto.randomUUID(), userId: session.userId,
+    refreshToken: hashRefreshToken(refreshToken), expiresAt: newExpiresAt,
+  });
 
   return { status: "200 OK", data: { accessToken, refreshToken } };
 }
@@ -179,12 +225,15 @@ async function logout(p: Record<string, unknown>): Promise<RouteResult> {
   const rt = p.refreshToken as string | undefined;
   if (rt) {
     await db.delete(schema.refreshSessions)
-      .where(eq(schema.refreshSessions.refreshToken, rt));
+      .where(eq(schema.refreshSessions.refreshToken, hashRefreshToken(rt)));
   }
   return { status: "200 OK", data: { message: "Logged out" } };
 }
 
-async function verify(p: Record<string, unknown>): Promise<RouteResult> {
+async function verify(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
+  // verify は token 文字列の有効性 oracle になりうるため rate limit を課す
+  // (M-1: login/register には rate limit があるのに verify には無かった非対称を解消)。
+  await checkRateLimit(`verify:${ctx.ip ?? "unknown"}`, 60, 60);
   const token = p.token as string;
   // プロジェクトトークンとして検証
   try {
@@ -222,12 +271,65 @@ async function verify(p: Record<string, unknown>): Promise<RouteResult> {
 }
 
 async function exchange(p: Record<string, unknown>): Promise<RouteResult> {
+  // M-3: authcode は user の access/refresh token を取り出す bearer ticket。
+  // 以前は code の先頭 8 文字を平文 console.log に書いていた。 値はログに残さず、
+  // dev のみ有効な devLog に「有無 / 結果」だけを寄せる。
   const code = p.code as string | undefined;
-  if (!code) throw new Error("code is required");
+  if (!code) {
+    devLog("auth.exchange.missingCode", {});
+    throw new Error("code is required");
+  }
   const raw = await redis.get(`authcode:${code}`);
+  devLog("auth.exchange.lookup", { found: raw !== null });
   if (!raw) throw new Error("Unauthorized: Invalid or expired auth code");
   await redis.del(`authcode:${code}`);
-  return { status: "200 OK", data: JSON.parse(raw) };
+  const parsed = JSON.parse(raw);
+  devLog("auth.exchange.done", {
+    userId: parsed.user?.id ?? "(none)",
+    hasAccessToken: !!parsed.accessToken,
+  });
+  return { status: "200 OK", data: parsed };
+}
+
+/**
+ * 既存の Cernere セッション (Bearer accessToken) から、 呼び出し元サービス用の
+ * composite authCode を「無操作で」発行する (silent SSO)。
+ *
+ * 用途: 一度 Cernere にログイン済みのユーザが GLab 等を開いたとき、 passkey/パスワードの
+ * 再入力なしで authCode を得て `POST /api/auth/exchange` に渡せるようにする。
+ *
+ * 防御: (1) accessToken を検証、 (2) 送信先 `target` (origin / redirect_uri) を
+ * composite 許可リストで完全一致検証 (VULNWEB-001 と同じ authority)。 いずれか失敗で 401/400。
+ */
+async function compositeSessionCode(
+  p: Record<string, unknown>,
+  authHeader: string,
+): Promise<RouteResult> {
+  const token = extractBearerToken(authHeader);
+  if (!token) return { status: "401 Unauthorized", data: { error: "no_session" } };
+
+  let userId: string;
+  try {
+    userId = verifyToken(token).sub;
+  } catch {
+    return { status: "401 Unauthorized", data: { error: "invalid_session" } };
+  }
+
+  // 発行のたびに refresh_sessions 行が増えるため、 有効セッション保持者による
+  // スパム発行を rate limit で抑止する (login/register と同じ流儀)。
+  await checkRateLimit(`session-code:${userId}`, 10, 60);
+
+  const target = typeof p.target === "string" ? p.target : "";
+  if (!target) return { status: "400 Bad Request", data: { error: "target is required" } };
+  if (!isCompositeTargetAllowed(target)) {
+    return { status: "403 Forbidden", data: { error: "target_not_allowed" } };
+  }
+
+  const authCode = await issueAuthCodeForUserId(userId);
+  if (!authCode) return { status: "401 Unauthorized", data: { error: "user_not_found" } };
+
+  devLog("auth.compositeSessionCode.issued", { userId });
+  return { status: "200 OK", data: { authCode } };
 }
 
 async function me(authHeader: string): Promise<RouteResult> {
@@ -244,6 +346,98 @@ async function me(authHeader: string): Promise<RouteResult> {
       id: u.id, name: u.displayName, email: u.email, role: u.role,
       hasGoogleAuth: !!u.googleId, hasPassword: !!u.passwordHash,
       googleScopes: u.googleScopes ?? [],
+    },
+  };
+}
+
+/**
+ * POST /api/auth/project-token  — 「ログイン中ユーザ × 指定 project」 の per-call token を発行。
+ *
+ * リクエスト:
+ *   Authorization: Bearer <user accessToken>
+ *   body: { project_key: "memoria-hub" }   (project_id でも可: 後方互換)
+ *
+ * 戻り値:
+ *   { tokenType: "user_for_project", accessToken, expiresIn, projectKey, userId }
+ *
+ * 設計意図:
+ *   ・呼び出し元 (Memoria local backend など) は **自分用の long-lived secret を持たない**。
+ *     ログイン中ユーザの user JWT を借りて、 各 project に対する short-lived token を都度発行する。
+ *   ・返した token は呼び出し元 process の memory のみに保持される想定。 disk / Infisical
+ *     には残さない。 user/AI も値を見ない (HTTPS+memory 経由でのみ流通)。
+ *   ・token は **PASETO Ed25519 (aud=hub_url 必須)** で署名する。 project 側 (Hub) は
+ *     `/.well-known/cernere-public-key` の公開鍵でローカル検証する。 旧 HS256 共有鍵
+ *     fallback は鍵横展開 + aud 無し横断偽造のリスクのため撤去済み。
+ */
+async function projectUserToken(
+  p: Record<string, unknown>,
+  authHeader: string,
+  ctx: RequestCtx,
+): Promise<RouteResult> {
+  const token = extractBearerToken(authHeader);
+  if (!token) throw new Error("Unauthorized: No token provided");
+  const claims = verifyToken(token);
+
+  const projectKey = (p.project_key as string | undefined) ?? (p.project_id as string | undefined);
+  if (!projectKey || typeof projectKey !== "string") {
+    throw new Error("project_key is required");
+  }
+
+  await checkRateLimit(`project_user_token:${claims.sub}:${projectKey}`, 60, 60);
+
+  const rows = await db.select().from(schema.managedProjects)
+    .where(eq(schema.managedProjects.key, projectKey)).limit(1);
+  const project = rows[0];
+  if (!project || !project.isActive) {
+    throw new Error(`project '${projectKey}' not found or inactive`);
+  }
+
+  const userRows = await db.select().from(schema.users)
+    .where(eq(schema.users.id, claims.sub)).limit(1);
+  if (!userRows[0]) throw new Error("Unauthorized: User not found");
+  const user = userRows[0];
+
+  // hub_url (= 受け取る service の URL) を PASETO の aud claim に入れる。 これは
+  // confused-deputy 防御の要 (「service A 向け token を service B が受理」を防ぐ) なので
+  // **必須**。 旧 HS256 fallback は撤去したため、 未指定/PASETO 未設定は fail-closed。
+  const hubUrl = typeof p.hub_url === "string" ? p.hub_url.trim() : "";
+  const displayName = (user.displayName ?? user.login ?? "").trim() || `user-${user.id.slice(0, 8)}`;
+
+  // fail-closed: aud 無し token は横断偽造を許すため、 hub_url を必須にする (400)。
+  if (!hubUrl) {
+    throw new Error("hub_url is required for project-token (HS256 fallback removed; aud is mandatory)");
+  }
+  // fail-closed: PASETO 署名鍵が未設定なら暗黙降格せず明示的に拒否する (= 設定不備の
+  // 無言フォールバック禁止 RULE §7.1)。 サーバ構成エラーなので 500 扱い。
+  if (!isPasetoEnabled()) {
+    throw new Error(
+      "project-token signing unavailable: PASETO keys not configured (set CERNERE_PASETO_SECRET_KEY / _PUBLIC_KEY)",
+    );
+  }
+
+  const tokenTtl = 15 * 60;
+  const accessToken = await signProjectToken({
+    userId: user.id,
+    projectKey: project.key,
+    role: user.role,
+    displayName,
+    audience: hubUrl,
+    ttlSec: tokenTtl,
+  });
+  devLog("auth.projectUserToken.issue", {
+    userId: user.id, projectKey: project.key, audience: hubUrl, ip: ctx.ip, alg: "EdDSA",
+  });
+  return {
+    status: "200 OK",
+    data: {
+      tokenType: "user_for_project",
+      accessToken,
+      expiresIn: tokenTtl,
+      projectKey: project.key,
+      userId: user.id,
+      displayName,
+      audience: hubUrl,
+      alg: "EdDSA",
     },
   };
 }
@@ -284,7 +478,11 @@ async function projectLogin(clientId: string | undefined, clientSecret: string |
     logProjectLoginFailed(clientId, "invalid credentials", ctx);
     throw new Error("Unauthorized: Invalid project credentials");
   }
-  const accessToken = generateProjectToken(project.clientId, project.key);
+  const accessToken = generateProjectToken(
+    project.clientId,
+    project.key,
+    project.credentialGeneration,
+  );
   logProjectLogin(project.key, project.clientId, ctx);
   return {
     status: "200 OK",
@@ -300,4 +498,45 @@ async function projectLogin(clientId: string | undefined, clientSecret: string |
       },
     },
   };
+}
+
+/** Excubitor等の認可済launcherが、target projectの起動credentialを毎回発行する。 */
+async function projectLaunchCredential(
+  p: Record<string, unknown>,
+  ctx: RequestCtx,
+): Promise<RouteResult> {
+  const clientId = p.client_id as string | undefined;
+  const clientSecret = p.client_secret as string | undefined;
+  const targetProjectKey = p.target_project_key as string | undefined;
+  const launchId = p.launch_id as string | undefined;
+  const targetClientSecret = p.target_client_secret as string | undefined;
+  if (!clientId || !clientSecret || !targetProjectKey || !launchId || !targetClientSecret) {
+    throw new Error(
+      "client_id, client_secret, target_project_key, launch_id, and target_client_secret are required",
+    );
+  }
+
+  await checkRateLimit(`project_launch_credential:${clientId}`, 30, 300);
+  const rows = await db.select().from(schema.managedProjects)
+    .where(eq(schema.managedProjects.clientId, clientId)).limit(1);
+  const issuer = rows[0];
+  if (!issuer || !issuer.isActive || !await bcrypt.compare(clientSecret, issuer.clientSecretHash)) {
+    logProjectLoginFailed(clientId, "invalid launch issuer credentials", ctx);
+    throw new Error("Unauthorized: Invalid project credentials");
+  }
+
+  const { issueProjectLaunchCredential } = await import("../project/launch-credentials.js");
+  const credential = await issueProjectLaunchCredential(
+    issuer.key,
+    targetProjectKey,
+    launchId,
+    targetClientSecret,
+  );
+  devLog("auth.projectLaunchCredential.issued", {
+    issuerProjectKey: issuer.key,
+    targetProjectKey,
+    launchId,
+    idempotent: credential.idempotent,
+  });
+  return { status: "201 Created", data: credential };
 }

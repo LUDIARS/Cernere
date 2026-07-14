@@ -9,11 +9,14 @@ export {
   collectDeviceFingerprint,
   collectMachineInfo,
   collectBrowserInfo,
-  collectGeoInfo,
 } from "./device-fingerprint.js";
 export type {
   DeviceFingerprint,
   MachineInfo,
   BrowserInfo,
-  GeoInfo,
 } from "./device-fingerprint.js";
+export {
+  buildCompositePasskeyLoginUrl,
+  CompositePasskeyPopup,
+} from "./CompositePasskeyPopup.js";
+export type { CompositePasskeyPopupProps } from "./CompositePasskeyPopup.js";

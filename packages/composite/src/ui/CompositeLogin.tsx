@@ -16,7 +16,6 @@ export type DeviceAnomaly =
   | "new_device"
   | "new_os"
   | "new_browser"
-  | "new_location"
   | "new_ip"
   | "missing_fingerprint";
 
@@ -97,11 +96,9 @@ interface Labels {
   deviceResend: string;
   deviceResent: string;
   collectingFingerprint: string;
-  geoRequest: string;
   anomalyNewDevice: string;
   anomalyNewOs: string;
   anomalyNewBrowser: string;
-  anomalyNewLocation: string;
   anomalyNewIp: string;
   anomalyMissing: string;
   remainingAttempts: string;
@@ -132,11 +129,9 @@ const DEFAULT_LABELS: Labels = {
   deviceResend: "Resend code",
   deviceResent: "Code re-sent.",
   collectingFingerprint: "Collecting device information...",
-  geoRequest: "We will request your location to verify it's really you.",
   anomalyNewDevice: "New device",
   anomalyNewOs: "New OS",
   anomalyNewBrowser: "New browser",
-  anomalyNewLocation: "Different location",
   anomalyNewIp: "Different network",
   anomalyMissing: "Could not collect device information",
   remainingAttempts: "{n} attempts remaining",
@@ -157,7 +152,6 @@ function anomalyLabel(a: DeviceAnomaly, l: Labels): string {
     case "new_device": return l.anomalyNewDevice;
     case "new_os": return l.anomalyNewOs;
     case "new_browser": return l.anomalyNewBrowser;
-    case "new_location": return l.anomalyNewLocation;
     case "new_ip": return l.anomalyNewIp;
     case "missing_fingerprint": return l.anomalyMissing;
     default: return a;
@@ -181,15 +175,14 @@ export function CompositeLogin(props: CompositeLoginProps) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // ── マウント時にフィンガープリント収集 (geo はユーザー操作不要) ──
-  // ※ Geolocation API はユーザー許可を求めるが、拒否されてもフォールバックする
+  // ── マウント時にフィンガープリント収集 (machine + browser のみ、同期) ──
   const [fingerprint, setFingerprint] = useState<DeviceFingerprint | null>(null);
   useEffect(() => {
-    let cancelled = false;
-    collectDeviceFingerprint({ requestGeo: true, geoTimeoutMs: 5000 })
-      .then((fp) => { if (!cancelled) setFingerprint(fp); })
-      .catch(() => { if (!cancelled) setFingerprint(null); });
-    return () => { cancelled = true; };
+    try {
+      setFingerprint(collectDeviceFingerprint());
+    } catch {
+      setFingerprint(null);
+    }
   }, []);
 
   const handleResponse = (r: CompositeAuthResponse) => {

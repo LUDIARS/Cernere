@@ -48,15 +48,34 @@ export async function dispatchProjectCommand(
     case "auth.register":
     case "auth.mfa-verify": {
       const { executeCompositeAction } = await import("../http/composite-handler.js");
-      return executeCompositeAction(action as "login" | "register" | "mfa-verify", payload);
+      // projectKey を ctx に載せて、認証完了時に project_data_<key> へ
+      // 行を初期化できるようにする (ensureUserProjectRow).
+      return executeCompositeAction(
+        action as "login" | "register" | "mfa-verify",
+        payload,
+        { projectKey },
+      );
     }
     // ─── managed_project: project_data_{key} へのユーザーデータアクセス ───
-    // projectKey は WS セッションで bind されており、payload では受け取らない
-    // (他プロジェクトの書き換えを防止)。
+    // projectKey は WS セッションで bind される。targetProjectKey を省略した操作は
+    // 常に自己 project に限定し、別 project の read/write は data_sharing grant を
+    // fail-closed で検査する。delete は引き続き自己 project のみ。
     case "managed_project.get_user_data": {
-      const svc = await import("../project/service.js");
       const userId = requireStr(payload, "userId");
       const columns = Array.isArray(payload.columns) ? payload.columns as string[] : undefined;
+      const targetProjectKey = typeof payload.targetProjectKey === "string"
+        ? payload.targetProjectKey
+        : undefined;
+
+      // targetProjectKey が自分自身と異なる場合のみ、他プロジェクトの data_sharing
+      // 許可を経由するクロスプロジェクト読み取りに回す。省略時/自分自身の場合は
+      // 既存の自己データ読み取りのまま (挙動変更なし)。
+      if (targetProjectKey && targetProjectKey !== projectKey) {
+        const { getSharedUserColumns } = await import("../project/data-sharing.js");
+        return getSharedUserColumns(projectKey, targetProjectKey, userId, columns);
+      }
+
+      const svc = await import("../project/service.js");
       return svc.getUserColumns(projectKey, userId, columns);
     }
     case "managed_project.set_user_data": {
@@ -65,6 +84,13 @@ export async function dispatchProjectCommand(
       const data = payload.data as Record<string, unknown> | undefined;
       if (!data || typeof data !== "object") {
         throw new Error("Missing or invalid field: data");
+      }
+      const targetProjectKey = typeof payload.targetProjectKey === "string"
+        ? payload.targetProjectKey
+        : undefined;
+      if (targetProjectKey && targetProjectKey !== projectKey) {
+        const { setSharedUserColumns } = await import("../project/data-sharing.js");
+        return setSharedUserColumns(projectKey, targetProjectKey, userId, data);
       }
       return svc.setUserData(projectKey, userId, data);
     }
@@ -120,14 +146,25 @@ export async function dispatchProjectCommand(
       const provider = requireStr(payload, "provider");
       return svc.deleteOAuthToken(projectKey, userId, provider);
     }
-    // ─── service adapter — project token 検証用 JWKS を返す ───
+    // ─── service adapter — peer から渡された project token をリモート検証 ───
     //
-    // 他 LUDIARS サービス (Actio/Nuntius/Imperativus 等) が
-    // @ludiars/cernere-service-adapter 経由で取得する. 返却内容は
-    // RFC 7517 JWKS 形式で、ローカルでの RS256 検証に使う.
-    case "managed_project.get_jwks": {
-      const { getProjectJwks } = await import("../auth/project-keys.js");
-      return getProjectJwks();
+    // 旧 get_jwks (RS256 + ローカル検証) は廃止. peer 側は token を
+    // Cernere に投げて { valid, projectKey, clientId } を取得する.
+    case "managed_project.verify_token": {
+      const token = requireStr(payload, "token");
+      const { resolveProjectWsAuth } = await import("./project-handler.js");
+      try {
+        const claims = await resolveProjectWsAuth(token);
+        if (!claims) return { valid: false };
+        return {
+          valid: true,
+          projectKey: claims.projectKey,
+          clientId: claims.sub,
+          exp: claims.exp,
+        };
+      } catch {
+        return { valid: false };
+      }
     }
     // ─── managed_relay: peer SA 間の仲介 (Phase 0b) ───
     //
@@ -147,7 +184,8 @@ export async function dispatchProjectCommand(
     case "managed_relay.request_peer": {
       const { requestPeer } = await import("../project/relay-service.js");
       const target = requireStr(payload, "target");
-      return await requestPeer(projectKey, target);
+      const userId = requireStr(payload, "userId");  // fail-closed: opt-out チェックに必須
+      return await requestPeer(projectKey, target, userId);
     }
     case "managed_relay.verify_challenge": {
       // 呼び出し元 (B) は自身の projectKey を WS セッションから提供し、

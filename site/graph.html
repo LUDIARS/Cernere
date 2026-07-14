@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cernere — ドメイングラフ</title>
+  <meta name="description" content="Cernere のドメインと機能、その依存関係をインタラクティブに俯瞰するグラフビュー。" />
+  <link rel="stylesheet" href="assets/style.css" />
+  <script defer src="assets/nav.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+  <script defer src="assets/graph-data.js"></script>
+  <script defer src="assets/graph.js"></script>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <div class="tag">Domain Graph</div>
+      <h1>ドメイングラフ</h1>
+      <p>Cernere を構成するドメイン（大ノード）と機能（小ノード）、およびドメイン間の「依存する」関係を可視化する。ノードはドラッグ可能。クリックすると関連ノードを強調表示する。</p>
+    </section>
+
+    <div class="api-controls">
+      <button class="btn" id="toggle-features">機能ノードを隠す</button>
+      <button class="btn" id="toggle-physics">物理シミュレーション停止</button>
+      <button class="btn" id="fit">全体表示</button>
+    </div>
+
+    <div class="legend">
+      <span><span class="dot" style="background:#DC2626"></span>コアドメイン</span>
+      <span><span class="dot" style="background:#3b82f6"></span>ドメイン</span>
+      <span><span class="dot" style="background:#3a4250"></span>機能</span>
+      <span><span class="dot" style="background:transparent;border:2px solid #f85149;width:8px;height:8px"></span>→ 依存する</span>
+    </div>
+
+    <div id="graph"></div>
+    <div id="fallback" class="note" style="display:none">
+      グラフライブラリ (vis-network) を読み込めませんでした。下のテキスト表現を参照してください。
+    </div>
+
+    <h2>ドメインと機能の一覧</h2>
+    <div id="domain-list" class="grid cols-2"></div>
+
+    <h2>依存関係（テキスト表現）</h2>
+    <div id="dep-list"></div>
+  </main>
+</body>
+</html>

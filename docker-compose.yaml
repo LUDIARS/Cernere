@@ -21,12 +21,18 @@ services:
     ports:
       - "${LISTEN_PORT:-8080}:8080"
     environment:
-      DATABASE_URL: "${DATABASE_URL:-postgresql://cernere_user:cernere@localhost:5432/cernere}"
-      REDIS_URL: "${REDIS_URL:-redis://localhost:6379/0}"
+      # .env への依存は廃止。 起動経路:
+      #   host shell で INFISICAL_CLIENT_ID/SECRET (+ SITE_URL/PROJECT_ID/ENVIRONMENT)
+      #   を渡すと server/src/bootstrap.ts が env-cli 経由で Infisical から fetch する。
+      # ※ 旧 Excubitor 経由の inject (catalog.infisical.inject=true) は 2026-05-17
+      #   Concordia 統合時に廃止. 全サービス自前 fetch に統一.
       LISTEN_PORT: "8080"
-      FRONTEND_URL: "${FRONTEND_URL:-http://localhost:5173}"
-      JWT_SECRET: "${JWT_SECRET:-}"
       NODE_ENV: "production"
+      INFISICAL_SITE_URL: "${INFISICAL_SITE_URL:-}"
+      INFISICAL_PROJECT_ID: "${INFISICAL_PROJECT_ID:-}"
+      INFISICAL_ENVIRONMENT: "${INFISICAL_ENVIRONMENT:-dev}"
+      INFISICAL_CLIENT_ID: "${INFISICAL_CLIENT_ID:-}"
+      INFISICAL_CLIENT_SECRET: "${INFISICAL_CLIENT_SECRET:-}"
     restart: unless-stopped
     profiles:
       - prod
@@ -48,23 +54,52 @@ services:
   # ソースマウント + ホットリロード
 
   backend-dev:
-    image: node:22-slim
+    # uWebSockets.js v20.60+ requires glibc 2.38+.
+    # node:22-slim / node:24-slim (Debian bookworm, glibc 2.36) fail at runtime.
+    # Use Debian trixie (glibc 2.41) base.
+    image: node:24-trixie-slim
     container_name: cernere-backend-dev
     working_dir: /app/server
     ports:
       - "${LISTEN_PORT:-8080}:8080"
     volumes:
       - ./server:/app/server
+      - ./lib/vestigium:/app/lib/vestigium
       - ./migrations:/app/migrations
       - backend-node-modules:/app/server/node_modules
+      - backend-vestigium-node-modules:/app/lib/vestigium/node_modules
     environment:
-      DATABASE_URL: "${DATABASE_URL:-postgresql://cernere_user:cernere@localhost:5432/cernere}"
-      REDIS_URL: "${REDIS_URL:-redis://localhost:6379/0}"
+      # .env 廃止 — secret は bootstrap.ts が host 経由で渡された INFISICAL_* env から
+      # 自前で Infisical fetch する (env-cli/src/env-file.ts).
+      # dev では infra_default network 経由で `postgres:5432` / `redis:6379` の hostname 解決が
+      # できるので、 Infisical 側の secrets にもこれら docker network 用 URL を設定しておく。
+      # ※ 旧 Excubitor 経由の inject は 2026-05-17 Concordia 統合時に廃止.
       LISTEN_PORT: "8080"
-      FRONTEND_URL: "${FRONTEND_URL:-http://localhost:5173}"
-      JWT_SECRET: "${JWT_SECRET:-}"
       NODE_ENV: "development"
-    command: sh -c "apt-get update -qq && apt-get install -y -qq git > /dev/null && npm i -g pnpm && pnpm install && npx tsx watch src/index.ts"
+      CI: "true"
+      DATABASE_URL: "${CERNERE_DOCKER_DATABASE_URL:-postgresql://cernere_user:cernere@infra-postgres-1:5432/cernere}"
+      REDIS_URL: "${CERNERE_DOCKER_REDIS_URL:-redis://infra-redis-1:6379/1}"
+      JWT_SECRET: "${JWT_SECRET:-}"
+      GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID:-}"
+      GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"
+      GITHUB_REDIRECT_URI: "${GITHUB_REDIRECT_URI:-}"
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      GOOGLE_REDIRECT_URI: "${GOOGLE_REDIRECT_URI:-}"
+      FRONTEND_URL: "${FRONTEND_URL:-}"
+      INFISICAL_SITE_URL: "${INFISICAL_SITE_URL:-}"
+      INFISICAL_PROJECT_ID: "${INFISICAL_PROJECT_ID:-}"
+      INFISICAL_ENVIRONMENT: "${INFISICAL_ENVIRONMENT:-dev}"
+      INFISICAL_CLIENT_ID: "${INFISICAL_CLIENT_ID:-}"
+      INFISICAL_CLIENT_SECRET: "${INFISICAL_CLIENT_SECRET:-}"
+      NODE_AUTH_TOKEN: "${NODE_AUTH_TOKEN:-}"
+    # pnpm v10 系は ERR_PNPM_IGNORED_BUILDS で esbuild postinstall を拒否し続ける
+    # (workspace.yaml の onlyBuiltDependencies を書いても効かない version がある)。
+    # 当面 pnpm v9 に pin して回避。 v10 の strict build script 仕様が安定したら戻す。
+    command: sh -c "apt-get update -qq && apt-get install -y -qq git > /dev/null && npm i -g pnpm@9 && cd /app/lib/vestigium && npm ci --ignore-scripts && npm run build && cd /app/server && pnpm install --no-frozen-lockfile && npx tsx watch src/bootstrap.ts"
+    networks:
+      - default
+      - infra_default
     profiles:
       - dev
 
@@ -79,6 +114,9 @@ services:
       - frontend-node-modules:/app/frontend/node_modules
     environment:
       VITE_BACKEND_URL: "${VITE_BACKEND_URL:-http://cernere-backend-dev:8080}"
+      # VITE_ALLOWED_HOSTS (e.g. cernere-d.vtn-game.com) は host shell から渡す.
+      # 旧: Excubitor inject. 2026-05-17 から自前で env 渡し.
+      VITE_ALLOWED_HOSTS: "${VITE_ALLOWED_HOSTS:-}"
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
     profiles:
       - dev
@@ -86,6 +124,14 @@ services:
 # MailHog (dev SMTP) は共有インフラ (../infra/docker-compose.yaml) で提供される。
 # infra を起動していない場合は CERNERE_SMTP_HOST を任意の SMTP に向けること。
 
+networks:
+  # 共有インフラ (../infra/docker-compose.yaml) のネットワークを external 参照。
+  # backend-dev はこのネットに属して `postgres:5432` / `redis:6379` で
+  # service name 直結する (ホストの port forwarding を経由しない)。
+  infra_default:
+    external: true
+
 volumes:
   backend-node-modules:
+  backend-vestigium-node-modules:
   frontend-node-modules:

@@ -1,0 +1,15 @@
+{
+  "name": "project-data",
+  "description": "プロジェクトの永続化と管理。ユーザ×プロジェクトの行確保、ユーザデータ設定、ピア要求、スキーマ migration、プロジェクト概要一覧などのデータリレー対象資源を扱う。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)server/src/project/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)server/src/db/[^/]+$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"project-data\" domain: プロジェクトの永続化と管理。ユーザ×プロジェクトの行確保、ユーザデータ設定、ピア要求、スキーマ migration、プロジェクト概要一覧などのデータリレー対象資源を扱う。"
+}

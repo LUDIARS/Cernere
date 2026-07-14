@@ -3,7 +3,9 @@
  *
  * - マシン情報   (OS, プラットフォーム, スクリーン, タイムゾーン, 言語)
  * - ブラウザ情報 (UA, ベンダー, ブラウザ名/バージョン)
- * - 位置情報     (Geolocation API、ユーザー許可がある場合)
+ *
+ * 位置情報 (Geolocation API) は取得しない。デバイス識別は
+ * マシン + ブラウザ情報 + 接続元 IP (サーバー側で取得) のみで行う。
  *
  * バックエンド側 (server/src/auth/identity-verification.ts) と
  * 同じスキーマで送信できるよう設計している。
@@ -25,17 +27,9 @@ export interface BrowserInfo {
   version: string;
 }
 
-export interface GeoInfo {
-  latitude?: number;
-  longitude?: number;
-  accuracy?: number;
-  source: "geolocation" | "denied" | "unavailable";
-}
-
 export interface DeviceFingerprint {
   machine: MachineInfo;
   browser: BrowserInfo;
-  geo: GeoInfo;
 }
 
 function detectOs(ua: string, platform: string): string {
@@ -89,52 +83,9 @@ export function collectBrowserInfo(): BrowserInfo {
   return { ua, vendor, browser, version };
 }
 
-export function collectGeoInfo(timeoutMs = 5000): Promise<GeoInfo> {
-  return new Promise((resolve) => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      resolve({ source: "unavailable" });
-      return;
-    }
-    let settled = false;
-    const finish = (g: GeoInfo) => {
-      if (settled) return;
-      settled = true;
-      resolve(g);
-    };
-    const timer = setTimeout(() => finish({ source: "denied" }), timeoutMs);
-    try {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          clearTimeout(timer);
-          finish({
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
-            accuracy: pos.coords.accuracy,
-            source: "geolocation",
-          });
-        },
-        () => {
-          clearTimeout(timer);
-          finish({ source: "denied" });
-        },
-        { enableHighAccuracy: false, timeout: timeoutMs, maximumAge: 5 * 60 * 1000 },
-      );
-    } catch {
-      clearTimeout(timer);
-      finish({ source: "unavailable" });
-    }
-  });
-}
-
-export async function collectDeviceFingerprint(options: {
-  requestGeo?: boolean;
-  geoTimeoutMs?: number;
-} = {}): Promise<DeviceFingerprint> {
-  const { requestGeo = true, geoTimeoutMs = 5000 } = options;
-  const machine = collectMachineInfo();
-  const browser = collectBrowserInfo();
-  const geo = requestGeo
-    ? await collectGeoInfo(geoTimeoutMs)
-    : ({ source: "unavailable" } as GeoInfo);
-  return { machine, browser, geo };
+export function collectDeviceFingerprint(): DeviceFingerprint {
+  return {
+    machine: collectMachineInfo(),
+    browser: collectBrowserInfo(),
+  };
 }

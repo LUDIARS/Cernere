@@ -1,0 +1,24 @@
+{
+  "name": "identity-sdk",
+  "description": "汎用 Identity Service SDK 群。外部サービス向けの認証ルート・トークン生成・キャッシュ・WebSocket 認証アダプタ・プラグイン/プロフィールリポジトリを提供する再利用可能パッケージ。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)packages/id-service/src/core/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)packages/service-adapter/src/peer/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)packages/service-adapter/src/testing/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)packages/id-cache/src/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)packages/id-service/src/plugin/[^/]+$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"identity-sdk\" domain: 汎用 Identity Service SDK 群。外部サービス向けの認証ルート・トークン生成・キャッシュ・WebSocket 認証アダプタ・プラグイン/プロフィールリポジトリを提供する再利用可能パッケージ。"
+}

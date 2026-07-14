@@ -1,9 +1,39 @@
 import { useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { hasAccessRecord } from "../lib/api";
+import { fetchAllowedOrigins, isTargetAllowed } from "../lib/composite-redirect";
+
+/**
+ * 初期タブの決定:
+ *   - URL に ?mode=register / ?mode=login があれば最優先 (composite からの誘導等)。
+ *   - それ以外は「アクセスした形跡」で出し分け:
+ *       形跡あり (cookie / 過去ログイン) → Login を優先表示
+ *       形跡なし (初訪問)              → Register を優先表示
+ */
+function initialMode(): "login" | "register" {
+  const q = new URLSearchParams(window.location.search).get("mode");
+  if (q === "register" || q === "login") return q;
+  return hasAccessRecord() ? "login" : "register";
+}
+
+/**
+ * `?redirect=` の遷移先を検証して返す (open redirect 防止)。
+ * - 同一オリジンの相対パス (`/...`) は許可。
+ * - 絶対 URL は composite の許可リスト (サーバ権威、 完全一致 origin) にあるもののみ許可。
+ *   ドメインをフロントに焼き込まず、 VULNWEB-001 と同じ authority を共有する。
+ * それ以外・未指定・リスト取得失敗は null (= 既定の SPA 遷移に任せる、 fail-closed)。
+ */
+async function safeRedirectTarget(): Promise<string | null> {
+  const raw = new URLSearchParams(window.location.search).get("redirect");
+  if (!raw) return null;
+  if (raw.startsWith("/") && !raw.startsWith("//")) return raw; // 相対パス
+  const allowed = await fetchAllowedOrigins();
+  return isTargetAllowed(raw, allowed) ? raw : null;
+}
 
 export function LoginPage() {
-  const { login, register, googleAuthUrl, githubAuthUrl } = useAuth();
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const { login, register, passkeyLogin, googleAuthUrl, githubAuthUrl } = useAuth();
+  const [mode, setMode] = useState<"login" | "register">(initialMode);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -20,6 +50,9 @@ export function LoginPage() {
       } else {
         await login(email, password);
       }
+      // 登録/ログイン成功後、 ?redirect= があれば戻す (例: GLab から来た初回登録)。
+      const target = await safeRedirectTarget();
+      if (target) { window.location.href = target; return; }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Authentication failed";
       setError(message);
@@ -118,6 +151,8 @@ export function LoginPage() {
             <label>Email</label>
             <input
               type="email"
+              name="email"
+              autoComplete="username"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="user@example.com"
@@ -129,6 +164,8 @@ export function LoginPage() {
             <label>Password</label>
             <input
               type="password"
+              name="password"
+              autoComplete={mode === "register" ? "new-password" : "current-password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="8+ characters"
@@ -165,6 +202,45 @@ export function LoginPage() {
           <span>or</span>
           <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
         </div>
+
+        {/* Passkey (Face ID / Touch ID / Windows Hello / Android 生体 / 物理キー) */}
+        <button
+          type="button"
+          onClick={async () => {
+            setError("");
+            setLoading(true);
+            try {
+              await passkeyLogin(email || undefined);
+              const target = await safeRedirectTarget();
+              if (target) { window.location.href = target; return; }
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : "Passkey login failed";
+              setError(message);
+            } finally {
+              setLoading(false);
+            }
+          }}
+          disabled={loading}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "0.5rem",
+            width: "100%",
+            padding: "0.6rem",
+            background: "var(--bg-surface-2)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)",
+            color: "var(--text)",
+            fontSize: "0.875rem",
+            fontWeight: 500,
+            marginBottom: "0.5rem",
+            cursor: loading ? "not-allowed" : "pointer",
+            opacity: loading ? 0.6 : 1,
+          }}
+        >
+          🔐 Passkey でログイン (Face ID / Touch ID / Windows Hello)
+        </button>
 
         {/* Google */}
         <a

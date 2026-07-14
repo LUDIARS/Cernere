@@ -161,16 +161,123 @@ async function importFromSqlx(sql: postgres.Sql): Promise<void> {
 }
 
 /**
- * SQL テキストをステートメントに分割
+ * SQL テキストをステートメントに分割。
  *
- * - `;` で分割
- * - 各ステートメント先頭の `-- コメント行` を除去 (trim 後の最初の非空行が
- *   コメントだったら読み飛ばす)
- * - 実行可能な本体が残らなければステートメントとして扱わない
+ * 単純な `;` split だと、文字列リテラルやコメント中に `;` が含まれた
+ * (e.g. JSON の description) 際にステートメントが途中で切れてしまう。
+ * PostgreSQL の字句に従い以下を文字列とみなしてスキップする:
+ *   - 単一引用符 `'...'` (`''` で escape)
+ *   - dollar-quote `$tag$...$tag$`
+ *   - 行コメント `-- ... \n`
+ *   - ブロックコメント `/* ... *​/` (ネスト対応)
+ * 二重引用符 `"..."` は識別子なので `;` を含めることは無いが、
+ * 一応文字列同様に扱う。
  */
 function splitStatements(sqlText: string): string[] {
-  return sqlText
-    .split(";")
+  const out: string[] = [];
+  let buf = "";
+  let i = 0;
+  const n = sqlText.length;
+
+  while (i < n) {
+    const c = sqlText[i];
+    const next = sqlText[i + 1];
+
+    // 行コメント
+    if (c === "-" && next === "-") {
+      const eol = sqlText.indexOf("\n", i);
+      const end = eol === -1 ? n : eol + 1;
+      buf += sqlText.slice(i, end);
+      i = end;
+      continue;
+    }
+
+    // ブロックコメント (ネスト対応)
+    if (c === "/" && next === "*") {
+      let depth = 1;
+      let j = i + 2;
+      while (j < n && depth > 0) {
+        if (sqlText[j] === "/" && sqlText[j + 1] === "*") {
+          depth++;
+          j += 2;
+        } else if (sqlText[j] === "*" && sqlText[j + 1] === "/") {
+          depth--;
+          j += 2;
+        } else {
+          j++;
+        }
+      }
+      buf += sqlText.slice(i, j);
+      i = j;
+      continue;
+    }
+
+    // 単一引用符文字列 ('' は escape)
+    if (c === "'") {
+      let j = i + 1;
+      while (j < n) {
+        if (sqlText[j] === "'") {
+          if (sqlText[j + 1] === "'") {
+            j += 2;
+            continue;
+          }
+          j++;
+          break;
+        }
+        j++;
+      }
+      buf += sqlText.slice(i, j);
+      i = j;
+      continue;
+    }
+
+    // 二重引用符識別子 ("" は escape)
+    if (c === '"') {
+      let j = i + 1;
+      while (j < n) {
+        if (sqlText[j] === '"') {
+          if (sqlText[j + 1] === '"') {
+            j += 2;
+            continue;
+          }
+          j++;
+          break;
+        }
+        j++;
+      }
+      buf += sqlText.slice(i, j);
+      i = j;
+      continue;
+    }
+
+    // dollar-quote ($tag$ ... $tag$)
+    if (c === "$") {
+      const tagMatch = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sqlText.slice(i));
+      if (tagMatch) {
+        const tag = tagMatch[0]; // 例: $$ or $foo$
+        const start = i + tag.length;
+        const close = sqlText.indexOf(tag, start);
+        const end = close === -1 ? n : close + tag.length;
+        buf += sqlText.slice(i, end);
+        i = end;
+        continue;
+      }
+    }
+
+    if (c === ";") {
+      out.push(buf);
+      buf = "";
+      i++;
+      continue;
+    }
+
+    buf += c;
+    i++;
+  }
+
+  if (buf.length > 0) out.push(buf);
+
+  return out
     .map(stripLeadingComments)
     .filter((s) => s.length > 0);
 }

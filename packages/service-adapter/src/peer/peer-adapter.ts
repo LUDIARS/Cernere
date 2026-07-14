@@ -17,16 +17,16 @@
  *
  *   const res = await sa.invoke("imperativus", "ping", { hello: 1 });
  *
- * 7 ステップ protocol (Cernere 仲介 + 60s challenge):
+ * protocol (Cernere 仲介 + 60s challenge, JWKS 廃止後):
  *   (1) admin が Cernere で relay_pairs に両方向を登録
  *   (2) 両サービスが /api/auth/login → /ws/project?token=... で接続
- *   (3) 各サービスが managed_project.get_jwks で JWKS 取得・cache
- *   (4) 各サービスが SA WS サーバを立てて managed_relay.register_endpoint で自 URL を登録
- *   (5) A が invoke → Cernere に managed_relay.request_peer →
+ *   (3) 各サービスが SA WS サーバを立てて managed_relay.register_endpoint で自 URL を登録
+ *   (4) A が invoke → Cernere に managed_relay.request_peer →
  *       Cernere が relay_pair 確認 + challenge 発行 + B の SA URL を A に返却
- *   (6) A が B へ WS 接続. header Authorization: Bearer <A project JWT> + X-Relay-Challenge
- *   (7) B が:
- *       - JWT を JWKS (=(3) で取得) で local verify → A の projectKey 取得
+ *   (5) A が B へ WS 接続. header Authorization: Bearer <A project JWT> + X-Relay-Challenge
+ *   (6) B が:
+ *       - managed_project.verify_token を Cernere に round-trip し、A の
+ *         projectKey / clientId を取得 (旧 JWKS ローカル検証は撤去)
  *       - managed_relay.verify_challenge で challenge を Cernere に照会 →
  *         issuer が A projectKey と一致、target が自身であることを確認
  *       成立したら channel 確立. 以降データ経路に Cernere は介在しない.
@@ -37,7 +37,6 @@ import { WebSocketServer, WebSocket, type RawData } from "ws";
 import { randomUUID } from "node:crypto";
 
 import { CernereSession } from "./cernere-session.js";
-import { JwksCache } from "./jwks-cache.js";
 import {
   type Envelope,
   type InvokeEnvelope,
@@ -45,6 +44,13 @@ import {
   encodeEnvelope,
   PeerError,
 } from "./envelope.js";
+
+interface VerifyTokenResult {
+  valid: boolean;
+  projectKey?: string;
+  clientId?: string;
+  exp?: number;
+}
 
 export interface PeerAdapterConfig {
   projectId:      string;                  // Cernere managed_projects.client_id
@@ -95,7 +101,6 @@ export class PeerAdapter {
     accept: NonNullable<PeerAdapterConfig["accept"]>;
   };
   private session:      CernereSession | null = null;
-  private jwks:         JwksCache | null = null;
   private httpServer:   HttpServer | null = null;
   private wsServer:     WebSocketServer | null = null;
   private boundPort    = 0;
@@ -133,18 +138,8 @@ export class PeerAdapter {
     });
     await this.session.start();
 
-    // (3) JWKS fetch
-    const rawJwks = await this.session.call<{ keys: unknown[] }>(
-      "managed_project",
-      "get_jwks",
-      {},
-    );
-    this.jwks = new JwksCache(async () => {
-      return await this.session!.call<{ keys: unknown[] }>("managed_project", "get_jwks", {}) as never;
-    });
-    // 最初の取得を直接 JwksCache に反映させるため、ダミーの refresh を回さず強制 load:
-    await this.jwks.refresh();
-    void rawJwks;
+    // (3) Cernere の verify_token を round-trip で使う方式に変更したので
+    //     JWKS の事前取得は不要 (旧 RS256/JWKS 機構は廃止).
 
     // (4) endpoint 登録
     const publicUrl = this.config.saPublicBaseUrl.replace("{port}", String(this.boundPort));
@@ -305,29 +300,37 @@ export class PeerAdapter {
     const challenge = typeof req.headers["x-relay-challenge"] === "string"
       ? (req.headers["x-relay-challenge"] as string) : "";
     if (!bearer || !challenge) { return this.deny(socket, "missing auth or challenge"); }
-    if (!this.jwks || !this.session) { return this.deny(socket, "adapter not started"); }
+    if (!this.session) { return this.deny(socket, "adapter not started"); }
 
-    // (7a) JWT を JWKS で local verify
-    let claims;
-    try { claims = await this.jwks.verifyProjectToken(bearer); }
-    catch { return this.deny(socket, "invalid token"); }
+    // (7a) JWT を Cernere に投げてリモート検証 (旧 JWKS ローカル検証は廃止)
+    let verified: VerifyTokenResult;
+    try {
+      verified = await this.session.call<VerifyTokenResult>(
+        "managed_project", "verify_token", { token: bearer },
+      );
+    } catch { return this.deny(socket, "verify_token failed"); }
+    if (!verified.valid || !verified.projectKey || !verified.clientId) {
+      return this.deny(socket, "invalid token");
+    }
+    const peerProjectKey = verified.projectKey;
+    const peerClientId   = verified.clientId;
 
-    // (7b) challenge を Cernere に照会 (issuer = JWT から抽出した projectKey)
+    // (7b) challenge を Cernere に照会 (issuer = verify_token の結果)
     try {
       const res = await this.session.call<{ valid: true }>(
         "managed_relay", "verify_challenge",
-        { challenge, claimedIssuer: claims.projectKey },
+        { challenge, claimedIssuer: peerProjectKey },
       );
       if (!res.valid) return this.deny(socket, "challenge rejected");
     } catch { return this.deny(socket, "challenge rejected"); }
 
     // (7c) accept list 判定. 設定が空なら全 peer 拒否 (fail-closed).
-    const acceptedCmds = this.config.accept[claims.projectKey];
-    if (!acceptedCmds) return this.deny(socket, `peer ${claims.projectKey} not in accept list`);
+    const acceptedCmds = this.config.accept[peerProjectKey];
+    if (!acceptedCmds) return this.deny(socket, `peer ${peerProjectKey} not in accept list`);
 
     // upgrade OK
     wsServer.handleUpgrade(req, socket, head, (ws) => {
-      const caller = { projectKey: claims.projectKey, clientId: claims.sub };
+      const caller = { projectKey: peerProjectKey, clientId: peerClientId };
       this.inbound.add(ws);
       ws.on("close", () => this.inbound.delete(ws));
       this.wireIncomingChannel(ws, caller, acceptedCmds);

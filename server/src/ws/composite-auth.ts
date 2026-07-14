@@ -38,7 +38,9 @@ import {
   type DeviceFingerprint,
 } from "../auth/identity-verification.js";
 import { issueAuthCode as sharedIssueAuthCode } from "../auth/auth-code.js";
+import { ensureUserProjectRow } from "../project/service.js";
 import { logAuthEvent } from "../logging/auth-logger.js";
+import { devError, devLog } from "../logging/dev-logger.js";
 
 // ── uWS UserData ──────────────────────────────────────────
 
@@ -102,19 +104,41 @@ async function issueAuthCode(user: AuthSessionUser): Promise<string> {
   });
 }
 
+/**
+ * 認証完了直後に呼ぶ. session.projectKey が判明している
+ * (= project_credentials → composite WS 経由) 場合のみ
+ * `project_data_<projectKey>` に user 行を確保する.
+ *
+ * 失敗してもログのみで握り潰す (本筋の認証成功は妨げない).
+ */
+async function ensureProjectRowFromSession(session: AuthSession): Promise<void> {
+  if (!session.projectKey) return;
+  try {
+    await ensureUserProjectRow(session.user.userId, session.projectKey);
+  } catch (err) {
+    devError("composite-auth.ensureUserProjectRow.failed", err, {
+      userId: session.user.userId,
+      projectKey: session.projectKey,
+    });
+  }
+}
+
 // ── open ──────────────────────────────────────────────────
 
 export async function handleCompositeAuthOpen(
   ws: uWS.WebSocket<CompositeWsUserData>,
 ): Promise<void> {
   const data = ws.getUserData();
+  devLog("composite-ws.open", { ticket: data.ticket, userId: data.userId });
   const session = await getAuthSession(data.ticket);
   if (!session) {
+    devLog("composite-ws.open.expired", { ticket: data.ticket });
     send(ws, { type: "error", retryable: false, reason: "session expired" });
     try { ws.end(4401, "session expired"); } catch { /* ignore */ }
     return;
   }
 
+  devLog("composite-ws.open.state", { ticket: data.ticket, state: session.state });
   send(ws, { type: "state", state: session.state, data: stateExtras(session) });
 
   const timer = setInterval(() => {
@@ -139,6 +163,11 @@ export async function handleCompositeAuthMessage(
   ws: uWS.WebSocket<CompositeWsUserData>,
   raw: ArrayBuffer,
 ): Promise<void> {
+  // uWS は message handler が return すると raw ArrayBuffer を detach する。
+  // await の後で参照すると "detached ArrayBuffer" になるため、最初に
+  // 同期で文字列化しておく (Buffer.from は内部 copy)。
+  const rawText = Buffer.from(raw).toString();
+
   const data = ws.getUserData();
   const session = await getAuthSession(data.ticket);
   if (!session) {
@@ -149,8 +178,18 @@ export async function handleCompositeAuthMessage(
 
   let msg: ClientMessage;
   try {
-    msg = JSON.parse(Buffer.from(raw).toString()) as ClientMessage;
-  } catch {
+    msg = JSON.parse(rawText) as ClientMessage;
+  } catch (err) {
+    // 観測のため stdout に残す (ewatch が拾えるように [http-error] と同階層のタグで)。
+    // raw text は先頭 200 文字までに切る (size DoS / PII 漏洩防御)。
+    console.log(`[composite-error] ${JSON.stringify({
+      ts: new Date().toISOString(),
+      ticket: data.ticket,
+      reason: "invalid JSON",
+      parseError: err instanceof Error ? err.message : String(err),
+      rawLen: rawText.length,
+      rawPreview: rawText.slice(0, 200),
+    })}`);
     send(ws, { type: "error", retryable: true, reason: "invalid JSON" });
     return;
   }
@@ -180,12 +219,12 @@ async function handleDevice(
   session: AuthSession,
   fingerprint: DeviceFingerprint | undefined,
 ): Promise<void> {
-  // パーミッション未取得等で中身が空なら retry 指示
-  if (!fingerprint || (!fingerprint.machine && !fingerprint.browser && !fingerprint.geo)) {
+  // 中身が空なら retry 指示 (machine + browser のいずれか必須)
+  if (!fingerprint || (!fingerprint.machine && !fingerprint.browser)) {
     send(ws, {
       type: "error",
       retryable: true,
-      reason: "fingerprint is empty — please grant permission and retry",
+      reason: "fingerprint is empty — please retry",
     });
     return;
   }
@@ -203,6 +242,7 @@ async function handleDevice(
         .set({ lastLoginAt: now, updatedAt: now })
         .where(eq(schema.users.id, session.user.userId));
       const authCode = await issueAuthCode(session.user);
+      await ensureProjectRowFromSession(session);
       await updateAuthSession(session.ticket, {
         state: "authenticated",
         authCode,
@@ -238,6 +278,7 @@ async function handleDevice(
     const reason = err instanceof Error ? err.message : "device check failed";
     // 「メール送信失敗」など再試行で解決しないものは retryable=false 相当だが、
     // 呼び出し側でリトライ判断できるよう retryable=true で返し理由を明示する。
+    devError("composite-auth.device.failed", err, { userId: session.user.userId });
     send(ws, { type: "error", retryable: true, reason });
     logAuthEvent({
       event: "user.device.challenge.failed",
@@ -288,6 +329,7 @@ async function handleVerifyCode(
     .set({ lastLoginAt: now, updatedAt: now })
     .where(eq(schema.users.id, session.user.userId));
   const authCode = await issueAuthCode(session.user);
+  await ensureProjectRowFromSession(session);
   await updateAuthSession(session.ticket, { state: "authenticated", authCode });
   logAuthEvent({
     event: "user.login",

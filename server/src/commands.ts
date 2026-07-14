@@ -2,13 +2,31 @@
  * WebSocket コマンドディスパッチャ
  *
  * module_request メッセージを受け取り、ビジネスロジックにルーティングする。
- * 全操作は operation_logs テーブルに��録される。
+ * 全操作は operation_logs テーブルに記録される。
+ *
+ * 4 層防御 (CLAUDE.md §1.2 Step 6):
+ *   1. トークン検証      — WS upgrade 時に完了済 (resolveWsAuth)
+ *   2. Redis TTL 確認    — getUserState で session_expired を弾く
+ *   3. ユーザー状態      — state === "logged_in" を要求
+ *   4. リソース権限確認  — 各 sub-dispatcher (admin 系等) が個別に実施
+ *
+ * Layer 2-3 はここで集中ガード。Layer 4 は呼び出し先関数 (例: requireSystemAdmin) に委譲。
  */
 
 import { db } from "./db/connection.js";
 import * as schema from "./db/schema.js";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { AppError } from "./error.js";
+import { getUserState } from "./redis.js";
+import { redactSensitive } from "./lib/redact.js";
+
+/**
+ * Layer 2-3 を要求しないコマンド (主に「現在ログイン中であることを必須としない」もの).
+ * 認証完了直前のセッション初期化や、状態遷移そのものを行うものを除外する.
+ */
+const PUBLIC_COMMANDS = new Set<string>([
+  // ゲスト → 認証済みへの昇格に使う想定があれば追加
+]);
 
 export async function dispatch(
   userId: string,
@@ -25,21 +43,40 @@ export async function dispatch(
   let error: string | undefined;
 
   try {
+    // Layer 2 + 3: Redis 上のユーザー状態が "logged_in" であることを要求.
+    // userId が空 (ゲスト) の場合は Layer 4 の呼び出し先で都度判定.
+    if (userId && !PUBLIC_COMMANDS.has(method)) {
+      const state = await getUserState(userId);
+      if (!state) {
+        throw AppError.unauthorized("Session expired. Please re-authenticate.");
+      }
+      if (state.state !== "logged_in") {
+        throw AppError.forbidden(`Session not active (state=${state.state})`);
+      }
+    }
+
     result = await execute(userId, module, action, payload as Record<string, unknown> | undefined);
   } catch (err) {
     status = "error";
     error = (err as Error).message;
     throw err;
   } finally {
-    await db.insert(schema.operationLogs).values({
-      id: crypto.randomUUID(),
-      userId,
-      sessionId,
-      method,
-      params,
-      status,
-      error: error ?? null,
-    }).catch(() => {});
+    // operation_logs は監査要件上、書き込み失敗を握り潰さず log + メトリクス出力する.
+    try {
+      await db.insert(schema.operationLogs).values({
+        id: crypto.randomUUID(),
+        userId,
+        sessionId,
+        method,
+        // 機密値 (token/secret/password 等) はキー名ベースでマスクしてから記録する。
+        params: redactSensitive(params),
+        status,
+        error: error ?? null,
+      });
+    } catch (logErr) {
+      console.error("[operation_logs] insert failed (audit trail at risk):",
+        logErr instanceof Error ? logErr.message : logErr);
+    }
   }
 
   return result;
@@ -59,6 +96,8 @@ async function execute(
     case "user": return userCmd(userId, action, payload);
     case "profile": return profileCmd(userId, action, payload);
     case "managed_project": return managedProjectCmd(userId, action, payload);
+    case "oidc_client": return oidcClientCmd(userId, action, payload);
+    case "oidc_keys": return oidcKeysCmd(userId, action, payload);
     default:
       throw AppError.badRequest(`Unknown module: ${module}`);
   }
@@ -319,6 +358,16 @@ async function userCmd(userId: string, action: string, p?: Record<string, unknow
         hobbies: privacy.hobbies ? (profile?.hobbies ?? []) : undefined,
       };
     }
+    case "delete_account": {
+      // right to be forgotten — Cernere 一カ所で個人データを完全消去する。
+      // 既定は自分自身の削除。他ユーザを対象にする場合のみ system admin を要求。
+      const targetId = optStr(p, "userId") ?? userId;
+      if (targetId !== userId) {
+        await requireSystemAdmin(userId);
+      }
+      const svc = await import("./project/service.js");
+      return svc.deleteUserAccount(targetId);
+    }
     default:
       throw AppError.badRequest(`Unknown user action: ${action}`);
   }
@@ -459,6 +508,10 @@ async function managedProjectCmd(userId: string, action: string, p?: Record<stri
       await requireSystemAdmin(userId);
       return svc.updateProjectSchema(requireStr(p, "key"), p, userId);
     }
+    case "rotate_secret": {
+      await requireSystemAdmin(userId);
+      return svc.rotateProjectSecret(requireStr(p, "key"));
+    }
     case "definition_history":
       return svc.getDefinitionHistory(requireStr(p, "key"));
     case "list_optouts":
@@ -477,8 +530,51 @@ async function managedProjectCmd(userId: string, action: string, p?: Record<stri
       return svc.listUserProjectsOverview(userId);
     case "open_url":
       return svc.issueProjectOpenUrl(userId, requireStr(p, "projectKey"));
+    case "connections":
+      return svc.getProjectConnectionDetail(requireStr(p, "projectKey"));
     default:
       throw AppError.badRequest(`Unknown managed_project action: ${action}`);
+  }
+}
+
+// -- OIDC Client (IdP として登録する RP の管理、 admin 専用) --
+
+async function oidcClientCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
+  await requireSystemAdmin(userId);
+  const svc = await import("./oidc/clients.js");
+
+  switch (action) {
+    case "list":
+      return svc.listClients();
+    case "register":
+      // 戻り値に平文 client_secret を 1 度だけ含む (再取得不可)。
+      return svc.registerClient(p, userId);
+    case "rotate_secret":
+      return svc.rotateSecret(requireStr(p, "clientId"));
+    case "update_redirect_uris":
+      return svc.updateRedirectUris(requireStr(p, "clientId"), p?.redirectUris ?? p?.redirect_uris);
+    case "enable":
+      return svc.setActive(requireStr(p, "clientId"), true);
+    case "disable":
+      return svc.setActive(requireStr(p, "clientId"), false);
+    default:
+      throw AppError.badRequest(`Unknown oidc_client action: ${action}`);
+  }
+}
+
+// -- OIDC 署名鍵 (JWKS) の状態参照、 admin 専用 --
+// 鍵そのものは env / Infisical で管理する (ローテーション手順は spec/setup/oidc-provider.md)。
+// ここでは admin GUI が現行 kid / 公開中の旧 kid を可視化するための読み取りのみ提供する。
+
+async function oidcKeysCmd(userId: string, action: string, _p?: Record<string, unknown>): Promise<unknown> {
+  await requireSystemAdmin(userId);
+  const { getOidcKeyStatus } = await import("./auth/oidc-keys.js");
+
+  switch (action) {
+    case "status":
+      return getOidcKeyStatus();
+    default:
+      throw AppError.badRequest(`Unknown oidc_keys action: ${action}`);
   }
 }
 
