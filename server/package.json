@@ -19,7 +19,7 @@
     "drizzle-orm": "^0.45.1",
     "ioredis": "^5.10.0",
     "jsonwebtoken": "^9.0.3",
-    "nodemailer": "^8.0.5",
+    "nodemailer": "^9.0.3",
     "paseto": "^3.1.4",
     "postgres": "^3.4.8",
     "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.63.0",
