@@ -34,8 +34,12 @@ export function createUserContext(jwtSecret: string, secretManager: IdSecretMana
     if (authHeader?.startsWith("Bearer ")) {
       try {
         const token = authHeader.slice(7);
-        const payload = jwt.verify(token, jwtSecret) as { userId: string; role: string };
-        c.set("userId" as never, payload.userId as never);
+        // Cernere は `sub` で署名し、 他サービスは `userId` を使うため両対応する
+        // (H-1: id-cache/id-service の userId/sub 不整合による fail-open 防止)。
+        const payload = jwt.verify(token, jwtSecret) as { userId?: string; sub?: string; role: string };
+        const userId = payload.userId ?? payload.sub;
+        if (!userId) throw new Error("token has neither userId nor sub claim");
+        c.set("userId" as never, userId as never);
         c.set("userRole" as never, payload.role as never);
       } catch {
         c.set("userId" as never, "anonymous" as never);

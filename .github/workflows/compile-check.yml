@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   server-typecheck:
     name: Server TypeScript Check
@@ -15,6 +19,8 @@ jobs:
         working-directory: server
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -26,11 +32,22 @@ jobs:
         with:
           version: 10
 
+      - name: Build Vestigium submodule
+        working-directory: lib/vestigium
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+
       - name: Install dependencies
         run: pnpm install
 
       - name: Type check
         run: npx tsc --noEmit
+
+      # 認証コア (JWT / PASETO トークンの署名・検証・異常系) の unit テスト。
+      # DB/Redis 不要で動く純ロジックのみ。
+      - name: Tests
+        run: pnpm test
 
   frontend-typecheck:
     name: Frontend TypeScript Check

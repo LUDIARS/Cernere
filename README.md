@@ -2,6 +2,15 @@
 
 汎用認証プラットフォーム & データリレーサーバー。複数の認証方式（OAuth / パスワード / MFA）、組織・チーム管理、プロジェクトの永続化、および WebSocket ベースのリアルタイムメッセージリレーを提供します。
 
+> 📖 **ドキュメントサイト**: サービス概要・ドメイングラフ・API リファレンス（トグル展開）・仕様レビューを GitHub Pages で公開しています。ソースは [`site/`](site/)（[README](site/README.md)）。`main` への push で自動デプロイされます。
+
+## セットアップ
+
+設定・起動手順は用途別に [`spec/setup/`](spec/setup/) にまとめてある:
+
+- [サーバを起動する](spec/setup/server-bootstrap.md) / [Infisical 秘密管理](spec/setup/infisical-secrets.md) / [PASETO 署名鍵](spec/setup/paseto-keys.md) / [サービス登録](spec/setup/service-registration.md)
+- 全設定キー: [spec/setup/config-reference.md](spec/setup/config-reference.md)
+
 ## セキュリティ思想
 
 Cernere は **常時接続セッションの強固な認証** を基盤とするセキュリティモデルを採用しています。
@@ -40,7 +49,7 @@ Layer 4: リソース所有権・ロールチェック (403)
 ## プロジェクト構成
 
 ```
-├── server/                # TypeScript バックエンド (Hono)
+├── server/                # TypeScript バックエンド (uWebSockets.js)
 │   └── src/
 │       ├── index.ts       # エントリポイント
 │       ├── app.ts         # ルーティング + WebSocket
@@ -273,7 +282,7 @@ GET /auth?session_id=<id>      # 再接続 (セッション ID)
 
 ## ドキュメント
 
-- [セキュリティ設計](spec/security_design.md)
+- [セキュリティ設計](spec/interface/security_design.md)
 - [認証パッケージ一覧](docs/auth_packages.md)
 - [別プロジェクトへの実装ガイド](docs/integration_guide.md)
 - [リレー設計](docs/relay_design.md)

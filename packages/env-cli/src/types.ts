@@ -47,6 +47,16 @@ export interface EnvCliConfig {
 
   /** Infisical デフォルト Environment */
   defaultEnvironment?: string;
+
+  /**
+   * 環境ごとの必須キー宣言。
+   * 該当環境 (= bootstrap.environment) で env コマンドを実行したとき、
+   * ここで列挙されたキーが Infisical に存在しない / 空文字なら .env 生成を中止する。
+   * infraKeys のデフォルト値が dev 用 placeholder のまま本番起動するのを防ぐ。
+   */
+  required?: {
+    production?: string[];
+  };
 }
 
 // ─── Infisical internal types ──────────────────────────────

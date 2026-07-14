@@ -8,7 +8,9 @@ dist
 *.tsbuildinfo
 logs/
 *.log
+.anatomia/
 .claude/
 *.stackdump
 **/.pnpm-store/
 packages/*/package-lock.json
+.env.bak*

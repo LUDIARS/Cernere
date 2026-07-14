@@ -105,7 +105,12 @@ export function createIdCache(config: IdCacheConfig): IdCacheClient {
   function decodeLocally(token: string): { userId: string; role: string } | null {
     if (!jwtSecret) return null;
     try {
-      return jwt.verify(token, jwtSecret) as { userId: string; role: string };
+      // Cernere は `sub` で署名し、 他サービスは `userId` を使うため両対応する
+      // (H-1: 不整合により payload.userId === undefined になりキャッシュキーが壊れる問題)。
+      const payload = jwt.verify(token, jwtSecret) as { userId?: string; sub?: string; role: string };
+      const userId = payload.userId ?? payload.sub;
+      if (!userId) return null;
+      return { userId, role: payload.role };
     } catch {
       return null;
     }

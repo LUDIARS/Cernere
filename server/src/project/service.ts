@@ -6,7 +6,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import bcrypt from "bcryptjs";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as dbSchema from "../db/schema.js";
@@ -14,7 +13,22 @@ import { config } from "../config.js";
 import { AppError } from "../error.js";
 import { projectDefinitionSchema, type ProjectDefinition } from "./schema.js";
 import { migrateProjectSchema } from "./schema-migrator.js";
+import { encryptToken, decryptToken } from "./oauth-token-crypto.js";
 import * as cache from "./user-data-cache.js";
+import { getAllProjectStatus, getProjectConnections, getProjectStatus } from "../ws/project-registry.js";
+import { issueProjectSecret } from "./credentials.js";
+
+// ── Project definition helpers ───────────────────────────────
+
+/**
+ * schema_definition.endpoint.frontend_url を取り出す.
+ * Hub Shell (Memoria 等) が .well-known/ludiars-app.json を probe する
+ * ために list / overview に同梱する.
+ */
+function extractFrontendUrl(def: unknown): string | null {
+  const fu = (def as ProjectDefinition | null | undefined)?.endpoint?.frontend_url;
+  return typeof fu === "string" && fu.length > 0 ? fu : null;
+}
 
 // ── Service Templates ────────────────────────────────────────
 
@@ -77,13 +91,51 @@ export function getServiceTemplate(key: string): ProjectDefinition {
 // ── Project CRUD ─────────────────────────────────────────────
 
 export async function listProjects() {
-  return db.select({
+  const rows = await db.select({
     key: dbSchema.managedProjects.key,
     name: dbSchema.managedProjects.name,
     description: dbSchema.managedProjects.description,
     isActive: dbSchema.managedProjects.isActive,
     createdAt: dbSchema.managedProjects.createdAt,
+    schemaDefinition: dbSchema.managedProjects.schemaDefinition,
   }).from(dbSchema.managedProjects);
+
+  // 接続レジストリ (in-memory) から WS 接続状態をマージ
+  const statusMap = getAllProjectStatus();
+  return rows.map((p) => {
+    const s = statusMap.get(p.key);
+    const { schemaDefinition, ...rest } = p;
+    return {
+      ...rest,
+      // Hub Shell が manifest probe するための frontend URL.
+      // schema_definition.endpoint.frontend_url から派生し、 未設定なら null.
+      frontendUrl: extractFrontendUrl(schemaDefinition),
+      connectionCount: s?.connectionCount ?? 0,
+      lastConnectedAt: s?.lastConnectedAt ?? null,
+      lastDisconnectedAt: s?.lastDisconnectedAt ?? null,
+    };
+  });
+}
+
+/**
+ * 個別プロジェクトの WS 接続詳細 (admin 用).
+ * connections: 現在 OPEN な接続を全件 (clientId / connectedAt 付き).
+ */
+export async function getProjectConnectionDetail(projectKey: string) {
+  const proj = await db.select({ key: dbSchema.managedProjects.key })
+    .from(dbSchema.managedProjects)
+    .where(eq(dbSchema.managedProjects.key, projectKey)).limit(1);
+  if (proj.length === 0) throw AppError.notFound("Project not found");
+
+  const status = getProjectStatus(projectKey);
+  return {
+    ...status,
+    connections: getProjectConnections(projectKey).map((c) => ({
+      connectionId: c.connectionId,
+      clientId: c.clientId,
+      connectedAt: c.connectedAt,
+    })),
+  };
 }
 
 export async function getProject(key: string) {
@@ -115,6 +167,58 @@ export async function getProject(key: string) {
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
   };
+}
+
+// ── Schema Export (定義 shape のみ, project_data_<key> 実データには触れない) ──
+//
+// Foedus (クロスサービス契約/PII レビューア) が、コミット済み JSON の代わりに
+// レビュー時にライブでプロジェクトのスキーマ定義 (shape) を取得するための
+// 読み取り専用ヘルパー。 managedProjects のみ問い合わせ、動的テーブル
+// (project_data_*) には一切アクセスしない。
+
+export interface ProjectSchemaExport {
+  key: string;
+  name: string;
+  description: string;
+  schemaDefinition: ProjectDefinition;
+}
+
+/**
+ * key 指定時: そのプロジェクトを isActive を問わず返す (getProject と同じ挙動 —
+ *   明示的に狙って呼んでいるので inactive でも隠さない)。見つからなければ 404。
+ * key 省略時: listProjects と同じ「全件 select → isActive で絞る」 方式で
+ *   active プロジェクトのみ返す。
+ */
+export async function exportProjectSchemaDefinitions(key?: string): Promise<ProjectSchemaExport[]> {
+  const cols = {
+    key: dbSchema.managedProjects.key,
+    name: dbSchema.managedProjects.name,
+    description: dbSchema.managedProjects.description,
+    schemaDefinition: dbSchema.managedProjects.schemaDefinition,
+    isActive: dbSchema.managedProjects.isActive,
+  };
+
+  if (key) {
+    const rows = await db.select(cols).from(dbSchema.managedProjects)
+      .where(eq(dbSchema.managedProjects.key, key)).limit(1);
+    if (rows.length === 0) throw AppError.notFound("Project not found");
+    return rows.map((r) => ({
+      key: r.key,
+      name: r.name,
+      description: r.description,
+      schemaDefinition: r.schemaDefinition as ProjectDefinition,
+    }));
+  }
+
+  const rows = await db.select(cols).from(dbSchema.managedProjects);
+  return rows
+    .filter((r) => r.isActive)
+    .map((r) => ({
+      key: r.key,
+      name: r.name,
+      description: r.description,
+      schemaDefinition: r.schemaDefinition as ProjectDefinition,
+    }));
 }
 
 export async function registerProject(payload: unknown, userId?: string) {
@@ -149,8 +253,7 @@ export async function registerProject(payload: unknown, userId?: string) {
   }
 
   const clientId = `proj_${definition.project.key}_${crypto.randomUUID().slice(0, 8)}`;
-  const clientSecret = crypto.randomUUID();
-  const clientSecretHash = await bcrypt.hash(clientSecret, 12);
+  const { clientSecret, clientSecretHash } = await issueProjectSecret();
 
   await db.insert(dbSchema.managedProjects).values({
     key: definition.project.key,
@@ -175,6 +278,32 @@ export async function registerProject(payload: unknown, userId?: string) {
   };
 }
 
+/**
+ * managed project の long-lived secret を再発行する。
+ * 平文はこの戻り値で一度だけ返し、DB には bcrypt hash だけを保存する。
+ */
+export async function rotateProjectSecret(key: string) {
+  const rows = await db.select({
+    key: dbSchema.managedProjects.key,
+    clientId: dbSchema.managedProjects.clientId,
+  }).from(dbSchema.managedProjects)
+    .where(eq(dbSchema.managedProjects.key, key)).limit(1);
+  if (rows.length === 0) throw AppError.notFound("Project not found");
+
+  const { clientSecret, clientSecretHash } = await issueProjectSecret();
+  await db.update(dbSchema.managedProjects).set({
+    clientSecretHash,
+    updatedAt: new Date(),
+  }).where(eq(dbSchema.managedProjects.key, key));
+
+  return {
+    message: "Project secret rotated",
+    key: rows[0].key,
+    clientId: rows[0].clientId,
+    clientSecret,
+  };
+}
+
 export async function deleteProject(key: string) {
   const rows = await db.select({ key: dbSchema.managedProjects.key })
     .from(dbSchema.managedProjects).where(eq(dbSchema.managedProjects.key, key)).limit(1);
@@ -195,7 +324,7 @@ export async function updateProjectSchema(key: string, payload: unknown, userId?
 
   const parsed = projectDefinitionSchema.safeParse(payload);
   if (!parsed.success) {
-    throw AppError.badRequest(`Invalid definition: ${parsed.error.issues.map((i) => i.message).join(", ")}`);
+    throw AppError.badRequest(`Invalid definition: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`);
   }
   const definition = parsed.data;
 
@@ -219,6 +348,19 @@ export async function updateProjectSchema(key: string, payload: unknown, userId?
         _deleted: true,
       };
     }
+  }
+
+  // payload に top-level field が無ければ旧値を保持 (partial-update セマンティクス).
+  // サービスの起動時 auto-sync は user_data のみ送ってくるが、その際に
+  // 既存の endpoint / data_sharing を消してしまわないようにする。
+  if (definition.endpoint === undefined && oldDef?.endpoint) {
+    definition.endpoint = oldDef.endpoint;
+  }
+  if (definition.data_sharing === undefined && oldDef?.data_sharing) {
+    definition.data_sharing = oldDef.data_sharing;
+  }
+  if (!definition.project.description && oldDef?.project?.description) {
+    definition.project.description = oldDef.project.description;
   }
 
   await db.update(dbSchema.managedProjects).set({
@@ -335,14 +477,67 @@ export async function setModuleOptout(userId: string, projectKey: string, module
         );
       }
     } catch (err) {
-      console.warn(`[optout] データ削除失敗 (${projectKey}/${moduleKey}):`, err);
+      throw new Error(
+        `[optout] データ NULL 化失敗 (${projectKey}/${moduleKey}): ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       await sqlClient.end();
     }
   }
 
+  // 3. opt-out したプロジェクトに預けてある OAuth トークンを失効・削除する。
+  //    「個人データ単一情報源 → 一カ所削除で全失効」(oauth-token-storage.md:7-9) を
+  //    成立させる中核。これが無いと opt-out 後もサービスは get_oauth_token で
+  //    トークンを取得し続けられてしまう。
+  await db.delete(dbSchema.projectOauthTokens).where(and(
+    eq(dbSchema.projectOauthTokens.projectKey, projectKey),
+    eq(dbSchema.projectOauthTokens.userId, userId),
+  ));
+
   await cache.invalidate(userId, projectKey);
   return { message: "Opted out", projectKey, moduleKey, deletedColumns: moduleCols };
+}
+
+/**
+ * アカウント削除 (right to be forgotten)。指定ユーザの個人データを Cernere から
+ * 完全消去する。users 行を削除すると FK ON DELETE CASCADE により以下が連鎖削除される:
+ *   refresh_sessions / verification_codes / trusted_devices / passkeys /
+ *   organization_members / tool_clients / user_profiles / projects /
+ *   service_tickets / user_data_optouts / project_oauth_tokens /
+ *   project_data_<key> (各動的テーブルも user_id ON DELETE CASCADE)。
+ *
+ * CASCADE を持たない参照は削除をブロックするため明示的に先処理する:
+ *   - operation_logs.user_id (no action) → 監査ログごと purge (個人データ/トークン
+ *     混入を残さない。FLOW-L1 対応)。
+ *   - definition_history.applied_by (nullable, no action) → NULL 化 (admin 操作履歴
+ *     はユーザ個人データではないため記録自体は残す)。
+ *
+ * 注: organizations.created_by は NOT NULL かつ CASCADE 無し。org 作成は system admin
+ * 専用操作なので一般ユーザ削除では発火しない。admin が org 作成者のまま自己削除を
+ * 試みた場合は FK 制約で fail-closed (無言で部分削除しない)。
+ */
+export async function deleteUserAccount(
+  userId: string,
+): Promise<{ ok: true; userId: string }> {
+  const userRows = await db.select({ id: dbSchema.users.id })
+    .from(dbSchema.users).where(eq(dbSchema.users.id, userId)).limit(1);
+  if (userRows.length === 0) {
+    throw AppError.notFound("User not found");
+  }
+
+  await db.transaction(async (tx) => {
+    // 監査ログを purge (token/PII が params に残らないよう、かつ FK ブロック解消)。
+    await tx.delete(dbSchema.operationLogs)
+      .where(eq(dbSchema.operationLogs.userId, userId));
+    // admin 操作履歴の作成者参照を外す (履歴自体は保持)。
+    await tx.update(dbSchema.projectDefinitionHistory)
+      .set({ appliedBy: null })
+      .where(eq(dbSchema.projectDefinitionHistory.appliedBy, userId));
+    // users 削除で残りは CASCADE 連鎖。
+    await tx.delete(dbSchema.users).where(eq(dbSchema.users.id, userId));
+  });
+
+  return { ok: true, userId };
 }
 
 export async function removeModuleOptout(userId: string, projectKey: string, moduleKey: string) {
@@ -415,6 +610,9 @@ export async function getUserProjectData(userId: string, projectKey: string): Pr
 /**
  * ユーザーダッシュボード向け: ユーザーデータスキーマを持つプロジェクトの
  * 一覧を返す。"利用中" (inUse) はユーザーが 1 カラム以上の値を持つかで判定する。
+ *
+ * connectionCount / lastConnectedAt は project_credentials WS の生存状態を
+ * 表す (ダッシュボードの「使用中」表示はこの値を優先する)。
  */
 export interface UserProjectOverview {
   key: string;
@@ -427,6 +625,15 @@ export interface UserProjectOverview {
   filledColumns: number;
   /** 利用中か (filledColumns > 0) */
   inUse: boolean;
+  /** 現在 project_credentials で繋いでいる接続数 (Cernere プロセスローカル) */
+  connectionCount: number;
+  /** 直近に接続が確立したタイムスタンプ */
+  lastConnectedAt: Date | null;
+  /**
+   * Hub Shell が .well-known/ludiars-app.json を probe するための frontend URL.
+   * schema_definition.endpoint.frontend_url から派生、 未設定なら null.
+   */
+  frontendUrl: string | null;
 }
 
 /**
@@ -447,6 +654,9 @@ export async function issueProjectOpenUrl(userId: string, projectKey: string): P
   const { issueAuthCodeForUserId } = await import("../auth/auth-code.js");
   const authCode = await issueAuthCodeForUserId(userId);
   if (!authCode) throw AppError.forbidden("User not found");
+
+  // ユーザ × プロジェクトの初回 "use" を確定: Cernere DB に空行を作る
+  await ensureUserProjectRow(userId, projectKey);
 
   const separator = frontendUrl.includes("?") ? "&" : "?";
   const url = `${frontendUrl}${separator}code=${encodeURIComponent(authCode)}`;
@@ -479,6 +689,7 @@ export async function listUserProjectsOverview(userId: string): Promise<UserProj
       // 個別プロジェクトの取得失敗はスキップ扱い
     }
 
+    const status = getProjectStatus(proj.key);
     overviews.push({
       key: proj.key,
       name: proj.name,
@@ -487,6 +698,9 @@ export async function listUserProjectsOverview(userId: string): Promise<UserProj
       totalColumns: activeColumns.length,
       filledColumns: filled,
       inUse: filled > 0,
+      connectionCount: status.connectionCount,
+      lastConnectedAt: status.lastConnectedAt,
+      frontendUrl: extractFrontendUrl(definition),
     });
   }
   return overviews;
@@ -519,6 +733,49 @@ function safeTableName(projectKey: string): string {
     throw AppError.badRequest("Invalid project key");
   }
   return `project_data_${projectKey}`;
+}
+
+/**
+ * 「ユーザがそのプロジェクトを使い始めた」タイミングで
+ * `project_data_<key>` に空行を確保する.
+ *
+ * トリガ:
+ *   - Cernere ダッシュボードの「開く」 (issueProjectOpenUrl)
+ *   - 各サービス側での composite 認証 (auth_session.projectKey が判明している場合)
+ *
+ * 既存行があれば NO-OP (ON CONFLICT DO NOTHING).
+ * project が user_data スキーマを持たない場合や DB エラー時は warn のみで握り潰す
+ * (本筋の認証フローを巻き込まないため).
+ */
+export async function ensureUserProjectRow(userId: string, projectKey: string): Promise<void> {
+  let proj;
+  try {
+    proj = await db.select().from(dbSchema.managedProjects)
+      .where(eq(dbSchema.managedProjects.key, projectKey)).limit(1);
+  } catch (err) {
+    console.warn(`[project-data] ensureUserProjectRow: project lookup failed (${projectKey}):`, err);
+    return;
+  }
+  if (proj.length === 0 || !proj[0].isActive) return;
+
+  const def = proj[0].schemaDefinition as ProjectDefinition;
+  const columns = def?.user_data?.columns ?? {};
+  const hasActive = Object.values(columns).some((c) => !c._deleted);
+  if (!hasActive) return; // user_data 定義なし → row 不要
+
+  const tableName = safeTableName(projectKey);
+  const { default: postgres } = await import("postgres");
+  const sqlClient = postgres(config.databaseUrl, { max: 1 });
+  try {
+    await sqlClient.unsafe(
+      `INSERT INTO "${tableName}" (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`,
+      [userId],
+    );
+  } catch (err) {
+    console.warn(`[project-data] ensureUserProjectRow failed (${projectKey}):`, err);
+  } finally {
+    await sqlClient.end();
+  }
 }
 
 /** 安全なカラム名チェック */
@@ -738,8 +995,14 @@ export async function storeOAuthToken(
   if (existing.length > 0) {
     await db.update(dbSchema.projectOauthTokens)
       .set({
-        accessToken: input.accessToken ?? existing[0].accessToken,
-        refreshToken: input.refreshToken ?? existing[0].refreshToken,
+        // 新しい平文が来たときだけ暗号化して上書き。来なければ保存済み (暗号化済 or
+        // 移行前平文) の値をそのまま保持する — 既存値を二重暗号化しない。
+        accessToken: input.accessToken != null
+          ? encryptToken(input.accessToken)
+          : existing[0].accessToken,
+        refreshToken: input.refreshToken != null
+          ? encryptToken(input.refreshToken)
+          : existing[0].refreshToken,
         expiresAt: expiresAt ?? existing[0].expiresAt,
         tokenType: input.tokenType ?? existing[0].tokenType,
         scope: input.scope ?? existing[0].scope,
@@ -752,8 +1015,8 @@ export async function storeOAuthToken(
       projectKey,
       userId,
       provider: input.provider,
-      accessToken: input.accessToken ?? null,
-      refreshToken: input.refreshToken ?? null,
+      accessToken: encryptToken(input.accessToken),
+      refreshToken: encryptToken(input.refreshToken),
       expiresAt,
       tokenType: input.tokenType ?? null,
       scope: input.scope ?? null,
@@ -785,8 +1048,8 @@ export async function getOAuthToken(
   const r = rows[0];
   return {
     provider: r.provider,
-    accessToken: r.accessToken,
-    refreshToken: r.refreshToken,
+    accessToken: decryptToken(r.accessToken),
+    refreshToken: decryptToken(r.refreshToken),
     expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null,
     tokenType: r.tokenType,
     scope: r.scope,
@@ -809,8 +1072,8 @@ export async function listOAuthTokens(
 
   return rows.map((r) => ({
     provider: r.provider,
-    accessToken: r.accessToken,
-    refreshToken: r.refreshToken,
+    accessToken: decryptToken(r.accessToken),
+    refreshToken: decryptToken(r.refreshToken),
     expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null,
     tokenType: r.tokenType,
     scope: r.scope,

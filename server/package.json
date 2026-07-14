@@ -4,20 +4,26 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch src/bootstrap.ts",
+    "dev:legacy": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/bootstrap.js",
+    "start:legacy": "node dist/index.js",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@ludiars/vestigium": "file:../lib/vestigium",
     "@aws-sdk/client-ses": "^3.1030.0",
+    "@simplewebauthn/server": "^13.3.0",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.45.1",
     "ioredis": "^5.10.0",
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^9.0.3",
+    "paseto": "^3.1.4",
     "postgres": "^3.4.8",
-    "uuid": "^13.0.0",
     "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.63.0",
+    "uuid": "^13.0.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -28,11 +34,15 @@
     "@types/uuid": "^10.0.0",
     "drizzle-kit": "^0.31.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.7"
   },
   "pnpm": {
     "overrides": {
       "esbuild": "^0.25.0"
-    }
+    },
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

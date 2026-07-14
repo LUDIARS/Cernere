@@ -1,5 +1,15 @@
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
+// Passkey 用は @simplewebauthn/browser を使うので type だけ import
+import {
+  startRegistration, startAuthentication,
+} from "@simplewebauthn/browser";
+import type {
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+  AuthenticationResponseJSON,
+} from "@simplewebauthn/browser";
+
 // ── Token Management ──────────────────────────────
 
 export function getAccessToken(): string | null {
@@ -13,12 +23,45 @@ function getRefreshToken(): string | null {
 export function setTokens(access: string, refresh: string) {
   localStorage.setItem("accessToken", access);
   localStorage.setItem("refreshToken", refresh);
+  // 「このブラウザは一度アクセス済み」の永続印。 ログアウト (clearTokens) では
+  // 消さないので、 再訪時にログイン画面を既定表示する判定に使う。
+  localStorage.setItem("cernere_returning", "1");
 }
 
 export function clearTokens() {
   localStorage.removeItem("accessToken");
   localStorage.removeItem("refreshToken");
   localStorage.removeItem("user");
+  // cernere_returning は残す (アクセス形跡は保持し、 次回もログインを優先表示)。
+}
+
+/**
+ * インフラ (Cloudflare Tunnel 等) が全訪問者に付ける cookie。
+ * 「アクセスした形跡」の判定に数えると初訪問でも常に true になるため除外する。
+ */
+const INFRA_COOKIE_NAMES = new Set(["__cf_bm", "_cfuvid", "cf_clearance", "__cflb", "__cfruid"]);
+
+/**
+ * このブラウザに「アクセスした形跡」があるか。
+ * - 過去にログイン/登録した永続印 (cernere_returning)
+ * - 現行/残存セッション (accessToken / user)
+ * - インフラ由来を除く first-party cookie
+ * のいずれかがあれば true。 ログイン画面の既定タブ判定 (returning→Login / 新規→Register) に使う。
+ */
+export function hasAccessRecord(): boolean {
+  try {
+    if (localStorage.getItem("cernere_returning")) return true;
+    if (localStorage.getItem("accessToken") || localStorage.getItem("user")) return true;
+    if (typeof document !== "undefined") {
+      const meaningful = document.cookie.split(";")
+        .map((c) => c.split("=")[0]?.trim())
+        .filter((name) => name && !INFRA_COOKIE_NAMES.has(name));
+      if (meaningful.length > 0) return true;
+    }
+  } catch {
+    // localStorage 不可 (プライベートモード等) は「形跡なし」扱い。
+  }
+  return false;
 }
 
 export function getStoredUser(): { id: string; name: string; email: string; role: string } | null {
@@ -205,6 +248,56 @@ export const auth = {
     return request<UserProfile>("/api/auth/me");
   },
 
+  // ── Passkey (WebAuthn / Face ID / Touch ID / Windows Hello / Android 生体 / 物理キー) ──
+
+  /** 現在のユーザに passkey を新規登録する。 ブラウザが OS の生体認証ダイアログを開く */
+  async passkeyRegister(nickname?: string): Promise<{ ok: true; credentialId: string }> {
+    const opts = await request<PublicKeyCredentialCreationOptionsJSON>("/api/auth/passkey/register-begin", {
+      method: "POST", body: JSON.stringify({}),
+    });
+    const response = await startRegistration({ optionsJSON: opts });
+    const res = await request<{ ok: true; credentialId: string }>("/api/auth/passkey/register-finish", {
+      method: "POST", body: JSON.stringify({ response, nickname: nickname ?? null }),
+    });
+    return res;
+  },
+
+  /** passkey でログイン。 email を渡すとそのユーザの credentials を allow に詰める */
+  async passkeyLogin(email?: string): Promise<AuthResponse> {
+    const begin = await fetch(`${API_BASE}/api/auth/passkey/login-begin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email ?? "" }),
+    });
+    const beginData = await begin.json() as
+      { options: PublicKeyCredentialRequestOptionsJSON; challengeOwner: string; error?: string };
+    if (!begin.ok) throw new Error(beginData.error || "Passkey login failed");
+    const response: AuthenticationResponseJSON = await startAuthentication({ optionsJSON: beginData.options });
+    const finish = await fetch(`${API_BASE}/api/auth/passkey/login-finish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ response, challengeOwner: beginData.challengeOwner }),
+    });
+    const data = await finish.json() as AuthResponse & { error?: string };
+    if (!finish.ok) throw new Error(data.error || "Passkey login failed");
+    setTokens(data.accessToken, data.refreshToken);
+    setStoredUser({
+      id: data.user.id,
+      name: data.user.displayName,
+      email: data.user.email || "",
+      role: data.user.role,
+    });
+    return data;
+  },
+
+  async passkeyList(): Promise<{ items: Array<{ id: string; credentialId: string; nickname: string | null; deviceType: string; backedUp: boolean; aaguid: string | null; createdAt: string; lastUsedAt: string | null }> }> {
+    return request("/api/auth/passkey/list", { method: "POST", body: "{}" });
+  },
+
+  async passkeyDelete(id: string): Promise<{ ok: true; removed: number }> {
+    return request("/api/auth/passkey/delete", { method: "POST", body: JSON.stringify({ id }) });
+  },
+
   // ── MFA ──────────────────────────────────────
 
   isMfaChallenge,
@@ -302,6 +395,52 @@ export const auth = {
       method: "POST",
       body: JSON.stringify({ provider }),
     });
+  },
+};
+
+// ── OIDC Provider consent API ─────────────────────
+// Cernere を IdP とする RP (Cloudflare Access 等) の認可同意フロー。
+// /oidc/authorize がフロントの /oidc/consent に飛ばし、 ここで承認/拒否する。
+
+export interface OidcConsentInfo {
+  clientName: string;
+  scopes: string[];
+  redirectUri: string;
+}
+
+export const oidc = {
+  async getRequest(requestId: string): Promise<OidcConsentInfo> {
+    const res = await fetch(`${API_BASE}/api/auth/oidc/request?request_id=${encodeURIComponent(requestId)}`, {
+      credentials: "include",
+    });
+    const data = await res.json() as OidcConsentInfo & { error?: string };
+    if (!res.ok) throw new Error(data.error || "Failed to load authorization request");
+    return data;
+  },
+
+  async approve(requestId: string): Promise<{ redirectTo: string }> {
+    const token = getAccessToken();
+    const res = await fetch(`${API_BASE}/api/auth/oidc/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      credentials: "include",
+      body: JSON.stringify({ request_id: requestId }),
+    });
+    const data = await res.json() as { redirectTo: string; error?: string };
+    if (!res.ok) throw new Error(data.error || "Authorization failed");
+    return data;
+  },
+
+  async deny(requestId: string): Promise<{ redirectTo: string }> {
+    const res = await fetch(`${API_BASE}/api/auth/oidc/deny`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ request_id: requestId }),
+    });
+    const data = await res.json() as { redirectTo: string; error?: string };
+    if (!res.ok) throw new Error(data.error || "Failed to deny authorization");
+    return data;
   },
 };
 
