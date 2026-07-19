@@ -29,6 +29,41 @@ npx tsx scripts/rotate-project-secret.ts --project glab
 
 ログイン済みsystem adminはWSの `managed_project.rotate_secret { key }` でも同じ操作を行える。
 
+### 最小コンシューマプロジェクトの登録 (`register-project.ts` CLI)
+
+自前の `user_data` を持たない読み取り専用コンシューマ (例: 施設予約 Aedilis、アンケート配信
+Volputas) を一回限りで登録するオペレータ用 CLI。ログイン済み admin セッションを用意せず、
+対象 DB へ直接登録して `client_id` / `client_secret` を発行する。対象 DB の `DATABASE_URL` を
+設定して `server/` から実行する:
+
+```bash
+# 1. 最小定義 JSON を用意 (project.key は英小文字+数字+_、2-63字、先頭は英字)
+cat > /tmp/volputas-project.json <<'JSON'
+{
+  "project": {
+    "key": "volputas",
+    "name": "Volputas",
+    "description": "プレイヤープロフィール & アンケート配信サービス"
+  }
+}
+JSON
+
+# 2. 登録 (client_secret は一度だけ表示される)
+npx tsx scripts/register-project.ts --file /tmp/volputas-project.json
+```
+
+出力の `client_id` / `client_secret` は登録対象サービス側の Infisical secret
+(例: `CERNERE_CLIENT_ID` / `CERNERE_CLIENT_SECRET`) に保存し、`/ws/project` 接続のサーバ認証
+(§2) に使わせる。`client_secret` は再表示されないため、紛失時は上記
+`rotate-project-secret.ts` で再発行する。
+
+- 純粋なコンシューマは上記 3 キーだけでよい。ユーザーデータ列やアンケートを Cernere 管理下に
+  置く場合は `user_data` / `questionnaire` を定義に足す ([../project-management.md](../project-management.md))。
+- **登録するだけで `/api/auth/project-token` (§3) の発行対象になる**。 hub (GLAB 等) が
+  参照先サービス向けの downstream token を発行できるのは、その参照先が `managed_projects` に
+  active 登録済みのときだけ。 未登録なら §3 が `project '<key>' not found or inactive` を返し、
+  hub 側はアンケート一覧取得などが **502** になる (下の「トラブルシュート」参照)。
+
 ### Excubitorによる起動時credential
 
 Excubitor自身は一度だけproject secretを発行し、Cernere用Infisical projectへ
