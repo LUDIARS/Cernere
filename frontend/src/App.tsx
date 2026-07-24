@@ -9,6 +9,7 @@ import { OrganizationsPage } from "./pages/OrganizationsPage";
 import { OidcClientsPage } from "./pages/admin/OidcClientsPage";
 import { CompositeLoginPage } from "./pages/composite/CompositeLoginPage";
 import { CompositeCallbackPage } from "./pages/composite/CompositeCallbackPage";
+import { DeviceRegisterPage } from "./pages/DeviceRegisterPage";
 import { OidcConsentPage } from "./pages/oidc/OidcConsentPage";
 import { CheckinPage } from "./pages/CheckinPage";
 
@@ -47,6 +48,9 @@ function AppRoutes() {
 
       {/* 会場チェックイン (session ベース、 passkey 再入力なし。 QR/クエリで gateway を渡す) */}
       <Route path="/checkin" element={<CheckinPage />} />
+
+      {/* 他デバイス登録 (one-time link で新しい端末の passkey を追加) */}
+      <Route path="/device-register" element={<DeviceRegisterPage />} />
 
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
       {/* 認証済みページは AppLayout 内で描画 — WS 接続を維持 */}

@@ -17,6 +17,7 @@ export type {
 } from "./device-fingerprint.js";
 export {
   buildCompositePasskeyLoginUrl,
+  buildCompositePasskeyRedirectLoginUrl,
   CompositePasskeyPopup,
 } from "./CompositePasskeyPopup.js";
 export type { CompositePasskeyPopupProps } from "./CompositePasskeyPopup.js";

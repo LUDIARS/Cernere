@@ -4,6 +4,8 @@
  * 認証済みセッションを管理し、module_request の送受信を行う。
  */
 
+import { authorizeAction, resolveBrowserActionTarget } from "./action-auth";
+
 type ServerMessage = {
   type: string;
   session_id?: string;
@@ -127,6 +129,20 @@ class CernereWsClient {
       throw new Error("WebSocket not connected");
     }
 
+    const storedUser = localStorage.getItem("user");
+    let currentUserId: string | undefined;
+    try {
+      currentUserId = storedUser
+        ? (JSON.parse(storedUser) as { id?: string }).id
+        : undefined;
+    } catch {
+      currentUserId = undefined;
+    }
+    const target = resolveBrowserActionTarget(module, action, payload, currentUserId);
+    const actionProof = target
+      ? await authorizeAction(target.action, target.resource, this._sessionId ?? undefined)
+      : undefined;
+
     return new Promise((resolve, reject) => {
       this.pendingRequests.push({
         resolve: resolve as (p: unknown) => void,
@@ -135,7 +151,13 @@ class CernereWsClient {
         action,
       });
 
-      const msg = { type: "module_request", module, action, payload };
+      const msg = {
+        type: "module_request",
+        module,
+        action,
+        payload,
+        ...(actionProof ? { action_proof: actionProof } : {}),
+      };
       console.log("[ws] →", module, action);
       this.ws!.send(JSON.stringify(msg));
     });
