@@ -19,6 +19,7 @@ import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { verifyProjectToken, type ProjectJwtClaims } from "../auth/jwt.js";
 import { logProjectWsConnect, logProjectWsDisconnect } from "../logging/auth-logger.js";
+import { publicProjectCommandError } from "./project-errors.js";
 import { addConnection, removeConnection } from "./project-registry.js";
 
 export interface ProjectWsUserData {
@@ -214,7 +215,7 @@ export async function handleProjectWsMessage(
         type: "error",
         request_id: msg.request_id,
         code: "command_error",
-        message: (err as Error).message,
+        message: publicProjectCommandError(msg.module, err),
         module: msg.module,
         action: msg.action,
       });

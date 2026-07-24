@@ -14,6 +14,7 @@ LUDIARS 認証プラットフォーム Cernere の仕様書。AIFormat
 | [identity-verification.md](feature/identity-verification.md) | デバイスフィンガープリント + 6 桁コード本人確認 |
 | [user-project-row.md](feature/user-project-row.md) | `project_data_<key>` への row 自動初期化トリガ |
 | [project-connection-registry.md](feature/project-connection-registry.md) | プロジェクト WS 接続状態 (使用中バッジ) |
+| [volputas-survey-responses.md](feature/volputas-survey-responses.md) | Volputas設問とCernere本人回答の分離保管 |
 
 ### `interface/` — API・外部連携・セキュリティ境界
 | ドキュメント | 範囲 |
@@ -46,7 +47,7 @@ LUDIARS 認証プラットフォーム Cernere の仕様書。AIFormat
 | ドキュメント | 範囲 |
 |---|---|
 | [README.md](data/README.md) | スコープ（Cernere 所有 / 委託データ除外）+ テーブル一覧（ドメイン別） |
-| [schema.md](data/schema.md) | 全 21 テーブルの列定義・制約・インデックス・FK |
+| [schema.md](data/schema.md) | 静的テーブルの列定義・制約・インデックス・FK |
 
 ※ 動的 `project_data_<key>`（他サービス委託データ）は対象外。
 
