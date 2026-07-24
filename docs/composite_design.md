@@ -2,7 +2,18 @@
 
 ## 概要
 
-Cernere Composite は、他サービスの **バックエンド** に組み込むための認証パッケージである。
+Cernere Composite は、他サービスの **バックエンド** とログイン UI に組み込むための認証パッケージである。
+
+Passkey UI は PC では呼び出し元と同じウィンドウで Cernere に遷移し、
+`redirect_uri` に one-time code を返す。呼び出し元は sessionStorage に保持した
+state を照合してから code をバックエンドで交換する。モバイルでは popup も利用できる。
+いずれも WebAuthn ceremony は Cernere origin 上で実行する。
+
+ログイン UI は Cernere ホストの `/composite/login` に一本化されている。
+Cernere 単独フロントの `/login` も同ページの self モード (authCode を
+`POST /api/auth/exchange` で自分のトークンに交換) を描画するだけで、
+独自のログインフォームは持たない。新規登録 (パスキー: name のみ /
+email 任意) も同ページの register タブで行う。
 サービス起動時に Cernere にプロジェクト認証 (WebSocket) を行い、
 ユーザー認証をバックエンド経由で仲介する。
 
@@ -41,7 +52,7 @@ Frontend (SPA)                Backend (Hono)                    Cernere Server
     | GET /api/auth/login-url -->|                                   |
     |<-- { url }                 |                                   |
     |                            |                                   |
-    | window.open(url) ----------|------ popup -------------------->| /composite/login
+    | location.assign(url) ------|------ same window -------------->| /composite/login
     |                            |                                   | ユーザー認証
     |<-- postMessage(authCode) --|                                   |
     |                            |                                   |

@@ -7,8 +7,10 @@ import {
 import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
+  RegistrationResponseJSON,
   AuthenticationResponseJSON,
 } from "@simplewebauthn/browser";
+import { authorizeAction } from "./action-auth";
 
 // ── Token Management ──────────────────────────────
 
@@ -252,14 +254,61 @@ export const auth = {
 
   /** 現在のユーザに passkey を新規登録する。 ブラウザが OS の生体認証ダイアログを開く */
   async passkeyRegister(nickname?: string): Promise<{ ok: true; credentialId: string }> {
+    const existing = await this.passkeyList();
+    const currentUser = getStoredUser();
+    if (existing.items.length > 0 && !currentUser) {
+      throw new Error("Current user is unavailable");
+    }
+    const proof = existing.items.length > 0
+      ? await authorizeAction("passkey.register", currentUser!.id)
+      : undefined;
     const opts = await request<PublicKeyCredentialCreationOptionsJSON>("/api/auth/passkey/register-begin", {
-      method: "POST", body: JSON.stringify({}),
+      method: "POST",
+      headers: proof ? { "X-Cernere-Action-Proof": proof } : undefined,
+      body: JSON.stringify({}),
     });
     const response = await startRegistration({ optionsJSON: opts });
     const res = await request<{ ok: true; credentialId: string }>("/api/auth/passkey/register-finish", {
       method: "POST", body: JSON.stringify({ response, nickname: nickname ?? null }),
     });
     return res;
+  },
+
+  /** パスワードを作らず、最初の passkey を資格情報にしてアカウントを作成する。
+   *  email は任意 (Windows Hello 等だけで登録可)。 email 無しアカウントの
+   *  他デバイス追加はログイン後の device-link で行う。 */
+  async passkeySignup(name: string, email?: string): Promise<AuthResponse> {
+    const begin = await fetch(`${API_BASE}/api/auth/passkey/signup-begin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(email ? { name, email } : { name }),
+    });
+    const beginData = await begin.json() as {
+      signupId?: string;
+      options?: PublicKeyCredentialCreationOptionsJSON;
+      error?: string;
+    };
+    if (!begin.ok || !beginData.signupId || !beginData.options) {
+      throw new Error(beginData.error || "Passkey registration failed");
+    }
+    const response: RegistrationResponseJSON = await startRegistration({
+      optionsJSON: beginData.options,
+    });
+    const finish = await fetch(`${API_BASE}/api/auth/passkey/signup-finish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signupId: beginData.signupId, response }),
+    });
+    const data = await finish.json() as AuthResponse & { error?: string };
+    if (!finish.ok) throw new Error(data.error || "Passkey registration failed");
+    setTokens(data.accessToken, data.refreshToken);
+    setStoredUser({
+      id: data.user.id,
+      name: data.user.displayName,
+      email: data.user.email || "",
+      role: data.user.role,
+    });
+    return data;
   },
 
   /** passkey でログイン。 email を渡すとそのユーザの credentials を allow に詰める */
@@ -294,8 +343,85 @@ export const auth = {
     return request("/api/auth/passkey/list", { method: "POST", body: "{}" });
   },
 
+  /** composite authCode を自分 (Cernere frontend) のトークンに交換する。
+   *  /login を composite フローへ一本化した際の self モード完了処理。 */
+  async exchangeAuthCode(code: string): Promise<AuthResponse> {
+    const res = await fetch(`${API_BASE}/api/auth/exchange`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    const data = await res.json() as AuthResponse & { error?: string };
+    if (!res.ok || !data.accessToken) throw new Error(data.error || "Auth code exchange failed");
+    setTokens(data.accessToken, data.refreshToken);
+    setStoredUser({
+      id: data.user.id,
+      name: data.user.displayName,
+      email: data.user.email || "",
+      role: data.user.role,
+    });
+    return data;
+  },
+
+  /** 他デバイス登録用の one-time URL を発行する (要ログイン + step-up)。 */
+  async passkeyDeviceLinkCreate(): Promise<{ url: string; expiresIn: number }> {
+    const existing = await this.passkeyList();
+    const currentUser = getStoredUser();
+    if (!currentUser) throw new Error("Current user is unavailable");
+    const proof = existing.items.length > 0
+      ? await authorizeAction("passkey.device_link", currentUser.id)
+      : undefined;
+    return request("/api/auth/passkey/device-link", {
+      method: "POST",
+      headers: proof ? { "X-Cernere-Action-Proof": proof } : undefined,
+      body: JSON.stringify({}),
+    });
+  },
+
+  /** 新しい端末側: device-link URL の token でこの端末の passkey を登録し、
+   *  そのままログイン状態にする。 */
+  async passkeyDeviceRegister(token: string, nickname?: string): Promise<AuthResponse> {
+    const begin = await fetch(`${API_BASE}/api/auth/passkey/device-register-begin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    const beginData = await begin.json() as {
+      ceremonyId?: string;
+      options?: PublicKeyCredentialCreationOptionsJSON;
+      account?: { displayName: string };
+      error?: string;
+    };
+    if (!begin.ok || !beginData.ceremonyId || !beginData.options) {
+      throw new Error(beginData.error || "Device registration failed");
+    }
+    const response: RegistrationResponseJSON = await startRegistration({
+      optionsJSON: beginData.options,
+    });
+    const finish = await fetch(`${API_BASE}/api/auth/passkey/device-register-finish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ceremonyId: beginData.ceremonyId, response, ...(nickname ? { nickname } : {}) }),
+    });
+    const data = await finish.json() as AuthResponse & { error?: string };
+    if (!finish.ok) throw new Error(data.error || "Device registration failed");
+    setTokens(data.accessToken, data.refreshToken);
+    setStoredUser({
+      id: data.user.id,
+      name: data.user.displayName,
+      email: data.user.email || "",
+      role: data.user.role,
+    });
+    return data;
+  },
+
   async passkeyDelete(id: string): Promise<{ ok: true; removed: number }> {
-    return request("/api/auth/passkey/delete", { method: "POST", body: JSON.stringify({ id }) });
+    const proof = await authorizeAction("passkey.delete", id);
+    return request("/api/auth/passkey/delete", {
+      method: "POST",
+      headers: { "X-Cernere-Action-Proof": proof },
+      body: JSON.stringify({ id }),
+    });
   },
 
   // ── MFA ──────────────────────────────────────
