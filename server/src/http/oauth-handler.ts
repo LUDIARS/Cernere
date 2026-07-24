@@ -125,11 +125,10 @@ async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader
   const frontend = config.frontendUrl;
 
   const isComposite = stateParam?.startsWith("composite:");
-  if (!stateParam || (!stateParam.startsWith("link:") && !isComposite && expectedState !== stateParam)) {
-    throw new Error("Invalid OAuth state");
-  }
-  // composite state の CSRF 検証: "composite:<origin>:<uuid>" の uuid 部分を cookie と比較
-  if (isComposite && expectedState !== stateParam) {
+  // 全フロー (通常 / composite / link:) で cookie の state と厳密一致を要求する。
+  // 旧実装は "link:" prefix で検証を丸ごとスキップし、攻撃者が state=link:<victim_uuid>
+  // を送るだけで被害者の github_id を書き換えられた (Issue #63 C2)。
+  if (!stateParam || !expectedState || expectedState !== stateParam) {
     throw new Error("Invalid OAuth state");
   }
   if (!code) throw new Error("Authorization code not provided");

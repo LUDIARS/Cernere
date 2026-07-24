@@ -322,6 +322,8 @@ async function userCmd(userId: string, action: string, p?: Record<string, unknow
     case "search": {
       const query = requireStr(p, "query");
       if (query.length < 2) throw AppError.badRequest("Query must be at least 2 characters");
+      // ILIKE のワイルドカード (%/_) を literal 化 — 入力でのパターン注入によるユーザ列挙を防ぐ
+      const escaped = query.replace(/[\\%_]/g, (ch) => "\\" + ch);
       const rows = await db.select({
         id: schema.users.id,
         login: schema.users.login,
@@ -330,9 +332,9 @@ async function userCmd(userId: string, action: string, p?: Record<string, unknow
         email: schema.users.email,
       }).from(schema.users)
         .where(
-          sql`(${schema.users.login} ILIKE ${'%' + query + '%'}
-           OR ${schema.users.displayName} ILIKE ${'%' + query + '%'}
-           OR ${schema.users.email} ILIKE ${'%' + query + '%'})`
+          sql`(${schema.users.login} ILIKE ${'%' + escaped + '%'}
+           OR ${schema.users.displayName} ILIKE ${'%' + escaped + '%'}
+           OR ${schema.users.email} ILIKE ${'%' + escaped + '%'})`
         )
         .limit(10);
       return rows;
