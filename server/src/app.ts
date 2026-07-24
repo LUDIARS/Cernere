@@ -192,7 +192,7 @@ export function createApp() {
     res.cork(() => {
       res.writeStatus("204 No Content")
         .writeHeader("Access-Control-Allow-Origin", config.frontendUrl)
-        .writeHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        .writeHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         .writeHeader("Access-Control-Allow-Headers", "Content-Type, Authorization")
         .writeHeader("Access-Control-Allow-Credentials", "true")
         .end();
