@@ -112,7 +112,44 @@ sequenceDiagram
 | `managed_project.rotate_secret` | system admin限定。project secretを再発行し、平文を一度だけ返す |
 | `managed_project.store_oauth_token` 他 | OAuth トークンを Cernere に預ける ([oauth-token-storage.md](oauth-token-storage.md)) |
 | `managed_project.verify_token` | peer から渡された project token のリモート検証 ([peer-relay.md](peer-relay.md)) |
+| `volputas_survey.list_response_statuses` / `get_response` / `save_response` | Volputas設問に対する本人回答の参照・transactional replace |
 | `managed_relay.register_endpoint` 他 | サービス間直接通信の調停 ([peer-relay.md](peer-relay.md)) |
+
+### Volputas survey response command
+
+3 commandは、認証済みproject WSの`projectKey`が`volputas`の場合だけ利用できる。
+他projectはpayload検証やDBアクセスより先に拒否する。
+
+```json
+{
+  "module": "volputas_survey",
+  "action": "save_response",
+  "payload": {
+    "userId": "Cernere user UUID",
+    "surveyId": "Volputas survey UUID",
+    "answers": [
+      { "questionId": "rating", "intValue": 4 },
+      { "questionId": "comment", "textValue": "..." }
+    ]
+  }
+}
+```
+
+- `list_response_statuses`: `{ userId, surveyIds }` →
+  `{ answeredSurveyIds: string[] }`
+- `get_response`: `{ userId, surveyId }` →
+  `{ surveyId, answers, submittedAt } | null`
+- `save_response`: `{ userId, surveyId, answers }` →
+  `{ surveyId, answers, submittedAt }`
+
+`submittedAt`はUTC ISO 8601文字列としてWSへ返す。1回答はTEXT / INTEGERのexactly
+one、question IDは`^[a-z][a-z0-9_-]{0,99}$`、回答は最大100件、TEXTは最大4,000文字で
+PostgreSQLが保存できないU+0000と、UTF-8変換で値が変わるunpaired surrogateを許可しない。
+
+Cernereが認証するのはproject WSのVolputas service identityである。payload
+`userId`と元のuser project-token subjectの一致は、tokenを検証するVolputas ingressが
+保証する。詳細は
+[Volputasアンケート回答保管](../feature/volputas-survey-responses.md)。
 
 ## 経路 3: `/auth/composite-ws` (composite 認証 WS)
 

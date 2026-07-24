@@ -348,6 +348,44 @@ SSO ハンドオフ用 one-time チケット。
 
 - INDEX: `idx_oauth_tokens_project_user_provider` (project_key, user_id, provider, unique), `idx_oauth_tokens_project_user` (project_key, user_id), `idx_oauth_tokens_project_provider` (project_key, provider)
 
+### `volputas_survey_responses`
+
+Volputasが所有するsurvey定義に対する、Cernere user単位の回答header。
+行データはVolputasから委託された保護対象ユーザーデータで、Cernereが本人回答の
+権威ソースとなる。
+
+| データ | 種類 | 権威ソース | 保存先 | 保護 | 保護方法 |
+|---|---|---|---|---|---|
+| survey response header | user | Cernere | PostgreSQL | 要 | Volputas project WS限定、user FK cascade、ログ非出力 |
+| normalized answers | user | Cernere | PostgreSQL | 要 | TEXT/INTEGER exactly-one、transactional replace、ログ非出力 |
+| survey / question定義 | master | Volputas | Cernereには非保存 | 要否はVolputas管理 | UUID / question ID参照だけ保持 |
+
+| 列 | 型 | 制約 / 既定 |
+|---|---|---|
+| id | uuid | PK, default random |
+| survey_id | uuid | NOT NULL、Volputas surveyの外部ID（DB FKなし） |
+| user_id | uuid | NOT NULL, FK → users.id (CASCADE) |
+| submitted_at | timestamptz | NOT NULL, default now()、最新提出時刻 |
+| updated_at | timestamptz | NOT NULL, default now() |
+
+- UNIQUE: `uq_volputas_survey_response_survey_user` (survey_id, user_id)
+- INDEX: `idx_volputas_survey_responses_user` (user_id, updated_at DESC)
+
+### `volputas_survey_answers`
+
+1 responseの回答を設問単位で正規化する。回答値はTEXT / INTEGERのどちらか一方だけを
+保持し、JSON blobやVolputas設問本文を複製しない。
+
+| 列 | 型 | 制約 / 既定 |
+|---|---|---|
+| response_id | uuid | PK(1/2), FK → volputas_survey_responses.id (CASCADE) |
+| question_id | text | PK(2/2), `^[a-z][a-z0-9_-]{0,99}$` |
+| answer_text | text | null可、最大4,000文字、U+0000 / unpaired surrogate不可 |
+| answer_int | integer | null可 |
+
+- CHECK: `answer_text` / `answer_int`のexactly one
+- INDEX: `idx_volputas_survey_answers_response` (response_id)
+
 ---
 
 ## ユーザーデータ（汎用）
