@@ -9,7 +9,13 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { config } from "../config.js";
-import { drizzleDevLogger, devLog, devError, DEV_LOG_ENABLED } from "../logging/dev-logger.js";
+import {
+  drizzleDevLogger,
+  devLog,
+  devError,
+  DEV_LOG_ENABLED,
+  formatDevQueryParams,
+} from "../logging/dev-logger.js";
 import * as schema from "./schema.js";
 
 const client = postgres(config.databaseUrl, {
@@ -18,7 +24,7 @@ const client = postgres(config.databaseUrl, {
   // dev は接続イベントを詳細に追う
   debug: DEV_LOG_ENABLED
     ? (connection, query, params) => {
-        const paramsStr = params.length > 0 ? ` -- params: ${JSON.stringify(params)}` : "";
+        const paramsStr = formatDevQueryParams(query, params);
         console.log(`[db.raw conn=${connection}] ${query}${paramsStr}`);
       }
     : undefined,

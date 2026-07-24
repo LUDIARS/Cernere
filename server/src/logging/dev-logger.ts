@@ -20,6 +20,8 @@ function shouldLog(): boolean {
 }
 
 const ENABLED = shouldLog();
+const SENSITIVE_QUERY_RELATION =
+  /\bvolputas_survey_(?:responses|answers)\b/i;
 
 function safeStringify(value: unknown): string {
   if (value === undefined) return "";
@@ -29,6 +31,19 @@ function safeStringify(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+/**
+ * Survey answers are user-owned and can be sensitive. Keep query shape
+ * observable in development without placing identifiers or answer values in
+ * either Drizzle's logger or postgres.js's lower-level debug callback.
+ */
+export function formatDevQueryParams(query: string, params: unknown[]): string {
+  if (params.length === 0) return "";
+  if (SENSITIVE_QUERY_RELATION.test(query)) {
+    return ` -- params: [REDACTED count=${params.length}]`;
+  }
+  return ` -- params: ${safeStringify(params)}`;
 }
 
 /** 1 行詳細ログ (dev のみ). 第二引数はオブジェクトを JSON 化して付与 */
@@ -50,7 +65,7 @@ export function devError(label: string, err: unknown, data?: Record<string, unkn
 export const drizzleDevLogger = ENABLED
   ? {
       logQuery(query: string, params: unknown[]): void {
-        const paramsStr = params.length > 0 ? ` -- params: ${safeStringify(params)}` : "";
+        const paramsStr = formatDevQueryParams(query, params);
         console.log(`[db] ${query}${paramsStr}`);
       },
     }

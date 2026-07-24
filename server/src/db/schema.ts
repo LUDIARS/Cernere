@@ -5,8 +5,10 @@
  */
 
 import {
-  pgTable, text, uuid, timestamp, bigint, boolean, jsonb, integer, customType, primaryKey, uniqueIndex, index,
+  pgTable, text, uuid, timestamp, bigint, boolean, jsonb, integer, customType,
+  primaryKey, uniqueIndex, index, check,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 // drizzle 標準には bytea 型がないので簡易 custom type で代用 (= raw Buffer / Uint8Array)
 const bytea = customType<{ data: Buffer; default: false }>({
@@ -414,4 +416,45 @@ export const projectOauthTokens = pgTable("project_oauth_tokens", {
   uniqueIndex("idx_oauth_tokens_project_user_provider").on(t.projectKey, t.userId, t.provider),
   index("idx_oauth_tokens_project_user").on(t.projectKey, t.userId),
   index("idx_oauth_tokens_project_provider").on(t.projectKey, t.provider),
+]);
+
+// ── Volputas Survey Responses ──────────────────────────────────
+// Survey definitions stay in Volputas. Cernere owns the authenticated user's
+// normalized response and cascades it with the Cernere user identity.
+
+export const volputasSurveyResponses = pgTable("volputas_survey_responses", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  surveyId: uuid("survey_id").notNull(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  submittedAt: timestamp("submitted_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("uq_volputas_survey_response_survey_user").on(t.surveyId, t.userId),
+  index("idx_volputas_survey_responses_user").on(t.userId, t.updatedAt.desc()),
+]);
+
+export const volputasSurveyAnswers = pgTable("volputas_survey_answers", {
+  responseId: uuid("response_id").notNull()
+    .references(() => volputasSurveyResponses.id, { onDelete: "cascade" }),
+  questionId: text("question_id").notNull(),
+  answerText: text("answer_text"),
+  answerInt: integer("answer_int"),
+}, (t) => [
+  primaryKey({ columns: [t.responseId, t.questionId] }),
+  index("idx_volputas_survey_answers_response").on(t.responseId),
+  check(
+    "chk_volputas_survey_answer_exactly_one",
+    sql`(
+      (${t.answerText} IS NOT NULL AND ${t.answerInt} IS NULL)
+      OR (${t.answerText} IS NULL AND ${t.answerInt} IS NOT NULL)
+    )`,
+  ),
+  check(
+    "chk_volputas_survey_answer_question_id",
+    sql`${t.questionId} ~ '^[a-z][a-z0-9_-]{0,99}$'`,
+  ),
+  check(
+    "chk_volputas_survey_answer_text_length",
+    sql`${t.answerText} IS NULL OR char_length(${t.answerText}) <= 4000`,
+  ),
 ]);

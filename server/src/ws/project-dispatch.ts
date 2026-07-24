@@ -24,6 +24,8 @@ interface ProfileUpdateParams {
   hobbies?: string[];
 }
 
+const VOLPUTAS_PROJECT_KEY = "volputas";
+
 function requireStr(obj: Record<string, unknown>, key: string): string {
   const v = obj[key];
   if (typeof v !== "string" || !v) {
@@ -166,6 +168,24 @@ export async function dispatchProjectCommand(
         return { valid: false };
       }
     }
+    // ─── Volputas survey responses ────────────────────────────────────────
+    // The project key is bound to the authenticated WS connection. Only the
+    // Volputas service may access the response store it delegates to Cernere.
+    case "volputas_survey.list_response_statuses": {
+      requireVolputasProject(projectKey);
+      const service = await import("../project/volputas-survey-response.js");
+      return service.listResponseStatuses(payload);
+    }
+    case "volputas_survey.get_response": {
+      requireVolputasProject(projectKey);
+      const service = await import("../project/volputas-survey-response.js");
+      return service.getResponse(payload);
+    }
+    case "volputas_survey.save_response": {
+      requireVolputasProject(projectKey);
+      const service = await import("../project/volputas-survey-response.js");
+      return service.saveResponse(payload);
+    }
     // ─── managed_relay: peer SA 間の仲介 (Phase 0b) ───
     //
     // Cernere は認証局に徹する. challenge 発行 / pair 許可 / endpoint
@@ -197,6 +217,12 @@ export async function dispatchProjectCommand(
     }
     default:
       throw new Error(`Unknown command: ${module}.${action} (project: ${projectKey})`);
+  }
+}
+
+function requireVolputasProject(projectKey: string): void {
+  if (projectKey !== VOLPUTAS_PROJECT_KEY) {
+    throw new Error("Volputas survey commands require the Volputas project");
   }
 }
 
