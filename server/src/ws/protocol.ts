@@ -8,7 +8,7 @@ import type { UserFullState } from "../redis.js";
 
 export type ClientMessage =
   | { type: "pong"; ts: number }
-  | { type: "module_request"; module: string; action: string; payload?: unknown }
+  | { type: "module_request"; module: string; action: string; payload?: unknown; action_proof?: string }
   | { type: "relay"; target: RelayTarget; payload: unknown };
 
 export type RelayTarget =

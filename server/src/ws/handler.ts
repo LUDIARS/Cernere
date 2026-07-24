@@ -16,6 +16,8 @@ import { handleGuestAuthCommand } from "./guest.js";
 import { notifyPresenceChange } from "./events.js";
 import type { ClientMessage, ServerMessage } from "./protocol.js";
 import { logUserWsConnect, logUserWsDisconnect } from "../logging/auth-logger.js";
+import { resolveWsActionTarget } from "../auth/action-policy.js";
+import { actionProofStore, wsActionBinding } from "../auth/action-proof.js";
 
 const PING_INTERVAL_MS = 30_000;
 
@@ -165,6 +167,15 @@ export async function handleWsMessage(
       if (p && typeof p[k] === "string") ids[k] = p[k];
     }
     try {
+      const actionTarget = resolveWsActionTarget(data.userId, msg.module, msg.action, msg.payload);
+      if (actionTarget) {
+        const actionProof = typeof msg.action_proof === "string" ? msg.action_proof : undefined;
+        await actionProofStore.consume(actionProof, {
+          userId: data.userId,
+          binding: wsActionBinding(data.sessionId),
+          ...actionTarget,
+        });
+      }
       const result = await dispatch(data.userId, data.sessionId, msg.module, msg.action, msg.payload);
       send(ws, { type: "module_response", module: msg.module, action: msg.action, payload: result });
       console.log(`[action] ${JSON.stringify({

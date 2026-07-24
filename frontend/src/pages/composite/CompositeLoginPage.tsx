@@ -26,7 +26,8 @@ import {
 } from "@simplewebauthn/browser";
 import { collectDeviceFingerprint } from "../../lib/device-fingerprint";
 import { fetchAllowedOrigins, isTargetAllowed } from "../../lib/composite-redirect";
-import { getAccessToken } from "../../lib/api";
+import { auth as authApi, getAccessToken, hasAccessRecord } from "../../lib/api";
+import { useAuth } from "../../contexts/AuthContext";
 
 const API_BASE = "";
 
@@ -82,23 +83,29 @@ function buildWsUrl(wsPath: string): string {
   return `${proto}://${window.location.host}${wsPath}`;
 }
 
-export function CompositeLoginPage() {
+/**
+ * self モード: Cernere 単独フロントの /login がこのページをそのまま使う (ダブスタ解消)。
+ * 認証処理は composite と共通 (authCode 発行まで同一) で、 最後だけ
+ * /api/auth/exchange で自分のトークンに交換してアプリへ入る。
+ */
+export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
   const params = new URLSearchParams(window.location.search);
-  const origin = params.get("origin");
-  const redirectUri = params.get("redirect_uri");
-  // スマホは passkey が端末に無い (PC で登録したパスキーは持ち込めない) ことが多い。
-  // その場合 passkey 指定でもパスワードフォームを出し、 スマホのパスワードマネージャの
-  // 自動入力で入れるようにする。 PC では従来どおり passkey 専用のまま。
-  const isMobile = typeof navigator !== "undefined" &&
-    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-  const passkeyOnly = params.get("auth_mode") === "passkey" && !isMobile;
+  const origin = self ? null : params.get("origin");
+  const redirectUri = self ? null : params.get("redirect_uri");
+  // self ログイン完了後の戻り先 (ローカルパスのみ許可 — open redirect 防止)
+  const redirectParam = params.get("redirect");
+  // passkey 指定時は端末種別にかかわらずパスワードへ暗黙フォールバックしない。
+  const passkeyOnly = !self && params.get("auth_mode") === "passkey";
+  const { googleAuthUrl: selfGoogleUrl, githubAuthUrl: selfGithubUrl } = useAuth();
 
-  // 新規登録は Cernere 単体の登録画面へ誘導し、 登録後は呼び出し元 (GLab 等) の
-  // origin へ戻す (?redirect=)。 これで「初回登録後に手動で戻る」 が不要になる。
-  const returnTarget = origin ?? redirectUri ?? "";
-  const registerHref = `/login?mode=register${returnTarget ? `&redirect=${encodeURIComponent(returnTarget)}` : ""}`;
-
-  const [mode, setMode] = useState<"login" | "register" | "device">("login");
+  // 初期タブ: ?mode= が最優先。 self モードでは「アクセスした形跡」が無い初訪問に
+  // Register を優先表示する (#149 の挙動を引き継ぐ)。
+  const [mode, setMode] = useState<"login" | "register" | "device">(() => {
+    const q = params.get("mode");
+    if (q === "register" || q === "login") return q;
+    if (self && !hasAccessRecord()) return "register";
+    return "login";
+  });
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -129,6 +136,7 @@ export function CompositeLoginPage() {
   // ── 送信先 (origin / redirect_uri) をサーバ許可リストで事前検証 (VULNWEB-001) ──
   // 不正な送信先ならログイン UI を出す前に停止し、 authCode を発行させない。
   useEffect(() => {
+    if (self) return; // self モードは送信先検証も silent SSO も不要 (App 側でログイン済みを弾く)
     let cancelled = false;
     void (async () => {
       const allowed = await fetchAllowedOrigins();
@@ -166,7 +174,25 @@ export function CompositeLoginPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin, redirectUri]);
 
+  /** self モードの戻り先。 open redirect を防ぐためローカルパスのみ許可。 */
+  const selfTarget = (): string => {
+    if (redirectParam && redirectParam.startsWith("/") && !redirectParam.startsWith("//")) {
+      return redirectParam;
+    }
+    return "/";
+  };
+
   const completeAuth = (authCode: string) => {
+    if (self) {
+      // Cernere 自身がコンシューマ: authCode を自分のトークンに交換して入る
+      void authApi.exchangeAuthCode(authCode)
+        .then(() => { window.location.href = selfTarget(); })
+        .catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : "ログインの完了に失敗しました");
+          setLoading(false);
+        });
+      return;
+    }
     const allowed = allowedOriginsRef.current;
     // 権威はサーバ許可リスト。 postMessage/redirect の直前で必ず再検証し、
     // 許可外の送信先へ authCode を渡さない (fail-closed)。
@@ -317,10 +343,54 @@ export function CompositeLoginPage() {
     return data;
   };
 
+  /** passkey signup 完了後の合流点。 signup-finish は authCode ではなくトークンを
+   *  返すため、 composite モードでは composite-session-code で authCode に変換して
+   *  呼び出し元へ返す。 self モードはそのままアプリへ。 */
+  const completeSignedUp = async (accessToken: string) => {
+    if (self) {
+      window.location.href = selfTarget();
+      return;
+    }
+    const target = origin ?? redirectUri ?? "";
+    const res = await fetch(`${API_BASE}/api/auth/composite-session-code`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ target }),
+    });
+    const body = await res.json().catch(() => null) as { authCode?: string; error?: string } | null;
+    if (!res.ok || !body?.authCode) {
+      throw new Error(body?.error ?? "登録は完了しましたが、呼び出し元への連携に失敗しました");
+    }
+    completeAuth(body.authCode);
+  };
+
+  /** メアド不要のパスキー新規登録 (Windows Hello / Face ID / Android 生体)。 */
+  const handlePasskeySignup = async () => {
+    setError("");
+    setInfo("");
+    if (!name.trim()) {
+      setError("名前を入力してください");
+      return;
+    }
+    setLoading(true);
+    try {
+      const data = await authApi.passkeySignup(name.trim(), email.trim() || undefined);
+      await completeSignedUp(data.accessToken);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "パスキー登録に失敗しました");
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setInfo("");
+
+    if (mode === "register" && (!email.trim() || !password)) {
+      setError("パスワード登録にはメールアドレスとパスワードが必要です (パスキーなら名前だけで登録できます)");
+      return;
+    }
     setLoading(true);
 
     try {
@@ -412,8 +482,8 @@ export function CompositeLoginPage() {
       ? `composite_origin=${encodeURIComponent(redirectUri)}`
       : "";
 
-  const googleAuthUrl = `/auth/google/login${compositeParam ? `?${compositeParam}` : ""}`;
-  const githubAuthUrl = `/auth/github/login${compositeParam ? `?${compositeParam}` : ""}`;
+  const googleAuthUrl = self ? selfGoogleUrl : `/auth/google/login${compositeParam ? `?${compositeParam}` : ""}`;
+  const githubAuthUrl = self ? selfGithubUrl : `/auth/github/login${compositeParam ? `?${compositeParam}` : ""}`;
 
   return (
     <div
@@ -459,12 +529,7 @@ export function CompositeLoginPage() {
             {(["login", "register"] as const).map((m) => (
               <button
                 key={m}
-                onClick={() => {
-                  // 新規登録は composite (埋め込み) では行わず、 Cernere 単体の
-                  // 登録画面へ誘導する (device 検証 / MFA を含む完全なフロー)。
-                  if (m === "register") { window.location.href = registerHref; return; }
-                  setMode(m); setError(""); setInfo("");
-                }}
+                onClick={() => { setMode(m); setError(""); setInfo(""); }}
                 style={{
                   flex: 1,
                   padding: "0.5rem",
@@ -514,7 +579,7 @@ export function CompositeLoginPage() {
           </div>
         )}
 
-        {!passkeyOnly && <form onSubmit={handleSubmit}>
+        {(!passkeyOnly || mode === "register") && <form onSubmit={handleSubmit}>
           {mode === "register" && (
             <div className="form-group">
               <label>Name</label>
@@ -528,10 +593,31 @@ export function CompositeLoginPage() {
             </div>
           )}
 
+          {mode === "register" && (
+            <>
+              {/* メアド不要のパスキー登録が第一候補。 この端末の Windows Hello /
+                  生体認証だけでアカウントを作る。 他端末はログイン後の
+                  「他のデバイスを登録」 リンク (one-time URL) で追加する。 */}
+              <button
+                type="button"
+                className="primary"
+                disabled={loading}
+                onClick={() => { void handlePasskeySignup(); }}
+                style={{ width: "100%", marginBottom: "0.5rem", padding: "0.6rem" }}
+              >
+                🔐 パスキーでアカウント作成（生体認証 / Windows Hello PIN）
+              </button>
+              <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "1rem" }}>
+                メールアドレス不要で登録できます。他の端末（スマホ等）は、ログイン後に
+                「他のデバイスを登録」リンクから追加します。
+              </p>
+            </>
+          )}
+
           {(mode === "login" || mode === "register") && (
             <>
               <div className="form-group">
-                <label>Email</label>
+                <label>{mode === "register" ? "Email（任意 — パスワード登録では必須）" : "Email"}</label>
                 <input
                   type="email"
                   name="email"
@@ -539,23 +625,25 @@ export function CompositeLoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="user@example.com"
-                  required
+                  required={mode === "login"}
                 />
               </div>
 
-              <div className="form-group">
-                <label>Password</label>
-                <input
-                  type="password"
-                  name="password"
-                  autoComplete={mode === "register" ? "new-password" : "current-password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="8+ characters"
-                  minLength={8}
-                  required
-                />
-              </div>
+              {(mode === "login" || !passkeyOnly) && (
+                <div className="form-group">
+                  <label>{mode === "register" ? "Password（パスワード登録を使う場合のみ）" : "Password"}</label>
+                  <input
+                    type="password"
+                    name="password"
+                    autoComplete={mode === "register" ? "new-password" : "current-password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="8+ characters"
+                    minLength={8}
+                    required={mode === "login"}
+                  />
+                </div>
+              )}
             </>
           )}
 
@@ -620,20 +708,41 @@ export function CompositeLoginPage() {
             </div>
           )}
 
-          <button
-            type="submit"
-            className="primary"
-            disabled={loading}
-            style={{ width: "100%", marginTop: "0.5rem", padding: "0.6rem" }}
-          >
-            {loading
-              ? "Processing..."
-              : mode === "device"
-                ? "確認コードを検証"
-                : mode === "login"
-                  ? "Login"
-                  : "Create Account"}
-          </button>
+          {(mode !== "register" || !passkeyOnly) && (
+            <button
+              type="submit"
+              className="primary"
+              disabled={loading}
+              style={{ width: "100%", marginTop: "0.5rem", padding: "0.6rem" }}
+            >
+              {loading
+                ? "Processing..."
+                : mode === "device"
+                  ? "確認コードを検証"
+                  : mode === "login"
+                    ? "Login"
+                    : "パスワードでアカウント作成"}
+            </button>
+          )}
+
+          {mode === "register" && passkeyOnly && (
+            <div style={{ textAlign: "center", marginTop: "0.75rem" }}>
+              <button
+                type="button"
+                onClick={() => { setMode("login"); setError(""); setInfo(""); }}
+                style={{
+                  fontSize: "0.8rem",
+                  color: "var(--text-muted)",
+                  textDecoration: "underline",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                既にアカウントをお持ちの方はログイン
+              </button>
+            </div>
+          )}
 
           {mode === "device" && (
             <button
@@ -681,7 +790,7 @@ export function CompositeLoginPage() {
             </div>}
 
             {/* Passkey (Face ID / Touch ID / Windows Hello / Android 生体 / 物理キー) */}
-            <button
+            {mode === "login" && <button
               type="button"
               onClick={handlePasskeyLogin}
               disabled={loading}
@@ -703,19 +812,29 @@ export function CompositeLoginPage() {
                 opacity: loading ? 0.6 : 1,
               }}
             >
-              🔐 Passkey でログイン (Face ID / Touch ID / Windows Hello)
-            </button>
+              🔐 Passkey でログイン（生体認証 / Windows Hello PIN）
+            </button>}
 
-            {/* 新規登録導線: 埋め込み (特に passkey 専用) では登録できないため、
-                Cernere 単体の登録画面へ誘導する。 */}
-            <div style={{ textAlign: "center", marginTop: "0.25rem", marginBottom: "0.5rem" }}>
-              <a
-                href={registerHref}
-                style={{ fontSize: "0.8rem", color: "var(--text-muted)", textDecoration: "underline" }}
-              >
-                アカウントをお持ちでない方は新規登録
-              </a>
-            </div>
+            {/* 新規登録導線: このページの register タブでそのまま登録する
+                (passkey 専用モードでもパスキー登録は可能)。 */}
+            {mode === "login" && (
+              <div style={{ textAlign: "center", marginTop: "0.25rem", marginBottom: "0.5rem" }}>
+                <button
+                  type="button"
+                  onClick={() => { setMode("register"); setError(""); setInfo(""); }}
+                  style={{
+                    fontSize: "0.8rem",
+                    color: "var(--text-muted)",
+                    textDecoration: "underline",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  アカウントをお持ちでない方は新規登録
+                </button>
+              </div>
+            )}
 
             {/* Google */}
             {!passkeyOnly && <a

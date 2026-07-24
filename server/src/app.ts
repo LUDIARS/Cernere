@@ -9,6 +9,7 @@ import uWS from "uWebSockets.js";
 import { config } from "./config.js";
 import { handleAuthRoute } from "./http/auth-handler.js";
 import { handlePasskeyRoute } from "./http/passkey-handler.js";
+import { handleActionAuthRoute } from "./http/action-auth-handler.js";
 import { exportProjectSchemas } from "./http/project-schema-handler.js";
 import { getPublicKeys } from "./auth/paseto.js";
 import { handleCompositeRoute } from "./http/composite-handler.js";
@@ -349,6 +350,25 @@ export function createApp() {
     close: (ws) => { handleCompositeAuthClose(ws); },
   });
 
+  // ── Action authentication: fresh passkey → one-shot proof ──
+  app.post("/api/auth/action/:phase", async (res, req) => {
+    const phase = req.getParameter(0) ?? "";
+    const authHeader = req.getHeader("authorization") ?? "";
+    let aborted = false;
+    res.onAborted(() => { aborted = true; });
+
+    try {
+      const body = await readBody(res);
+      if (aborted) return;
+      const result = await handleActionAuthRoute(phase, body, authHeader);
+      jsonResponse(res, result.status, result.data);
+    } catch (err) {
+      if (aborted) return;
+      const { status, message } = classifyError(err);
+      jsonResponse(res, status, { error: message });
+    }
+  });
+
   // ── Auth REST: POST /api/auth/:action ───────────────────
   app.post("/api/auth/:action", async (res, req) => {
     const action = req.getParameter(0) ?? "";
@@ -383,6 +403,7 @@ export function createApp() {
   app.post("/api/auth/passkey/:action", async (res, req) => {
     const action = req.getParameter(0) ?? "";
     const authHeader = req.getHeader("authorization") ?? "";
+    const actionProof = req.getHeader("x-cernere-action-proof") ?? "";
     const userAgent = req.getHeader("user-agent") ?? undefined;
     const ip = getRemoteIp(res);
     let aborted = false;
@@ -392,7 +413,7 @@ export function createApp() {
     try {
       const body = await readBody(res);
       if (aborted) return;
-      const result = await handlePasskeyRoute(action, body, authHeader, { ip, userAgent });
+      const result = await handlePasskeyRoute(action, body, authHeader, { ip, userAgent }, "", actionProof);
       devLog("http.passkey.ok", { action, status: result.status });
       jsonResponse(res, result.status, result.data);
     } catch (err) {
@@ -559,7 +580,12 @@ export function createApp() {
 
   // ── Health check ────────────────────────────────────────
   app.get("/health", (res) => {
-    jsonResponse(res, "200 OK", { status: "ok", timestamp: new Date().toISOString() });
+    jsonResponse(res, "200 OK", {
+      status: "ok",
+      service: "cernere",
+      version: process.env.npm_package_version ?? "0.2.0",
+      timestamp: new Date().toISOString(),
+    });
   });
 
   // ── 404 ─────────────────────────────────────────────────

@@ -14,6 +14,8 @@ export interface CompositePasskeyPopupProps {
   timeoutMs?: number;
   popupName?: string;
   popupFeatures?: string;
+  /** auto は PC で同一ウィンドウ、モバイルで popup を使う。 */
+  navigationMode?: "auto" | "same-window" | "popup";
 }
 
 interface CernereAuthMessage {
@@ -30,6 +32,22 @@ export function buildCompositePasskeyLoginUrl(
   url.searchParams.set("auth_mode", "passkey");
   return url.toString();
 }
+
+export function buildCompositePasskeyRedirectLoginUrl(
+  cernereUrl: string,
+  redirectUri: string,
+): string {
+  const url = new URL("/composite/login", cernereUrl);
+  url.searchParams.set("redirect_uri", new URL(redirectUri).toString());
+  url.searchParams.set("auth_mode", "passkey");
+  return url.toString();
+}
+
+function isMobileBrowser(): boolean {
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+}
+
+const REDIRECT_STATE_KEY = "cernere:composite:redirect-state";
 
 function isCernereAuthMessage(value: unknown): value is CernereAuthMessage {
   if (!value || typeof value !== "object") return false;
@@ -55,11 +73,33 @@ export function CompositePasskeyPopup({
   timeoutMs = 120_000,
   popupName = "cernere-passkey-login",
   popupFeatures = DEFAULT_POPUP_FEATURES,
+  navigationMode = "auto",
 }: CompositePasskeyPopupProps) {
   const [pending, setPending] = useState(false);
   const cleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => () => cleanupRef.current?.(), []);
+
+  useEffect(() => {
+    const callbackUrl = new URL(window.location.href);
+    const state = callbackUrl.searchParams.get("cernere_composite_state");
+    const authCode = callbackUrl.searchParams.get("code");
+    if (!state || !authCode) return;
+
+    callbackUrl.searchParams.delete("cernere_composite_state");
+    callbackUrl.searchParams.delete("code");
+    window.history.replaceState({}, "", callbackUrl.toString());
+
+    const expectedState = window.sessionStorage.getItem(REDIRECT_STATE_KEY);
+    window.sessionStorage.removeItem(REDIRECT_STATE_KEY);
+    if (!expectedState || state !== expectedState) {
+      onError?.(new Error("ログインの復帰情報を検証できませんでした"));
+      return;
+    }
+    void Promise.resolve(onAuthCode(authCode)).catch((error: unknown) => {
+      onError?.(error instanceof Error ? error : new Error("ログイン処理に失敗しました"));
+    });
+  }, [onAuthCode, onError]);
 
   const fail = (error: Error) => {
     setPending(false);
@@ -128,12 +168,36 @@ export function CompositePasskeyPopup({
     popup.focus();
   };
 
+  const startLogin = () => {
+    const sameWindow = navigationMode === "same-window"
+      || (navigationMode === "auto" && !isMobileBrowser());
+    if (!sameWindow) {
+      openPopup();
+      return;
+    }
+
+    try {
+      const callbackUrl = new URL(window.location.href);
+      callbackUrl.searchParams.delete("code");
+      const state = crypto.randomUUID();
+      callbackUrl.searchParams.set("cernere_composite_state", state);
+      window.sessionStorage.setItem(REDIRECT_STATE_KEY, state);
+      const loginUrl = buildCompositePasskeyRedirectLoginUrl(
+        cernereUrl,
+        callbackUrl.toString(),
+      );
+      window.location.assign(loginUrl);
+    } catch {
+      fail(new Error("Cernere URL またはリダイレクト先が不正です"));
+    }
+  };
+
   return (
     <button
       type="button"
       className={className}
       disabled={disabled || pending}
-      onClick={openPopup}
+      onClick={startLogin}
     >
       {pending ? pendingLabel : buttonLabel}
     </button>

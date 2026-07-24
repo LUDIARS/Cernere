@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
+import QRCode from "qrcode";
 import { useAuth } from "../contexts/AuthContext";
 import { profile as profileApi, auth as authApi, type UserProfileData, type ProfilePrivacy } from "../lib/api";
 
@@ -244,8 +245,133 @@ export function ProfilePage() {
           </Link>
         </div>
 
+        <DeviceLinkSection />
+
         <PasskeySection />
       </div>
+    </div>
+  );
+}
+
+// ── 他のデバイスを登録 (one-time link 発行) ────────────────────
+//
+// email 無しアカウントでも新しい端末 (別 PC / スマホ) を使えるようにする経路。
+// ログイン済み端末で one-time URL を発行し、 新端末がそれを開いて自分の
+// passkey を追加する。 リンクは 15 分・1 回限り。 発行には既存 passkey での
+// step-up (生体認証 / PIN の再確認) が必要。
+
+function DeviceLinkSection() {
+  const [link, setLink] = useState<{ url: string; expiresIn: number } | null>(null);
+  const [qr, setQr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const handleIssue = async () => {
+    setBusy(true);
+    setMsg("");
+    setLink(null);
+    setQr("");
+    try {
+      const r = await authApi.passkeyDeviceLinkCreate();
+      setLink(r);
+      try {
+        setQr(await QRCode.toDataURL(r.url, { width: 220, margin: 1 }));
+      } catch { /* QR は補助表示。 失敗しても URL コピーで続行できる */ }
+    } catch (e) {
+      setMsg(`⚠ ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link.url);
+      setMsg("✓ リンクをコピーしました");
+    } catch {
+      setMsg("⚠ コピーに失敗しました。URL を手動で選択してください");
+    }
+  };
+
+  return (
+    <div
+      style={{
+        background: "var(--bg-surface-2)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+        padding: "1.5rem",
+        marginTop: "1rem",
+      }}
+    >
+      <h2 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.5rem", color: "var(--text-muted)" }}>
+        📱 他のデバイスを登録
+      </h2>
+      <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: 1.7, marginBottom: "0.75rem" }}>
+        別の PC やスマホでこのアカウントを使うには、下のボタンで登録リンクを発行し、
+        そのデバイスで開いてください。開いた先で生体認証 / PIN を登録すると、
+        そのままログインできます (メールアドレス不要)。
+        リンクは <strong>15 分間・1 回限り</strong> 有効です。
+      </p>
+      {msg && (
+        <div style={{ fontSize: "0.8rem", margin: "0.5rem 0", color: msg.startsWith("⚠") ? "var(--red)" : "var(--green)" }}>
+          {msg}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => { void handleIssue(); }}
+        disabled={busy}
+        style={{
+          fontSize: "0.85rem",
+          padding: "0.4rem 1rem",
+          borderRadius: "var(--radius)",
+          border: "1px solid var(--accent)",
+          background: "var(--accent)",
+          color: "#fff",
+          cursor: busy ? "not-allowed" : "pointer",
+        }}
+      >
+        {busy ? "発行中… (生体認証 / PIN の確認があります)" : "+ 登録リンクを発行"}
+      </button>
+
+      {link && (
+        <div style={{ marginTop: "1rem" }}>
+          {qr && (
+            <div style={{ marginBottom: "0.75rem" }}>
+              <img src={qr} alt="デバイス登録リンクの QR コード" style={{ borderRadius: "var(--radius-sm)" }} />
+              <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
+                スマホはこの QR を読み取ってください。
+              </p>
+            </div>
+          )}
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <input
+              type="text"
+              readOnly
+              value={link.url}
+              onFocus={(e) => e.currentTarget.select()}
+              style={{ flex: 1, fontSize: "0.75rem", fontFamily: "monospace" }}
+            />
+            <button
+              type="button"
+              onClick={() => { void handleCopy(); }}
+              style={{
+                fontSize: "0.8rem",
+                padding: "0.35rem 0.75rem",
+                borderRadius: "var(--radius)",
+                border: "1px solid var(--border)",
+                background: "var(--bg-surface)",
+                color: "var(--text)",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              コピー
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
