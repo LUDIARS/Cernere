@@ -509,6 +509,9 @@ export async function setModuleOptout(userId: string, projectKey: string, module
  * CASCADE を持たない参照は削除をブロックするため明示的に先処理する:
  *   - operation_logs.user_id (no action) → 監査ログごと purge (個人データ/トークン
  *     混入を残さない。FLOW-L1 対応)。
+ *   - volputas_survey_access_logs.user_id (FK 無し) → purge。FK を張らないのは
+ *     未知 user_id の認可拒否を確実に記録するためで、その代償として CASCADE が
+ *     効かないので明示削除する (spec/data/retention.md)。
  *   - definition_history.applied_by (nullable, no action) → NULL 化 (admin 操作履歴
  *     はユーザ個人データではないため記録自体は残す)。
  *
@@ -529,6 +532,10 @@ export async function deleteUserAccount(
     // 監査ログを purge (token/PII が params に残らないよう、かつ FK ブロック解消)。
     await tx.delete(dbSchema.operationLogs)
       .where(eq(dbSchema.operationLogs.userId, userId));
+    // Volputas survey アクセス監査は FK を持たない (認可拒否を確実に残すため) ので
+    // CASCADE されない。user_id を含む以上、削除要求では明示的に purge する。
+    await tx.delete(dbSchema.volputasSurveyAccessLogs)
+      .where(eq(dbSchema.volputasSurveyAccessLogs.userId, userId));
     // admin 操作履歴の作成者参照を外す (履歴自体は保持)。
     await tx.update(dbSchema.projectDefinitionHistory)
       .set({ appliedBy: null })

@@ -20,8 +20,9 @@ function shouldLog(): boolean {
 }
 
 const ENABLED = shouldLog();
+// access_logs は回答値を持たないが user/survey 識別子を持つため同じ扱いにする。
 const SENSITIVE_QUERY_RELATION =
-  /\bvolputas_survey_(?:responses|answers)\b/i;
+  /\bvolputas_survey_(?:responses|answers|access_logs)\b/i;
 
 function safeStringify(value: unknown): string {
   if (value === undefined) return "";

@@ -34,6 +34,22 @@ Volputas serviceを信頼境界とし、受領した`userId`がCernere userと�
   途中失敗時は以前の回答を保持する。
 - Cernere user削除時はresponse / answerをcascade削除する。
 
+## アクセス監査
+
+project WS command 経路は user WS の dispatcher を通らないため`operation_logs`へ
+到達しない。回答の参照・上書きを無記録にしないよう、この経路専用の監査シンク
+`volputas_survey_access_logs`へ 1 コマンド 1 行を記録する。
+
+- 記録するのは`project_key` /`user_id` /`survey_id` /`action` /`status` /
+  固定`error_code`のみ。回答本文・payload・token は記録しない。
+- 成功 (`ok`)、失敗 (`error`)、認可拒否 (`denied`) の全てを記録する。認可拒否は
+  実処理・DBアクセスより前に判定し、拒否そのものを残す。
+- `error_code`は`project_not_authorized` /`invalid_payload` /`storage_failure` /
+  `internal_error`の閉じた集合。DB側 CHECK 制約でも自由文を拒否する。
+- 監査ログの書き込み失敗は fail-safe とし、本処理を止めない (stderr へ区分値のみ)。
+
+保持期間と削除方針は`spec/data/retention.md`を正本とする。
+
 ## Migration
 
 `036_volputas_survey_responses.sql`は、並行作業中のmigration 030–035との番号衝突を

@@ -24,8 +24,6 @@ interface ProfileUpdateParams {
   hobbies?: string[];
 }
 
-const VOLPUTAS_PROJECT_KEY = "volputas";
-
 function requireStr(obj: Record<string, unknown>, key: string): string {
   const v = obj[key];
   if (typeof v !== "string" || !v) {
@@ -171,20 +169,16 @@ export async function dispatchProjectCommand(
     // ─── Volputas survey responses ────────────────────────────────────────
     // The project key is bound to the authenticated WS connection. Only the
     // Volputas service may access the response store it delegates to Cernere.
-    case "volputas_survey.list_response_statuses": {
-      requireVolputasProject(projectKey);
-      const service = await import("../project/volputas-survey-response.js");
-      return service.listResponseStatuses(payload);
-    }
-    case "volputas_survey.get_response": {
-      requireVolputasProject(projectKey);
-      const service = await import("../project/volputas-survey-response.js");
-      return service.getResponse(payload);
-    }
+    //
+    // This path never reaches operation_logs (that sink is user-WS only), so the
+    // dedicated dispatcher below records a metadata-only audit entry for every
+    // success, failure and authorization denial.
+    case "volputas_survey.list_response_statuses":
+    case "volputas_survey.get_response":
     case "volputas_survey.save_response": {
-      requireVolputasProject(projectKey);
-      const service = await import("../project/volputas-survey-response.js");
-      return service.saveResponse(payload);
+      const { dispatchVolputasSurveyCommand } =
+        await import("./volputas-survey-dispatch.js");
+      return dispatchVolputasSurveyCommand(projectKey, action, payload);
     }
     // ─── managed_relay: peer SA 間の仲介 (Phase 0b) ───
     //
@@ -217,12 +211,6 @@ export async function dispatchProjectCommand(
     }
     default:
       throw new Error(`Unknown command: ${module}.${action} (project: ${projectKey})`);
-  }
-}
-
-function requireVolputasProject(projectKey: string): void {
-  if (projectKey !== VOLPUTAS_PROJECT_KEY) {
-    throw new Error("Volputas survey commands require the Volputas project");
   }
 }
 
