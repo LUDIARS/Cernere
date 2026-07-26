@@ -15,11 +15,13 @@ LUDIARS 認証プラットフォーム Cernere の仕様書。AIFormat
 | [user-project-row.md](feature/user-project-row.md) | `project_data_<key>` への row 自動初期化トリガ |
 | [project-connection-registry.md](feature/project-connection-registry.md) | プロジェクト WS 接続状態 (使用中バッジ) |
 | [volputas-survey-responses.md](feature/volputas-survey-responses.md) | Volputas設問とCernere本人回答の分離保管 |
+| [oidc-provider.md](feature/oidc-provider.md) | Cernere を OpenID Connect Provider として外部 RP に提供 |
+| [edge-assertion-login.md](feature/edge-assertion-login.md) | **Proposed**: Cloudflare Access 等のエッジ認証を Cernere へバイパス |
 
 ### `interface/` — API・外部連携・セキュリティ境界
 | ドキュメント | 範囲 |
 |---|---|
-| [auth-flows.md](interface/auth-flows.md) | 認証経路 5 種 (user/project/tool/composite/oauth) |
+| [auth-flows.md](interface/auth-flows.md) | 認証経路 6 種 (user/project/tool/composite/oauth/edge assertion) |
 | [ws-protocol.md](interface/ws-protocol.md) | WebSocket 3 経路のメッセージプロトコル |
 | [peer-relay.md](interface/peer-relay.md) | サービス間直接 WS 通信 (managed_relay + verify_token) |
 | [oauth-token-storage.md](interface/oauth-token-storage.md) | OAuth トークンを Cernere で集中管理 (個人データ単一情報源) |
@@ -29,6 +31,8 @@ LUDIARS 認証プラットフォーム Cernere の仕様書。AIFormat
 | ドキュメント | 範囲 |
 |---|---|
 | [service-registration.md](setup/service-registration.md) | サービス登録手順 |
+| [oidc-provider.md](setup/oidc-provider.md) | OIDC 署名鍵の生成と RP (Cloudflare Access 等) の登録 |
+| [cf-access-bypass.md](setup/cf-access-bypass.md) | **Proposed**: Cloudflare Access + Tunnel + binding 登録手順 |
 
 ### `test/` — テスト
 | ドキュメント | 範囲 |
@@ -64,6 +68,7 @@ LUDIARS 認証プラットフォーム Cernere の仕様書。AIFormat
 | CLI / API ツール認証 | `POST /api/auth/login` (`grant_type=client_credentials`) | [auth-flows.md#tool](interface/auth-flows.md) |
 | 別サービスへの SSO 遷移 | `managed_project.open_url` (WS) | [user-auth-project-open.md](feature/user-auth-project-open.md) |
 | 別サービスに埋め込んだログイン UI | `POST /api/auth/composite/...` または `auth.login` (project WS) | [auth-flows.md#composite](interface/auth-flows.md) |
+| 企業 SSO (Cloudflare Access) 配下の Hub | `auth.edge_assertion` (project WS) | [edge-assertion-login.md](feature/edge-assertion-login.md) |
 
 ### トークン署名
 
