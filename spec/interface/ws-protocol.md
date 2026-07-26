@@ -202,12 +202,17 @@ sequenceDiagram
 `managed_project.get_user_data` / `managed_project.set_user_data` は
 `payload.targetProjectKey` を指定するとクロスプロジェクトアクセスになる。
 対象 project の `schema_definition.data_sharing` が caller project を許可し、要求列の
-`module` が grant 範囲内である場合だけ実行する。
+`module`と`columns`がgrant範囲内である場合だけ実行する。
 
 - 読み取り: `access: read` または `readwrite`
 - 書き込み: `access: readwrite` のみ
+- `columns`明示時は管理者が選択したカラムだけを許可する
+- `modules`と`columns`を併記した場合は両方に含まれるカラムだけを許可する
+- `columns: []`はdeny-all、`columns`省略は既存定義との互換動作
 - 書き込み要求に範囲外の列が 1 つでもあれば、部分更新せず要求全体を拒否する
 - `targetProjectKey` 省略時または caller と同じ場合は従来どおり自己 project の操作になる
+- `data_sharing`を変更できるのはsystem adminのみ。project WSのschema auto-syncに
+  同フィールドが含まれても除外し、現行の管理者設定を保持する
 
 EducationLab はこの経路で `vantan_user` の `profile` module（名前・役職・学科）を初回登録する。
 

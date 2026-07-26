@@ -1,8 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const mockGetUserColumns = vi.fn();
+const mockUpdateProjectSchema = vi.fn();
 vi.mock("../../src/project/service.js", () => ({
   getUserColumns: (...args: unknown[]) => mockGetUserColumns(...args),
+  updateProjectSchema: (...args: unknown[]) => mockUpdateProjectSchema(...args),
 }));
 
 const mockGetSharedUserColumns = vi.fn();
@@ -91,5 +93,30 @@ describe("dispatchProjectCommand — managed_project.set_user_data routing", () 
       { name: "Neco" },
     );
     expect(result).toEqual({ ok: true, updated: ["name"] });
+  });
+});
+
+describe("dispatchProjectCommand — managed_project.update_schema authorization", () => {
+  it("preserves administrator-owned data sharing during project schema sync", async () => {
+    mockUpdateProjectSchema.mockResolvedValue({
+      message: "Schema updated",
+      key: "volputas",
+      columnsAdded: [],
+    });
+    const result = await dispatchProjectCommand("volputas", "managed_project", "update_schema", {
+      project: { key: "volputas", name: "Volputas" },
+      data_sharing: [{
+        project_key: "EducationLab",
+        access: "read",
+        columns: ["persona_analysis"],
+      }],
+    });
+
+    expect(mockUpdateProjectSchema).toHaveBeenCalledWith(
+      "volputas",
+      { project: { key: "volputas", name: "Volputas" } },
+      undefined,
+    );
+    expect(result).toMatchObject({ adminOwnedFieldsPreserved: ["data_sharing"] });
   });
 });
