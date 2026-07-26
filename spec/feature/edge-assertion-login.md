@@ -82,7 +82,12 @@ REST エンドポイントは生やさない。**project WS (`/ws/project`) 限�
 ```jsonc
 // request
 { "type": "module_request", "module": "auth", "action": "edge_assertion",
-  "payload": { "assertion": "<CF Access JWT>", "fingerprint": { /* 任意 */ }, "ip": "..." } }
+  "payload": {
+    "assertion": "<CF Access JWT>",
+    "identity": { /* 任意 — Hub が get-identity で取った補完属性 (§5.3)。署名が無いので表示名等にしか使わない */ },
+    "fingerprint": { /* 任意 */ },
+    "ip": "..."
+  } }
 
 // response
 { "type": "module_response", "module": "auth", "action": "edge_assertion",
@@ -118,13 +123,30 @@ CF だけ」+「提示できるのは project 認証済みの Hub だけ」の 2
 
 ## 5. ID 解決とプロビジョニング
 
-紐付けキーは CF の `sub` (CF アカウント内で不変の user UUID)。
-メールアドレス変更 (姓変更・ドメイン統合) で別人扱いにならない。
+### 5.1 何を紐付けキーにするか
+
+**CF の `sub` はキーに使わない。** CF のドキュメント上 `sub` は
+「アカウント内で email ごとに一意」であり、ユーザを削除して再追加した場合や
+別組織にログインした場合に **値が変わる**。永続キーとしての保証が無い。
+
+| 優先 | キー | 出所 | 備考 |
+|---|---|---|---|
+| 1 | **上流 IdP の subject** | custom OIDC claim (Google なら `sub`、Entra なら `oid`) | 企業運用の推奨。 IdP 上で不変 |
+| 2 | email | JWT の `email` claim | claim 未設定時のフォールバック。 メール変更で別人になる |
+| — | CF の `sub` | JWT の `sub` claim | **監査・セッション相関のみ**。 キーにしない |
+
+上流 IdP の subject を得るには、CF の IdP 設定 (Optional configurations) で
+その claim を **custom OIDC claim として明示追加**する必要がある
+(`spec/setup/cf-access-bypass.md` §1.4)。 どの claim 名を主キーとするかは
+binding の `subject_claim` で指定する。
+
+### 5.2 解決フロー
 
 ```mermaid
 flowchart TD
-    A([検証済みアサーション]) --> B{edge_identities に<br/>sub の行あり?}
-    B -- Yes --> Z([そのユーザ<br/>last_seen_at 更新])
+    A([検証済みアサーション]) --> S[subject を決める<br/>custom[subject_claim] → 無ければ email]
+    S --> B{edge_identities に<br/>subject の行あり?}
+    B -- Yes --> Z([そのユーザ<br/>last_seen_at / cf_sub 更新])
     B -- No --> C{users.email に<br/>一致あり?}
     C -- Yes --> D{provisioning}
     D -- auto / link_only --> E[リンク<br/>edge_identities INSERT] --> Z
@@ -141,10 +163,32 @@ flowchart TD
 | 列 | 値 |
 |---|---|
 | `login` | email ローカル部 (衝突時は連番サフィックス) |
-| `displayName` | `name` claim → 無ければ email ローカル部 |
+| `displayName` | `custom.name` → get-identity の `name` (§5.3) → email ローカル部 |
 | `email` | アサーションの `email` |
 | `passwordHash` | `NULL` (パスワードを持たないアカウント) |
 | `role` | binding の `default_role` (既定 `general`) |
+
+> **`name` は JWT の標準 claim ではない。** CF Access の application token に既定で
+> 入るのは `aud` / `email` / `sub` / `iat` / `exp` / `nbf` / `iss` / `type` /
+> `identity_nonce` / `country` / `custom` だけ。 氏名を使いたければ custom claim の
+> 追加か get-identity 参照が要る。
+
+### 5.3 get-identity (任意・初回リンク時のみ)
+
+custom claim だけでは足りない属性 (氏名・IdP グループ・IdP 種別) が要る場合、
+`https://<team>.cloudflareaccess.com/cdn-cgi/access/get-identity` を
+`CF_Authorization` クッキー付きで呼ぶと完全な identity が返る
+(`name` / `email` / `groups` / `idp.type` / `user_uuid` / `amr` / `geo` /
+`oidc_fields.principalName` / `devicePosture`)。
+
+- 呼ぶのは **Hub** (クッキーを持っているのは Hub 側)。 Cernere へは
+  `auth.edge_assertion` の payload に `identity` として添える。
+- Cernere は **この identity を信頼しない** (署名が無い)。 表示名や IdP 種別など
+  「間違っていても権限に影響しない値」 の補完にだけ使う。 認可判断は必ず
+  アサーション本体の検証結果に基づく。
+- 呼ぶのは **初回リンク時と表示名が空のとき**だけ。 毎リクエストは叩かない。
+- custom claim は Cookie サイズ制限のため **約 1KB でトリム**される (best-effort)。
+  大きい属性 (グループ一覧など) は custom claim ではなく get-identity で取る。
 
 > `users.email` には unique index がある。email 一致リンクを先に試さないと
 > 自動作成が一意制約で落ちる。順序は必須。
@@ -202,15 +246,17 @@ migration は **037 以降**を取る (030〜035 は別途整合作業中のた�
 
 ```sql
 CREATE TABLE IF NOT EXISTS edge_identities (
-  id            uuid PRIMARY KEY,
-  provider      text NOT NULL,              -- 'cf_access'
-  team_domain   text NOT NULL,              -- '<team>.cloudflareaccess.com'
-  subject       text NOT NULL,              -- CF user UUID (不変キー)
-  user_id       uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  email         text,                       -- 最終観測値 (表示・突合用)
-  idp_type      text,                       -- 'azureAD' / 'google' / 'onetimepin' ...
-  last_seen_at  timestamptz,
-  created_at    timestamptz NOT NULL DEFAULT now(),
+  id             uuid PRIMARY KEY,
+  provider       text NOT NULL,             -- 'cf_access'
+  team_domain    text NOT NULL,             -- '<team>.cloudflareaccess.com'
+  subject        text NOT NULL,             -- 紐付けキー (§5.1)
+  subject_source text NOT NULL,             -- 'idp_claim' | 'email'
+  user_id        uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  cf_sub         text,                      -- CF の sub。 監査用 (キーにしない)
+  email          text,                      -- 最終観測値 (表示・突合用)
+  idp_type       text,                      -- 'azureAD' / 'google' / 'onetimepin' ...
+  last_seen_at   timestamptz,
+  created_at     timestamptz NOT NULL DEFAULT now(),
   UNIQUE (provider, team_domain, subject)
 );
 CREATE INDEX IF NOT EXISTS idx_edge_identities_user ON edge_identities (user_id);
@@ -220,6 +266,7 @@ CREATE TABLE IF NOT EXISTS edge_idp_bindings (
   provider              text NOT NULL DEFAULT 'cf_access',
   team_domain           text NOT NULL,
   aud_tags              jsonb NOT NULL,     -- ["<application aud tag>", ...]
+  subject_claim         text,               -- custom claim 名 (例 'sub' / 'oid')。 NULL なら email を主キーにする
   allowed_email_domains jsonb NOT NULL,     -- ["example.co.jp"]
   provisioning          text NOT NULL,      -- 'auto' | 'link_only' | 'invite_only'
   default_role          text NOT NULL DEFAULT 'general',
@@ -266,7 +313,14 @@ binding の変更は **破壊的操作**として Action authentication (passkey
 ### テスト (最低ライン)
 
 署名不正 / `aud` 不一致 / 期限切れ / サービストークン / ドメイン外 / binding 無効 /
-自動作成 / email リンク / `sub` 既存リンクの再訪 — の 9 ケース。
+自動作成 / email リンク / 既存リンクの再訪 — の 9 ケース。
+
+加えて subject 決定まわり:
+
+- `subject_claim` 設定時に `custom` へ当該 claim が無ければ email フォールバックに落ちること
+- CF の `sub` が変わっても (削除→再追加のシミュレーション) 同一ユーザに解決されること
+- `identity` (get-identity 由来) に細工した `email` を入れても、認可判断が
+  アサーション本体の `email` に基づくこと (署名なし入力を信頼しない回帰テスト)
 
 ---
 

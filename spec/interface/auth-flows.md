@@ -228,7 +228,7 @@ sequenceDiagram
     CF->>SS: 転送 + Header: Cf-Access-Jwt-Assertion
     SS->>CS: WS { module:"auth", action:"edge_assertion",<br/>  payload:{ assertion } }
     CS->>CS: team JWKS で署名検証 / iss / aud / exp<br/>サービストークン拒否 / email ドメイン検査
-    CS->>CS: edge_identities で sub → user 解決<br/>(未登録なら policy に従い link / 自動作成)
+    CS->>CS: edge_identities で subject → user 解決<br/>(subject = custom claim の IdP subject、無ければ email)<br/>未登録なら policy に従い link / 自動作成
     CS->>CS: issueAuthCode + ensureUserProjectRow
     CS-->>SS: { authCode }
     SS->>CS: POST /api/auth/exchange { code }
@@ -237,6 +237,8 @@ sequenceDiagram
 
 - 前提: Hub の origin が **CF 経由でしか到達できない**こと (直接到達可能ならヘッダ偽装で成りすまし可)
 - Cernere は Hub の主張ではなく**生アサーションを自分で検証**する
+- 紐付けキーは **上流 IdP の subject** (custom OIDC claim)。 CF の `sub` は email 単位かつ
+  削除→再追加で変わるためキーにしない
 - 端末本人確認 (identity-verification) は既定で省略。破壊的操作の passkey step-up は据え置き
 - refresh 時もアサーション再提示を要求し、offboarding を最大 60 分で反映する
 

@@ -45,7 +45,38 @@ Zero Trust → Access → Applications → Add an application → Self-hosted。
 > ([`oidc-provider.md`](../feature/oidc-provider.md) の設定)。本経路は上流 IdP を
 > 問わないので、その場合も Cernere 側の設定は同じ。
 
-### 1.3 team domain
+### 1.3 custom OIDC claims (紐付けキーと氏名)
+
+CF Access の application token に既定で入るのは `aud` / `email` / `sub` / `iat` /
+`exp` / `nbf` / `iss` / `type` / `identity_nonce` / `country` / `custom` だけで、
+**氏名すら入らない**。 また CF の `sub` は「アカウント内で email ごとに一意」で、
+ユーザの削除→再追加や別組織ログインで **変わる** ため永続キーにできない。
+
+Zero Trust → Settings → Authentication → Login methods → 当該 IdP →
+**Optional configurations → Custom OIDC claims** に、少なくとも次を追加する。
+
+| IdP | 追加する claim | 用途 |
+|---|---|---|
+| Google Workspace | `sub` | **紐付けキー** (Google 上で不変) |
+| Google Workspace | `name` (任意) | 表示名 |
+| Microsoft Entra ID | `oid` | 紐付けキー |
+| Okta / 汎用 OIDC | `sub` | 紐付けキー |
+
+追加した claim は JWT の `custom` に入る。 **Cookie サイズ制限のため約 1KB で
+トリムされる** (best-effort) ので、 グループ一覧のような大きい属性は custom claim に
+載せず get-identity で取る。
+
+> **上流 IdP の client_id / access_token は origin に来ない。** JWT の `aud` は
+> Access アプリの AUD tag であり、 `common_name` は CF サービストークンの Client ID。
+> Google API を叩きたい場合は CF Access とは別に OAuth 連携が要る
+> (Cernere の Google 連携 = [`../interface/oauth-token-storage.md`](../interface/oauth-token-storage.md))。
+
+氏名・グループ・IdP 種別まで欲しい場合は、 Hub が `CF_Authorization` クッキー付きで
+`https://<team>.cloudflareaccess.com/cdn-cgi/access/get-identity` を叩き、
+`auth.edge_assertion` の `identity` に添える (署名が無いので表示名等の補完のみに使う。
+[`../feature/edge-assertion-login.md`](../feature/edge-assertion-login.md) §5.3)。
+
+### 1.4 team domain
 
 `https://<team>.cloudflareaccess.com` が team domain。JWKS は
 `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs` に公開される。
@@ -62,6 +93,7 @@ admin セッションで WS module `edge_idp` の `register` を呼ぶ。
     "projectKey": "<hub の project key>",
     "teamDomain": "<team>.cloudflareaccess.com",
     "audTags": ["<Application AUD Tag>"],
+    "subjectClaim": "sub",                 // §1.3 で追加した custom claim 名。省略すると email が主キーになる
     "allowedEmailDomains": ["example.co.jp"],
     "provisioning": "auto",            // auto | link_only | invite_only
     "defaultRole": "general"
@@ -76,6 +108,10 @@ admin セッションで WS module `edge_idp` の `register` を呼ぶ。
 
 `allowedEmailDomains` は空にできない。CF 側ポリシーの設定ミスに対する二重化なので、
 「CF で絞っているから不要」という理由で空にしない。
+
+`subjectClaim` を省略すると email が紐付けキーになる。この場合、**社員のメールアドレス
+変更が「別人の新規アカウント」になる**。企業運用では §1.3 の custom claim を設定して
+IdP 側の不変 ID を指定すること。
 
 ---
 
