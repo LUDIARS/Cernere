@@ -45,26 +45,32 @@ Zero Trust → Access → Applications → Add an application → Self-hosted。
 > ([`oidc-provider.md`](../feature/oidc-provider.md) の設定)。本経路は上流 IdP を
 > 問わないので、その場合も Cernere 側の設定は同じ。
 
-### 1.3 custom OIDC claims (紐付けキーと氏名)
+### 1.3 custom OIDC claims (任意)
 
-CF Access の application token に既定で入るのは `aud` / `email` / `sub` / `iat` /
-`exp` / `nbf` / `iss` / `type` / `identity_nonce` / `country` / `custom` だけで、
-**氏名すら入らない**。 また CF の `sub` は「アカウント内で email ごとに一意」で、
-ユーザの削除→再追加や別組織ログインで **変わる** ため永続キーにできない。
+**アカウントの正本キーは email なので、この設定は無くても動く。**
+([`../feature/edge-assertion-login.md`](../feature/edge-assertion-login.md) §5.1)
+
+設定すると **社員のメールアドレス変更 (姓変更・ドメイン統合) に追従できる**ように
+なる。 未設定だとアドレス変更は新規アカウント扱いになる。
 
 Zero Trust → Settings → Authentication → Login methods → 当該 IdP →
-**Optional configurations → Custom OIDC claims** に、少なくとも次を追加する。
+**Optional configurations → Custom OIDC claims**:
 
 | IdP | 追加する claim | 用途 |
 |---|---|---|
-| Google Workspace | `sub` | **紐付けキー** (Google 上で不変) |
-| Google Workspace | `name` (任意) | 表示名 |
-| Microsoft Entra ID | `oid` | 紐付けキー |
-| Okta / 汎用 OIDC | `sub` | 紐付けキー |
+| Google Workspace | `sub` | email 変更への追従 (Google 上で不変) |
+| Microsoft Entra ID | `oid` | 同上 |
+| Okta / 汎用 OIDC | `sub` | 同上 |
 
 追加した claim は JWT の `custom` に入る。 **Cookie サイズ制限のため約 1KB で
 トリムされる** (best-effort) ので、 グループ一覧のような大きい属性は custom claim に
 載せず get-identity で取る。
+
+> **CF の `sub` は紐付けに使えない。** 「アカウント内で email ごとに一意」であり、
+> ユーザの削除→再追加や別組織ログインで値が変わる。
+>
+> **表示名の claim (`name` 等) を足す必要は無い。** 表示名の初期値は email の
+> `@` より前で作り、 ユーザが後から変更できる (§5.2.2)。
 
 > **上流 IdP の client_id / access_token は origin に来ない。** JWT の `aud` は
 > Access アプリの AUD tag であり、 `common_name` は CF サービストークンの Client ID。
@@ -124,7 +130,7 @@ admin セッションで WS module `edge_idp` の `register` を呼ぶ。
     "projectKey": "<hub の project key>",
     "teamDomain": "<team>.cloudflareaccess.com",
     "audTags": ["<Application AUD Tag>"],
-    "subjectClaim": "sub",                 // §1.3 で追加した custom claim 名。省略すると email が主キーになる
+    "subjectClaim": "sub",                 // §1.3 の custom claim 名 (任意)。省略すると email だけで解決する
     "allowedEmailDomains": ["example.co.jp"],
     "adminGroups": [],                     // 明示列挙したグループだけ Cernere role=admin へ昇格 (既定は昇格なし)
     "fetchIdentity": true,                 // get-identity で user_uuid/name/groups を取る (既定 true)
@@ -142,9 +148,9 @@ admin セッションで WS module `edge_idp` の `register` を呼ぶ。
 `allowedEmailDomains` は空にできない。CF 側ポリシーの設定ミスに対する二重化なので、
 「CF で絞っているから不要」という理由で空にしない。
 
-`subjectClaim` を省略すると email が紐付けキーになる。この場合、**社員のメールアドレス
-変更が「別人の新規アカウント」になる**。企業運用では §1.3 の custom claim を設定して
-IdP 側の不変 ID を指定すること。
+`subjectClaim` は任意。設定すると**社員のメールアドレス変更に追従**でき、省略すると
+アドレス変更が新規アカウント扱いになる。IdP 移行 (Google Workspace → Entra 等) には
+どちらの設定でも email 一致で耐える。
 
 ---
 
@@ -206,7 +212,20 @@ curl -s https://<team>.cloudflareaccess.com/cdn-cgi/access/certs | jq '.keys | l
 
 - **CF Access の policy を緩めると Cernere のアカウントが自動生成される** (`auto` の場合)。
   policy 変更は `allowedEmailDomains` とセットで見直す。
-- 社員の退職時は IdP 側で無効化すれば CF を通れなくなる。Cernere 側のユーザ行は残るので、
-  棚卸しは `edge_identities.last_seen_at` を見る。
+- **退職者のデータは削除する。** IdP 側で無効化すれば CF は通れなくなるが、Cernere 側の
+  個人データはそのままなので、棚卸しして消す:
+
+  ```jsonc
+  { "module": "edge_idp", "action": "stale_identities", "payload": { "days": 90 } }
+  // → email / 表示名 / 最終ログイン日の一覧が返る。退職者を確認して:
+  { "module": "edge_idp", "action": "purge_user",
+    "payload": { "userId": "...", "confirmEmail": "taro@example.co.jp" } }
+  // step-up (passkey) 必須。users / edge_identities / project_data_<key> を削除し、
+  // operation_logs は監査のため残す。
+  ```
+
+  これにより、同じアドレスを後任者が引き継いでも**前任者のアカウントを掴まない**
+  (新規ユーザとして作られる)。逆に削除しないまま放置すると引き継いでしまうので、
+  棚卸しは運用に組み込むこと。
 - CF の署名鍵ローテーションは JWKS 側で自動追従する (未知 `kid` で 1 回だけ再取得)。
 - Hub のドメインを変えると AUD Tag も変わる。binding の `audTags` を更新すること。
