@@ -1,6 +1,6 @@
 # 認証フロー一覧
 
-Cernere がサポートする 5 種類の認証経路。すべて最終的に **HS256 JWT (`JWT_SECRET`)** で署名される。
+Cernere がサポートする 6 種類の認証経路。すべて最終的に **HS256 JWT (`JWT_SECRET`)** で署名される。
 
 > **別経路 — user×project token は PASETO Ed25519**: 「ログイン中ユーザ × 参照先 project」の短命トークン (`POST /api/auth/project-token`) は本表の 5 経路とは別物で、**PASETO Ed25519 (公開鍵署名・`aud` 必須)** で署名する。マスタ `JWT_SECRET` で署名する旧 HS256 フォールバックは、鍵の leaf 横展開と `aud` 無し横断偽造を許すため撤去した。詳細は [../setup/service-registration.md](../setup/service-registration.md) §3。
 
@@ -12,6 +12,7 @@ Cernere がサポートする 5 種類の認証経路。すべて最終的に **
 | project launch | launcher project credential | 起動対象project credential | Excubitorによる起動時rotate |
 | [tool](#4-tool-client-credentials) | client_id + client_secret | tool token | CLI / API ツール認証 |
 | [composite](#5-composite-埋め込みログイン) | email + pw + デバイス本人確認 | one-time authCode | サービス内 SPA 埋め込みログイン |
+| [edge assertion](#6-edge-assertion-エッジ認証のバイパス) | 上流エッジの署名済みアサーション (Cloudflare Access JWT) | one-time authCode | 企業 SSO 配下の Hub (再ログイン無し) |
 
 ---
 
@@ -206,6 +207,43 @@ sequenceDiagram
 - `device_challenge` Redis TTL: 10 分、最大 5 回試行
 - `authCode` 発行 → `/api/auth/exchange` で one-time 交換 → `accessToken`/`refreshToken`
 - 経路A の `projectKey` は [user-project-row.md](user-project-row.md) の自動 row 初期化に使われる
+
+## 6. edge assertion (エッジ認証のバイパス)
+
+**Status: Proposed** — 詳細は [../feature/edge-assertion-login.md](../feature/edge-assertion-login.md)。
+
+Cloudflare Access など上流エッジで本人確認済みのアサーションを Cernere が検証し、
+再ログイン無しで Cernere セッションを発行する経路。project WS 限定
+(`module:"auth", action:"edge_assertion"`) で、REST は公開しない。
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as ブラウザ
+    participant CF as Cloudflare Access
+    participant SS as Hub (Corpus)
+    participant CS as Cernere Server
+
+    U->>CF: GET https://hub.example.com/
+    CF->>SS: 転送 + Header: Cf-Access-Jwt-Assertion
+    SS->>CS: WS { module:"auth", action:"edge_assertion",<br/>  payload:{ assertion } }
+    CS->>CS: team JWKS で署名検証 / iss / aud / exp<br/>サービストークン拒否 / email ドメイン検査
+    CS->>CS: edge_identities で user 解決<br/>(IdP subject → email の順。正本キーは email)<br/>未登録なら policy に従い link / 自動作成
+    CS->>CS: issueAuthCode + ensureUserProjectRow
+    CS-->>SS: { authCode }
+    SS->>CS: POST /api/auth/exchange { code }
+    CS-->>SS: { accessToken, refreshToken, user }
+```
+
+- 前提: Hub の origin が **CF 経由でしか到達できない**こと (直接到達可能ならヘッダ偽装で成りすまし可)
+- Cernere は Hub の主張ではなく**生アサーションを自分で検証**する
+- アカウントの正本キーは **email**。 IdP subject (custom OIDC claim、任意) を副次インデックスに
+  持ち、 email 変更に追従する。 CF の `sub` は email 単位かつ削除→再追加で変わるため使わない
+- 表示名の初期値は email の `@` より前。 ユーザが変更したら以後は自動上書きしない
+- 退職者の個人データは無効化ではなく **削除**する (アドレス再利用時に前任者のアカウントを
+  掴まないため)
+- 端末本人確認 (identity-verification) は既定で省略。破壊的操作の passkey step-up は据え置き
+- refresh 時もアサーション再提示を要求し、offboarding を最大 60 分で反映する
 
 ## 共通: トークン交換 (exchange)
 
