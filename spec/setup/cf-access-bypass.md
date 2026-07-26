@@ -71,7 +71,7 @@ Zero Trust → Settings → Authentication → Login methods → 当該 IdP →
 > Google API を叩きたい場合は CF Access とは別に OAuth 連携が要る
 > (Cernere の Google 連携 = [`../interface/oauth-token-storage.md`](../interface/oauth-token-storage.md))。
 
-### 1.4 グループ取得 (Google Workspace)
+### 1.4 グループ取得 (Google Workspace) — グループを使う場合だけ
 
 `user_uuid` / `name` / `groups` は **get-identity から既定で取得する**
 ([`../feature/edge-assertion-login.md`](../feature/edge-assertion-login.md) §5.3)。
@@ -82,6 +82,12 @@ Zero Trust → Settings → Authentication → Login methods → 当該 IdP →
 | `name` | **不要** (Google Workspace ログインなら入る) |
 | `amr` / `idp.type` / `geo` | **不要** |
 | **`groups`** | **必要** — 下記のグループ連携設定 |
+
+> **グループを使わないなら本節は丸ごとスキップしてよい。** その場合 CF / Google 側の
+> 追加設定はゼロで、プレーンな Google IdP でも動く。 get-identity は既定で有効のまま
+> にしておくこと (`name` は JWT の標準 claim ではないので、 追加設定ゼロで氏名を取れる
+> のはこの経路だけ)。 CF への往復自体を避けたい場合は §2 の `fetchIdentity: false` と
+> §1.3 の `name` custom claim を組み合わせる。
 
 グループを取るには Google Workspace 側と CF 側の両方で設定が要る。
 
@@ -121,6 +127,7 @@ admin セッションで WS module `edge_idp` の `register` を呼ぶ。
     "subjectClaim": "sub",                 // §1.3 で追加した custom claim 名。省略すると email が主キーになる
     "allowedEmailDomains": ["example.co.jp"],
     "adminGroups": [],                     // 明示列挙したグループだけ Cernere role=admin へ昇格 (既定は昇格なし)
+    "fetchIdentity": true,                 // get-identity で user_uuid/name/groups を取る (既定 true)
     "provisioning": "auto",            // auto | link_only | invite_only
     "defaultRole": "general"
   } }
@@ -188,7 +195,8 @@ curl -s https://<team>.cloudflareaccess.com/cdn-cgi/access/certs | jq '.keys | l
 `edge_identities` 行と `project_data_<key>` の行が生成される。
 
 `edge_identities` の `cf_user_uuid` / `groups` / `idp_type` が埋まっていることも
-確認する。`groups` が空のままなら §1.4 のグループ連携が未設定
+確認する (グループを使わない構成なら `groups` は空で正常)。グループを使う構成で
+`groups` が空のままなら §1.4 のグループ連携が未設定
 (ブラウザで `https://hub.example.com/cdn-cgi/access/get-identity` を開くと、
 そのセッションで CF が返す identity をそのまま目視できる)。
 

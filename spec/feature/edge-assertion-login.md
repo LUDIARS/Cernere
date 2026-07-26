@@ -182,7 +182,8 @@ flowchart TD
 
 アサーション検証に成功したら、Cernere は続けて
 `https://<team>.cloudflareaccess.com/cdn-cgi/access/get-identity` を呼び、
-`user_uuid` / `name` / `groups` を取得する。 これは任意ではなく **基本挙動**とする。
+`user_uuid` / `name` / `groups` を取得する。 これは任意ではなく **基本挙動**とする
+(binding の `fetch_identity`、既定 `true`)。
 
 返る主なフィールド:
 
@@ -226,6 +227,24 @@ get-identity が失敗した場合、**認証自体は継続**する (subject �
   取得失敗時に前回値を流用しない (offboarding 直後の権限残留を防ぐ)
 - 表示名は `custom.name` → email ローカル部 にフォールバック
 - 失敗は `operation_logs` に記録する
+
+#### グループが要らない場合
+
+グループを使わない構成では **CF / Google 側の追加設定は一切要らない**
+(`spec/setup/cf-access-bypass.md` §1.4 をスキップできる。 プレーンな Google IdP でも動く)。
+それでも get-identity は既定で有効のままにしておく — `name` は JWT の標準 claim では
+ないため、**追加設定ゼロで氏名を取れる唯一の経路**がこれだから。
+
+CF への往復自体を避けたい場合だけ `fetch_identity = false` にする。 その場合:
+
+| | `fetch_identity = true` (既定) | `fetch_identity = false` |
+|---|---|---|
+| CF 側の設定 | 不要 (グループを使う場合のみ §1.4) | `name` を custom OIDC claim に追加する必要がある |
+| ログイン毎の外部通信 | CF へ 1 往復 (`identity_nonce` でキャッシュ) | 無し |
+| 表示名 | get-identity の `name` | `custom.name` → email ローカル部 |
+| `groups` / `cf_user_uuid` | 取得する | 常に空 |
+
+`fetch_identity = false` のとき、Hub は `cfAuthorization` を送らなくてよい。
 
 #### 権限への反映
 
@@ -323,6 +342,7 @@ CREATE TABLE IF NOT EXISTS edge_idp_bindings (
   provisioning          text NOT NULL,      -- 'auto' | 'link_only' | 'invite_only'
   default_role          text NOT NULL DEFAULT 'general',
   admin_groups          jsonb NOT NULL DEFAULT '[]', -- 明示列挙したときだけ role=admin へ昇格 (§5.3)
+  fetch_identity        boolean NOT NULL DEFAULT true, -- get-identity を呼ぶか (§5.3)
 
   require_device_check  boolean NOT NULL DEFAULT false,
   is_active             boolean NOT NULL DEFAULT true,
