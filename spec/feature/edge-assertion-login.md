@@ -84,14 +84,18 @@ REST エンドポイントは生やさない。**project WS (`/ws/project`) 限�
 { "type": "module_request", "module": "auth", "action": "edge_assertion",
   "payload": {
     "assertion": "<CF Access JWT>",
-    "identity": { /* 任意 — Hub が get-identity で取った補完属性 (§5.3)。署名が無いので表示名等にしか使わない */ },
+    "cfAuthorization": "<CF_Authorization クッキーの値>",  // §5.3 の get-identity に使う
     "fingerprint": { /* 任意 */ },
     "ip": "..."
   } }
 
 // response
 { "type": "module_response", "module": "auth", "action": "edge_assertion",
-  "payload": { "authCode": "<uuid>" } }
+  "payload": {
+    "authCode": "<uuid>",
+    // Hub 側の認可判断用。 Cernere の system role には昇格させていない (§5.3)
+    "groups": [{ "id": "...", "name": "engineering" }]
+  } }
 ```
 
 projectKey は WS セッションから自動付与される (composite の `auth.login` と同じ扱い)。
@@ -110,7 +114,8 @@ projectKey は WS セッションから自動付与される (composite の `aut
 | 7 | `common_name` を持つ / `sub` が空 = **サービストークン** は拒否 | `service_token` |
 | 8 | `email` のドメインが `allowed_email_domains` に含まれる | `domain` |
 | 9 | rate limit `edge_assertion:<projectKey>:<sub>` 5 分 30 回 | `rate_limited` |
-| 10 | ID 解決 / プロビジョニング可否 (§5) | `not_provisioned` |
+| 10 | get-identity を実行し、返った `email` がアサーションの `email` と一致すること (§5.3) | `identity_mismatch` |
+| 11 | ID 解決 / プロビジョニング可否 (§5) | `not_provisioned` |
 
 成功・失敗とも `operation_logs` に記録する。
 
@@ -163,7 +168,7 @@ flowchart TD
 | 列 | 値 |
 |---|---|
 | `login` | email ローカル部 (衝突時は連番サフィックス) |
-| `displayName` | `custom.name` → get-identity の `name` (§5.3) → email ローカル部 |
+| `displayName` | get-identity の `name` (§5.3) → `custom.name` → email ローカル部 |
 | `email` | アサーションの `email` |
 | `passwordHash` | `NULL` (パスワードを持たないアカウント) |
 | `role` | binding の `default_role` (既定 `general`) |
@@ -173,22 +178,67 @@ flowchart TD
 > `identity_nonce` / `country` / `custom` だけ。 氏名を使いたければ custom claim の
 > 追加か get-identity 参照が要る。
 
-### 5.3 get-identity (任意・初回リンク時のみ)
+### 5.3 identity 取得 (get-identity) — **既定で実行する**
 
-custom claim だけでは足りない属性 (氏名・IdP グループ・IdP 種別) が要る場合、
-`https://<team>.cloudflareaccess.com/cdn-cgi/access/get-identity` を
-`CF_Authorization` クッキー付きで呼ぶと完全な identity が返る
-(`name` / `email` / `groups` / `idp.type` / `user_uuid` / `amr` / `geo` /
-`oidc_fields.principalName` / `devicePosture`)。
+アサーション検証に成功したら、Cernere は続けて
+`https://<team>.cloudflareaccess.com/cdn-cgi/access/get-identity` を呼び、
+`user_uuid` / `name` / `groups` を取得する。 これは任意ではなく **基本挙動**とする。
 
-- 呼ぶのは **Hub** (クッキーを持っているのは Hub 側)。 Cernere へは
-  `auth.edge_assertion` の payload に `identity` として添える。
-- Cernere は **この identity を信頼しない** (署名が無い)。 表示名や IdP 種別など
-  「間違っていても権限に影響しない値」 の補完にだけ使う。 認可判断は必ず
-  アサーション本体の検証結果に基づく。
-- 呼ぶのは **初回リンク時と表示名が空のとき**だけ。 毎リクエストは叩かない。
-- custom claim は Cookie サイズ制限のため **約 1KB でトリム**される (best-effort)。
-  大きい属性 (グループ一覧など) は custom claim ではなく get-identity で取る。
+返る主なフィールド:
+
+| フィールド | 用途 |
+|---|---|
+| `user_uuid` | CF 上のユーザ識別子。 `edge_identities.cf_user_uuid` に保存 (監査用) |
+| `name` | 表示名。 `users.display_name` の解決に使う |
+| `groups` | IdP グループ (`[{id, name}]`)。 `edge_identities.groups` に保存し、Hub へ返す |
+| `email` | アサーションの `email` と照合。 不一致なら拒否 (`reason:"identity_mismatch"`) |
+| `idp.type` | `google` / `azureAD` / `onetimepin` 等。 `edge_identities.idp_type` に保存 |
+| `amr` | 認証手段。 監査ログに残す |
+
+#### 誰が呼ぶか — Cernere が呼ぶ
+
+**Hub が取得した identity JSON を受け取る形にはしない。** その JSON には署名が無く、
+groups が認可に効く以上、Hub 側の細工や事故で権限が湧く経路になるため。
+
+Hub は `auth.edge_assertion` の payload に **`cfAuthorization` (CF_Authorization
+クッキーの値) をそのまま転送**し、Cernere が自分で CF へ問い合わせる。
+Cernere から見た信頼の根拠は「CF の TLS 応答」であり、Hub の主張ではない
+(§2-3 の原則と一致する)。
+
+#### キャッシュ
+
+アサーションの `identity_nonce` は CF が
+「a cache key used to get the user's identity」と定義している claim なので、
+そのままキャッシュキーに使う。
+
+| キー | 内容 | TTL |
+|---|---|---|
+| `edge:identity:<identity_nonce>` | get-identity のレスポンス | 600s |
+
+同一セッション中の再ログイン・refresh では CF を叩き直さない。
+
+#### 失敗時 (fail-open は enrichment に限る)
+
+get-identity が失敗した場合、**認証自体は継続**する (subject と email は署名済み
+アサーションから取れているため)。 ただし:
+
+- `groups` は **空として扱う** — グループが取れないことで権限が増えてはならない。
+  取得失敗時に前回値を流用しない (offboarding 直後の権限残留を防ぐ)
+- 表示名は `custom.name` → email ローカル部 にフォールバック
+- 失敗は `operation_logs` に記録する
+
+#### 権限への反映
+
+`groups` は Cernere の system role (`admin` / `general`) へ**自動昇格させない**。
+IdP のグループ名変更が Cernere の管理権限に直結すると事故が大きいため。
+
+- Cernere は groups を保存し、`auth.edge_assertion` のレスポンスに含めて Hub へ返す。
+  Hub 側の認可 (Corpus の admin 判定など) はそれを見て決める
+- Cernere の role を groups で決めたい場合は binding の `admin_groups` に
+  グループ名を明示列挙したときだけ有効にする (opt-in)
+
+> custom claim は Cookie サイズ制限のため **約 1KB でトリム**される (best-effort)。
+> グループ一覧のような大きい属性は custom claim ではなく get-identity で取ること。
 
 > `users.email` には unique index がある。email 一致リンクを先に試さないと
 > 自動作成が一意制約で落ちる。順序は必須。
@@ -253,8 +303,10 @@ CREATE TABLE IF NOT EXISTS edge_identities (
   subject_source text NOT NULL,             -- 'idp_claim' | 'email'
   user_id        uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   cf_sub         text,                      -- CF の sub。 監査用 (キーにしない)
+  cf_user_uuid   text,                      -- get-identity の user_uuid。 監査用
   email          text,                      -- 最終観測値 (表示・突合用)
   idp_type       text,                      -- 'azureAD' / 'google' / 'onetimepin' ...
+  groups         jsonb NOT NULL DEFAULT '[]', -- get-identity の groups (最終観測値)
   last_seen_at   timestamptz,
   created_at     timestamptz NOT NULL DEFAULT now(),
   UNIQUE (provider, team_domain, subject)
@@ -270,6 +322,8 @@ CREATE TABLE IF NOT EXISTS edge_idp_bindings (
   allowed_email_domains jsonb NOT NULL,     -- ["example.co.jp"]
   provisioning          text NOT NULL,      -- 'auto' | 'link_only' | 'invite_only'
   default_role          text NOT NULL DEFAULT 'general',
+  admin_groups          jsonb NOT NULL DEFAULT '[]', -- 明示列挙したときだけ role=admin へ昇格 (§5.3)
+
   require_device_check  boolean NOT NULL DEFAULT false,
   is_active             boolean NOT NULL DEFAULT true,
   created_at            timestamptz NOT NULL DEFAULT now()
@@ -305,6 +359,7 @@ binding の変更は **破壊的操作**として Action authentication (passkey
 |---|---|
 | JWKS 取得/キャッシュ | `server/src/auth/edge-jwks.ts` |
 | アサーション検証 + ID 解決 | `server/src/auth/edge-assertion.ts` |
+| get-identity 取得 + nonce キャッシュ | `server/src/auth/edge-identity.ts` |
 | binding ストア | `server/src/project/edge-bindings.ts` |
 | WS 配線 | `server/src/ws/project-dispatch.ts` (`auth.edge_assertion` を 1 case 追加) |
 | 管理 module | `server/src/commands.ts` (`edge_idp`) |
@@ -319,8 +374,15 @@ binding の変更は **破壊的操作**として Action authentication (passkey
 
 - `subject_claim` 設定時に `custom` へ当該 claim が無ければ email フォールバックに落ちること
 - CF の `sub` が変わっても (削除→再追加のシミュレーション) 同一ユーザに解決されること
-- `identity` (get-identity 由来) に細工した `email` を入れても、認可判断が
-  アサーション本体の `email` に基づくこと (署名なし入力を信頼しない回帰テスト)
+
+get-identity まわり (§5.3):
+
+- 同一 `identity_nonce` で 2 回呼んでも CF への問い合わせが 1 回で済むこと
+- get-identity 失敗時に **認証は成功し、`groups` が空**になること
+  (前回値を流用しない = offboarding 直後に権限が残らない)
+- get-identity の `email` がアサーションの `email` と食い違う場合に拒否されること
+- `admin_groups` 未設定なら、どのグループに属していても `role` が `admin` に
+  昇格しないこと
 
 ---
 

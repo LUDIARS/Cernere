@@ -71,12 +71,37 @@ Zero Trust → Settings → Authentication → Login methods → 当該 IdP →
 > Google API を叩きたい場合は CF Access とは別に OAuth 連携が要る
 > (Cernere の Google 連携 = [`../interface/oauth-token-storage.md`](../interface/oauth-token-storage.md))。
 
-氏名・グループ・IdP 種別まで欲しい場合は、 Hub が `CF_Authorization` クッキー付きで
-`https://<team>.cloudflareaccess.com/cdn-cgi/access/get-identity` を叩き、
-`auth.edge_assertion` の `identity` に添える (署名が無いので表示名等の補完のみに使う。
-[`../feature/edge-assertion-login.md`](../feature/edge-assertion-login.md) §5.3)。
+### 1.4 グループ取得 (Google Workspace)
 
-### 1.4 team domain
+`user_uuid` / `name` / `groups` は **get-identity から既定で取得する**
+([`../feature/edge-assertion-login.md`](../feature/edge-assertion-login.md) §5.3)。
+
+| 取得したいもの | CF 側の追加設定 |
+|---|---|
+| `user_uuid` | **不要** |
+| `name` | **不要** (Google Workspace ログインなら入る) |
+| `amr` / `idp.type` / `geo` | **不要** |
+| **`groups`** | **必要** — 下記のグループ連携設定 |
+
+グループを取るには Google Workspace 側と CF 側の両方で設定が要る。
+
+1. Google Cloud Platform で **Admin SDK API を有効化**する。
+2. OAuth クライアント (認証情報) を作成する。
+3. Google 管理コンソールで **「内部アプリを信頼」(Trust internal apps)** を有効にする。
+4. Cloudflare One の Google Workspace IdP 設定に、作成した認証情報を登録する。
+5. 保存後に **生成されるリンクを開き、Google Workspace 管理者として権限を承認する**
+   (自分が管理者でない場合は管理者にリンクを共有する)。
+6. Integrations → Identity providers → Google Workspace の **Test** を実行し、
+   ユーザ identity と **グループが返ること**を確認する。
+
+> **プレーンな Google IdP (非 Workspace) ではグループを取得できない。**
+> グループが要るなら Google Workspace 統合を使うこと。
+
+get-identity の呼び出し自体に追加設定は要らない (Access アプリがあれば動く)。
+呼ぶのは **Cernere** で、Hub は `CF_Authorization` クッキーの値を転送するだけ
+(署名の無い identity JSON を Hub から受け取らないため)。
+
+### 1.5 team domain
 
 `https://<team>.cloudflareaccess.com` が team domain。JWKS は
 `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs` に公開される。
@@ -95,6 +120,7 @@ admin セッションで WS module `edge_idp` の `register` を呼ぶ。
     "audTags": ["<Application AUD Tag>"],
     "subjectClaim": "sub",                 // §1.3 で追加した custom claim 名。省略すると email が主キーになる
     "allowedEmailDomains": ["example.co.jp"],
+    "adminGroups": [],                     // 明示列挙したグループだけ Cernere role=admin へ昇格 (既定は昇格なし)
     "provisioning": "auto",            // auto | link_only | invite_only
     "defaultRole": "general"
   } }
@@ -160,6 +186,11 @@ curl -s https://<team>.cloudflareaccess.com/cdn-cgi/access/certs | jq '.keys | l
 ブラウザで `https://hub.example.com/` → 企業 IdP のログイン → **Hub のログイン画面を
 経ずに** そのままダッシュボードが表示されれば成功。Cernere 側では該当ユーザの
 `edge_identities` 行と `project_data_<key>` の行が生成される。
+
+`edge_identities` の `cf_user_uuid` / `groups` / `idp_type` が埋まっていることも
+確認する。`groups` が空のままなら §1.4 のグループ連携が未設定
+(ブラウザで `https://hub.example.com/cdn-cgi/access/get-identity` を開くと、
+そのセッションで CF が返す identity をそのまま目視できる)。
 
 ---
 
