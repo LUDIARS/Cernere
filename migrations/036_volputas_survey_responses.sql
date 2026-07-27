@@ -1,6 +1,9 @@
 -- Volputas owns survey definitions; Cernere owns each authenticated user's answers.
 -- 036 intentionally skips locally reserved WIP numbers 030-035 to avoid parallel
 -- migration collisions before those branches are integrated.
+-- Those WIP migrations have since been reconciled: 032/033/034 were dropped as
+-- superseded by this file, and 030/031/035 were renumbered to 038/039/040.
+-- See migrations/README.md.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
