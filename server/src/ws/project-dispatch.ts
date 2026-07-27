@@ -46,6 +46,30 @@ export async function dispatchProjectCommand(
     case "profile.update":
       return updateUserProfile(payload as ProfileUpdateParams);
     // ─── auth (embedded SPA login for mobile; CORS-free via project WS) ───
+    // ─── edge assertion (Cloudflare Access バイパス、 spec/feature/edge-assertion-login.md) ───
+    // Hub から生アサーションを受け取り、 Cernere 自身が CF の JWKS で検証する。
+    // Hub の主張は信用しない。 REST は生やさず project WS 限定にしてある。
+    case "auth.edge_assertion": {
+      const { authenticateEdgeAssertion, EdgeAssertionError } = await import("../auth/edge-assertion.js");
+      const { ensureUserProjectRow } = await import("../project/service.js");
+      try {
+        const result = await authenticateEdgeAssertion({
+          projectKey,
+          assertion: requireStr(payload, "assertion"),
+          cfAuthorization: typeof payload.cfAuthorization === "string"
+            ? payload.cfAuthorization
+            : undefined,
+        });
+        // composite と同じく、 認証成立時に project_data_<key> の行を確保する。
+        await ensureUserProjectRow(result.userId, projectKey);
+        return { authCode: result.authCode, groups: result.groups };
+      } catch (err) {
+        if (err instanceof EdgeAssertionError) {
+          throw new Error(`edge_assertion_rejected: ${err.reason}`);
+        }
+        throw err;
+      }
+    }
     case "auth.login":
     case "auth.register":
     case "auth.mfa-verify": {

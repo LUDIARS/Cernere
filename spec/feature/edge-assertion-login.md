@@ -353,43 +353,37 @@ Cernere は退職を能動的に知らない (IdP から消えても Cernere に
 
 #### 削除範囲
 
+実体は既存の `deleteUserAccount()` (`server/src/project/service.ts`) を再利用する。
+同じ削除経路を二重に作らない。
+
 | 対象 | 扱い |
 |---|---|
-| `users` 行 | **削除**。 FK cascade で `refresh_sessions` / `passkeys` / `trusted_devices` / `edge_identities` も消える |
-| `project_data_<key>` の行 | **削除** (全 project 横断) |
-| `operation_logs` | **残す**。 監査記録のため。 ただし残るのは `user_id` (UUID) だけで、 email や氏名は `users` 削除で消える |
+| `users` 行 | **削除**。 FK cascade で `refresh_sessions` / `passkeys` / `trusted_devices` / `edge_identities` / `project_data_<key>` も消える |
+| `operation_logs` | **削除**。 `params` に PII / token が入り得るため、 「個人データを消す」 操作で監査行だけ残すのは筋が通らない (既存の right-to-be-forgotten 方針に合わせる) |
+| `project_definition_history.applied_by` | **NULL 化**。 admin 操作の履歴自体は残す |
 
 削除は 1 トランザクションで行い、 途中失敗で中途半端な状態を残さない。
 
-#### FK の扱い (削除をブロックする 3 箇所)
+#### FK の扱い (migration での変更は不要)
 
-`users(id)` を参照する FK のうち **CASCADE でない 3 箇所**は、 そのままでは
-`users` 行の削除が外部キー違反で失敗する。 扱いを個別に決める。
+`users(id)` を参照する FK のうち CASCADE でないものが 3 箇所あるが、
+**`deleteUserAccount()` が既に全部先処理している**ので、 037 で FK をいじる必要は無い。
 
-| 参照元 | 現状 | 扱い |
-|---|---|---|
-| `operation_logs.user_id` (005) | `NOT NULL REFERENCES users(id)` | **FK を外し、 列は残す**。 監査行はユーザより長生きするのが正 |
-| `project_definitions_history.applied_by` (011) | `REFERENCES users(id)` | 同上 (履歴・監査テーブルのため) |
-| `organizations.created_by` (004) | `NOT NULL REFERENCES users(id)` | **FK は外さない。 purge を拒否する** |
-
-```sql
--- migration 037 に含める。 列は落とさない (migration 規約: DROP COLUMN 禁止)
-ALTER TABLE operation_logs DROP CONSTRAINT IF EXISTS operation_logs_user_id_fkey;
-ALTER TABLE project_definitions_history DROP CONSTRAINT IF EXISTS project_definitions_history_applied_by_fkey;
-```
-
-Drizzle schema 側も対応する `.references(() => users.id)` を外す (列は `uuid` +
-`notNull` のまま)。 外さないと以後の生成物で FK が復活する。
+| 参照元 | 既存の扱い |
+|---|---|
+| `operation_logs.user_id` (005) | 行ごと削除してから `users` を消す |
+| `project_definition_history.applied_by` (011) | NULL 化してから `users` を消す |
+| `organizations.created_by` (004) | FK のまま = 組織を持つユーザの削除は外部キー違反で fail-closed |
 
 **組織を持つユーザは purge しない。** `organizations.created_by` は監査行ではなく
 生きたドメインオブジェクトへの参照であり、 cascade させると「ユーザを消したら
-組織が消えた」という事故になる。 該当がある場合は
-`reason:"owns_organizations"` と対象組織 ID を返して拒否し、 admin に所有権の
-移譲を先に行わせる (fail-closed)。
+組織が消えた」という事故になる。 `purge_user` は生の FK エラーにする前に
+`owns_organizations` と対象組織 ID を返して拒否し、 admin に所有権の移譲を
+先に行わせる。
 
-> 削除後の `operation_logs.user_id` は **存在しないユーザを指す UUID** になる。
-> これは意図した状態で、 「誰が何をしたか」の相関を保ちつつ個人特定可能な情報
-> (email・氏名) だけを消すための設計。
+> 監査行を残さない判断は既存の right-to-be-forgotten 実装に合わせたもの。
+> `operation_logs.params` にはリクエスト内容がそのまま入るため、 個人データ削除を
+> 謳いながら監査行だけ残すと PII が残留する。
 
 #### 実行経路
 
@@ -563,8 +557,8 @@ binding の変更は **破壊的操作**として Action authentication (passkey
 
 退職者削除 (§5.4):
 
-- `purge_user` で `users` / `edge_identities` / `project_data_<key>` の行が消え、
-  `operation_logs` は残ること (残った行の `user_id` は存在しないユーザを指す)
+- `purge_user` で `users` / `edge_identities` / `project_data_<key>` / `operation_logs`
+  の行が消えること
 - 組織を作成したユーザの `purge_user` が `owns_organizations` で拒否され、
   **組織が消えていない**こと
 - 削除後に同じ email でログインすると **新規ユーザとして作られる**こと

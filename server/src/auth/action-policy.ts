@@ -20,6 +20,7 @@ export const protectedActionSchema = z.enum([
   "oidc_client.rotate_secret",
   "oidc_client.update_redirect_uris",
   "oidc_client.disable",
+  "edge_idp.purge_user",
 ]);
 
 export type ProtectedAction = z.infer<typeof protectedActionSchema>;
@@ -47,6 +48,7 @@ const protectedWsActions = new Set<ProtectedAction>([
   "oidc_client.rotate_secret",
   "oidc_client.update_redirect_uris",
   "oidc_client.disable",
+  "edge_idp.purge_user",
 ]);
 
 export function resolveWsActionTarget(
@@ -80,6 +82,8 @@ export function resolveWsActionTarget(
     case "oidc_client.update_redirect_uris":
     case "oidc_client.disable":
       return target(parsedAction.data, requiredString(p, "clientId"));
+    case "edge_idp.purge_user":
+      return target(parsedAction.data, requiredString(p, "userId"));
     default:
       return null;
   }
