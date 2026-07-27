@@ -46,6 +46,12 @@ export const users = pgTable("users", {
   mfaEnabled: boolean("mfa_enabled").notNull().default(false),
   mfaMethods: jsonb("mfa_methods").notNull().default([]),
 
+  // 表示名の出所 (spec/feature/edge-assertion-login.md §5.2.2)。
+  // 'provisional' = email ローカル部の暫定値 / 'idp' = IdP 由来 / 'user' = 本人設定。
+  // 'user' は自動上書きしない。 既定を 'user' にしてあるのは、 既存ユーザの
+  // 表示名をエッジ認証の初回ログインで書き換えないため。
+  displayNameSource: text("display_name_source").notNull().default("user"),
+
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -458,3 +464,43 @@ export const volputasSurveyAnswers = pgTable("volputas_survey_answers", {
     sql`${t.answerText} IS NULL OR char_length(${t.answerText}) <= 4000`,
   ),
 ]);
+
+// ── Edge Assertion (Cloudflare Access バイパス認証) ──
+// spec/feature/edge-assertion-login.md。 アカウントの正本キーは email で、
+// idp_subject は email 変更に追従するための副次インデックス (任意)。
+
+export const edgeIdentities = pgTable("edge_identities", {
+  id: uuid("id").primaryKey(),
+  provider: text("provider").notNull(),
+  teamDomain: text("team_domain").notNull(),
+  email: text("email").notNull(),
+  idpSubject: text("idp_subject"),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  cfSub: text("cf_sub"),
+  cfUserUuid: text("cf_user_uuid"),
+  idpType: text("idp_type"),
+  idpName: text("idp_name"),
+  groups: jsonb("groups").notNull().default([]),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("idx_edge_identities_email").on(t.provider, t.teamDomain, t.email),
+  index("idx_edge_identities_user").on(t.userId),
+  index("idx_edge_identities_last_seen").on(t.lastSeenAt),
+]);
+
+export const edgeIdpBindings = pgTable("edge_idp_bindings", {
+  projectKey: text("project_key").primaryKey(),
+  provider: text("provider").notNull().default("cf_access"),
+  teamDomain: text("team_domain").notNull(),
+  audTags: jsonb("aud_tags").notNull(),
+  subjectClaim: text("subject_claim"),
+  allowedEmailDomains: jsonb("allowed_email_domains").notNull(),
+  provisioning: text("provisioning").notNull(),
+  defaultRole: text("default_role").notNull().default("general"),
+  adminGroups: jsonb("admin_groups").notNull().default([]),
+  fetchIdentity: boolean("fetch_identity").notNull().default(true),
+  requireDeviceCheck: boolean("require_device_check").notNull().default(false),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});

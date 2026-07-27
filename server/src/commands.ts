@@ -97,6 +97,7 @@ async function execute(
     case "profile": return profileCmd(userId, action, payload);
     case "managed_project": return managedProjectCmd(userId, action, payload);
     case "oidc_client": return oidcClientCmd(userId, action, payload);
+    case "edge_idp": return edgeIdpCmd(userId, action, payload);
     case "oidc_keys": return oidcKeysCmd(userId, action, payload);
     default:
       throw AppError.badRequest(`Unknown module: ${module}`);
@@ -561,6 +562,48 @@ async function oidcClientCmd(userId: string, action: string, p?: Record<string, 
       return svc.setActive(requireStr(p, "clientId"), false);
     default:
       throw AppError.badRequest(`Unknown oidc_client action: ${action}`);
+  }
+}
+
+// -- Edge IdP (Cloudflare Access バイパス認証の binding 管理、 admin 専用) --
+// spec/feature/edge-assertion-login.md §11。 purge_user は破壊的なので
+// action proof (passkey step-up) を WS 層で要求している。
+
+async function edgeIdpCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
+  await requireSystemAdmin(userId);
+
+  switch (action) {
+    case "list": {
+      const svc = await import("./project/edge-bindings.js");
+      return svc.listBindings();
+    }
+    case "register": {
+      const svc = await import("./project/edge-bindings.js");
+      return svc.registerBinding(p);
+    }
+    case "update": {
+      const svc = await import("./project/edge-bindings.js");
+      return svc.updateBinding(requireStr(p, "projectKey"), p ?? {});
+    }
+    case "enable": {
+      const svc = await import("./project/edge-bindings.js");
+      return svc.setBindingActive(requireStr(p, "projectKey"), true);
+    }
+    case "disable": {
+      const svc = await import("./project/edge-bindings.js");
+      return svc.setBindingActive(requireStr(p, "projectKey"), false);
+    }
+    case "stale_identities": {
+      const svc = await import("./project/edge-offboarding.js");
+      const days = p?.days === undefined ? undefined : Number(p.days);
+      return svc.listStaleIdentities(days);
+    }
+    case "purge_user": {
+      const svc = await import("./project/edge-offboarding.js");
+      return svc.purgeEdgeUser(requireStr(p, "userId"), requireStr(p, "confirmEmail"));
+    }
+    default:
+      throw AppError.badRequest(`Unknown edge_idp action: ${action}`);
   }
 }
 
