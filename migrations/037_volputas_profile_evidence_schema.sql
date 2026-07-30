@@ -42,7 +42,7 @@ VALUES (
           "nullable": true,
           "description": "User comments scoped to games or in-game content"
         },
-        "voicememo_records": {
+        "voice_memo_records": {
           "type": "json",
           "module": "profile_evidence",
           "nullable": true,
@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS "project_data_volputas" (
   user_id                UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   "gameplay_records"     JSONB,
   "voice_records"        JSONB,
-  "voicememo_records"    JSONB,
+  "voice_memo_records"   JSONB,
   "emotion_curve_records" JSONB,
   "comparison_records"   JSONB,
   "card_sort_records"    JSONB,
@@ -124,7 +124,7 @@ ALTER TABLE "project_data_volputas"
 ALTER TABLE "project_data_volputas"
   ADD COLUMN IF NOT EXISTS "voice_records" JSONB;
 ALTER TABLE "project_data_volputas"
-  ADD COLUMN IF NOT EXISTS "voicememo_records" JSONB;
+  ADD COLUMN IF NOT EXISTS "voice_memo_records" JSONB;
 ALTER TABLE "project_data_volputas"
   ADD COLUMN IF NOT EXISTS "emotion_curve_records" JSONB;
 ALTER TABLE "project_data_volputas"

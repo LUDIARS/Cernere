@@ -16,7 +16,7 @@ const migration = readFileSync(
 const REQUIRED_COLUMNS = [
   "gameplay_records",
   "voice_records",
-  "voicememo_records",
+  "voice_memo_records",
   "emotion_curve_records",
   "comparison_records",
   "card_sort_records",
