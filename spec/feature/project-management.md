@@ -39,12 +39,34 @@ user_data:
       nullable: true
       description: "学籍番号"
 
+# 管理者が他プロジェクトへ許可する参照範囲
+data_sharing:
+  - project_key: "EducationLab"
+    access: "read"
+    columns:
+      - major
+      - student_id
+    description: "EducationLabのプロフィール表示に必要な列だけを参照許可"
+
 # 将来の拡張用
-# permissions:
-#   scopes: [...]
 # webhooks:
 #   events: [...]
 ```
+
+### Managed Schemaのカラム共有
+
+`data_sharing`はsystem adminがCernere管理画面から設定する。他プロジェクトの
+project client自身は変更できない。
+
+- `project_key`: 参照を許可する共有先
+- `access`: `read`または`readwrite`
+- `columns`: 参照・更新を許可するカラム名
+- `modules`: 既存定義との互換用。指定時は`columns`との積集合だけを許可
+
+`columns`を明示した場合は指定列だけを許可する。空配列はdeny-allとして扱う。
+既存定義との互換性のため、`columns`を省略したgrantのみ従来どおりmodule範囲内の
+全カラムを許可する。管理画面で保存すると、既存grantも現在選択されているカラムの
+明示リストへ変換される。
 
 ### カラム型
 
@@ -117,6 +139,12 @@ CREATE TABLE project_data_{key} (
 | `project` | `register` | `{ yaml, url? }` | admin |
 | `project` | `delete` | `{ key }` | admin |
 | `project` | `update_schema` | `{ key, yaml }` | admin |
+
+管理画面のManaged Schema Sharingでは、共有先・`read`/`readwrite`・許可カラムを
+チェックボックスで指定する。保存はadmin専用`managed_project.update_schema`を使い、
+プロジェクトWS経由のschema auto-syncに含まれる`data_sharing`は更新対象から除外して
+現行値を保持する。応答の`adminOwnedFieldsPreserved`に`data_sharing`を含め、
+サービス側から変更できないフィールドであることを明示する。
 
 `list` / `overview` の戻り値には `frontendUrl: string | null` を含む。
 これは `schema_definition.endpoint.frontend_url` を露出したもので、

@@ -19,9 +19,26 @@ import type { ProjectDefinition } from "./schema.js";
 import { getUserColumns, setUserData } from "./service.js";
 
 type ColumnMap = Record<string, { type: string; module?: string; _deleted?: boolean }>;
+type DataSharingEntry = NonNullable<ProjectDefinition["data_sharing"]>[number];
 
 function extractColumns(definition: ProjectDefinition | null | undefined): ColumnMap {
   return (definition?.user_data?.columns ?? {}) as ColumnMap;
+}
+
+function isColumnAllowedByGrant(
+  columnName: string,
+  columns: ColumnMap,
+  entry: DataSharingEntry,
+): boolean {
+  const column = columns[columnName];
+  if (!column || column._deleted) return false;
+
+  if (entry.modules && entry.modules.length > 0) {
+    if (!column.module || !entry.modules.includes(column.module)) return false;
+  }
+
+  // columns 未指定は既存定義との互換モード。明示した空配列は deny-all として扱う。
+  return entry.columns === undefined || entry.columns.includes(columnName);
 }
 
 /**
@@ -48,14 +65,8 @@ export function resolveSharedColumnNames(
   }
 
   const columns = extractColumns(targetDefinition);
-  let names = Object.keys(columns).filter((c) => !columns[c]._deleted);
-
-  // modules 指定があれば、そのモジュールに属するカラムのみへさらに絞り込む
-  // (未指定 = 全モジュール共有、schema.ts のコメント通り)。
-  if (entry.modules && entry.modules.length > 0) {
-    const allowedModules = new Set(entry.modules);
-    names = names.filter((c) => columns[c].module !== undefined && allowedModules.has(columns[c].module as string));
-  }
+  let names = Object.keys(columns)
+    .filter((columnName) => isColumnAllowedByGrant(columnName, columns, entry));
 
   // 呼び出し元が特定カラムを要求している場合はさらに絞る
   // (getUserColumns の「columns 未指定/空なら全カラム」と同じ意味論に合わせる)。
@@ -85,16 +96,8 @@ export function resolveSharedWritableColumnNames(
   }
 
   const columns = extractColumns(targetDefinition);
-  const allowedModules = entry.modules && entry.modules.length > 0
-    ? new Set(entry.modules)
-    : null;
-
-  return requestedColumns.filter((columnName) => {
-    const column = columns[columnName];
-    if (!column || column._deleted) return false;
-    if (!allowedModules) return true;
-    return column.module !== undefined && allowedModules.has(column.module);
-  });
+  return requestedColumns
+    .filter((columnName) => isColumnAllowedByGrant(columnName, columns, entry));
 }
 
 /**

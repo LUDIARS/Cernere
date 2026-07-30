@@ -2,6 +2,10 @@ import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { wsClient } from "../lib/ws-client";
 import { useIsMobile } from "../hooks/useIsMobile";
+import {
+  ManagedSchemaSharingEditor,
+  type ManagedSchemaDefinition,
+} from "../components/ManagedSchemaSharingEditor";
 
 interface ManagedProject {
   key: string;
@@ -20,10 +24,7 @@ interface ProjectDetail {
   name: string;
   description: string;
   clientId: string;
-  schemaDefinition: {
-    project: { key: string; name: string; description?: string };
-    user_data?: { columns: Record<string, { type: string; nullable?: boolean; description?: string }> };
-  };
+  schemaDefinition: ManagedSchemaDefinition;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -212,6 +213,28 @@ export function DashboardPage() {
       fetchProjects();
     } catch (err) {
       setError((err as Error).message);
+    }
+  };
+
+  const handleSharingUpdate = async (definition: ManagedSchemaDefinition) => {
+    if (!selected) return;
+    setError(null);
+    try {
+      await wsClient.sendCommand("managed_project", "update_schema", {
+        ...definition,
+        key: selected.key,
+        project: { ...definition.project, key: selected.key },
+      });
+      const detail = await wsClient.sendCommand<ProjectDetail>(
+        "managed_project",
+        "get",
+        { key: selected.key },
+      );
+      setSelected(detail);
+      await fetchProjects();
+    } catch (err) {
+      setError((err as Error).message);
+      throw err;
     }
   };
 
@@ -467,6 +490,15 @@ export function DashboardPage() {
 
               {selected.description && (
                 <p style={{ fontSize: "0.85rem", marginBottom: "1rem" }}>{selected.description}</p>
+              )}
+
+              {isAdmin && selected.isActive && (
+                <ManagedSchemaSharingEditor
+                  definition={selected.schemaDefinition}
+                  isMobile={isMobile}
+                  projects={projects}
+                  onSave={handleSharingUpdate}
+                />
               )}
 
               <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "1rem" }}>

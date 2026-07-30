@@ -109,12 +109,19 @@ export async function dispatchProjectCommand(
       if (payload.key && payload.key !== projectKey) {
         throw new Error("project key mismatch");
       }
-      const def = { ...payload, project: { ...(payload.project as object ?? {}), key: projectKey } };
-      // system admin 権限は不要 (project client 認証済みのため)。
-      // ただし service.updateProjectSchema は appliedBy (admin userId) を要求するため
-      // project client の場合は null 渡しを許容する版が必要。
-      // 既存 updateProjectSchema にそのまま委譲 (appliedBy は undefined)。
-      return svc.updateProjectSchema(projectKey, def, undefined);
+      const hasAdminOwnedDataSharing = Object.prototype.hasOwnProperty.call(payload, "data_sharing");
+      const projectOwnedPayload = { ...payload };
+      delete projectOwnedPayload.data_sharing;
+      const protectedDef = {
+        ...projectOwnedPayload,
+        project: { ...(projectOwnedPayload.project as object ?? {}), key: projectKey },
+      };
+      // project client の schema auto-sync では管理者所有の data_sharing を保存対象から
+      // 外す。updateProjectSchema の partial-update semantics が現行 grant を保持する。
+      const result = await svc.updateProjectSchema(projectKey, protectedDef, undefined);
+      return hasAdminOwnedDataSharing
+        ? { ...result, adminOwnedFieldsPreserved: ["data_sharing"] }
+        : result;
     }
     // ─── OAuth token storage (個人データ保管禁止ルールの基盤) ───
     case "managed_project.store_oauth_token": {

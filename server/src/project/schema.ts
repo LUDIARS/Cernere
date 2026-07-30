@@ -55,6 +55,11 @@ export const dataShareDefinitionSchema = z.object({
   project_key: z.string().min(1),
   /** 共有するモジュール (省略時は全モジュール) */
   modules: z.array(z.string()).optional(),
+  /**
+   * 共有するカラム。省略時は既存定義との互換性のため modules 範囲内の全カラム、
+   * 明示時は空配列を含めて指定カラムだけを許可する。
+   */
+  columns: z.array(z.string().min(1)).optional(),
   /** 共有方向: "read" = 読み取りのみ, "readwrite" = 読み書き */
   access: z.enum(["read", "readwrite"]).optional().default("read"),
   /** 共有の説明 */
@@ -81,6 +86,40 @@ export const projectDefinitionSchema = z.object({
   user_data: z.object({
     columns: z.record(z.string(), columnDefinitionSchema),
   }).optional(),
+}).superRefine((definition, context) => {
+  const schemaColumns = definition.user_data?.columns ?? {};
+  const seenProjects = new Set<string>();
+
+  for (const [shareIndex, share] of (definition.data_sharing ?? []).entries()) {
+    if (seenProjects.has(share.project_key)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["data_sharing", shareIndex, "project_key"],
+        message: `duplicate data_sharing project: ${share.project_key}`,
+      });
+    }
+    seenProjects.add(share.project_key);
+
+    const seenColumns = new Set<string>();
+    for (const [columnIndex, columnName] of (share.columns ?? []).entries()) {
+      if (seenColumns.has(columnName)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["data_sharing", shareIndex, "columns", columnIndex],
+          message: `duplicate shared column: ${columnName}`,
+        });
+      }
+      seenColumns.add(columnName);
+
+      if (!schemaColumns[columnName] || schemaColumns[columnName]._deleted) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["data_sharing", shareIndex, "columns", columnIndex],
+          message: `shared column is not active in user_data: ${columnName}`,
+        });
+      }
+    }
+  }
 });
 
 export type ProjectDefinition = z.infer<typeof projectDefinitionSchema>;

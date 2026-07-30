@@ -3,7 +3,11 @@ import {
   resolveSharedColumnNames,
   resolveSharedWritableColumnNames,
 } from "../../src/project/data-sharing.js";
-import { dataShareDefinitionSchema, type ProjectDefinition } from "../../src/project/schema.js";
+import {
+  dataShareDefinitionSchema,
+  projectDefinitionSchema,
+  type ProjectDefinition,
+} from "../../src/project/schema.js";
 
 function makeTargetDefinition(overrides: Partial<ProjectDefinition> = {}): ProjectDefinition {
   return {
@@ -60,6 +64,37 @@ describe("resolveSharedColumnNames", () => {
     expect(names).not.toContain("internal_note");
   });
 
+  it("restricts reads to the administrator-selected columns", () => {
+    const target = makeTargetDefinition({
+      data_sharing: [{
+        project_key: "aedilis",
+        access: "read",
+        columns: ["name", "grade"],
+      }],
+    });
+    expect(resolveSharedColumnNames("aedilis", target))
+      .toEqual(["grade", "name"]);
+  });
+
+  it("intersects selected columns with the module restriction", () => {
+    const target = makeTargetDefinition({
+      data_sharing: [{
+        project_key: "aedilis",
+        access: "read",
+        modules: ["profile"],
+        columns: ["name", "internal_note"],
+      }],
+    });
+    expect(resolveSharedColumnNames("aedilis", target)).toEqual(["name"]);
+  });
+
+  it("treats an explicit empty column selection as deny-all", () => {
+    const target = makeTargetDefinition({
+      data_sharing: [{ project_key: "aedilis", access: "read", columns: [] }],
+    });
+    expect(resolveSharedColumnNames("aedilis", target)).toEqual([]);
+  });
+
   it("further narrows to explicitly requested columns within the allowed set", () => {
     const target = makeTargetDefinition({
       data_sharing: [{ project_key: "aedilis", access: "read", modules: ["profile"] }],
@@ -107,11 +142,57 @@ describe("resolveSharedWritableColumnNames", () => {
     )).toEqual(["name", "department_name"]);
   });
 
+  it("allows writes only to administrator-selected columns", () => {
+    const target = makeTargetDefinition({
+      data_sharing: [{
+        project_key: "EducationLab",
+        access: "readwrite",
+        columns: ["name"],
+      }],
+    });
+    expect(resolveSharedWritableColumnNames(
+      "EducationLab",
+      target,
+      ["name", "department_name"],
+    )).toEqual(["name"]);
+  });
+
   it("rejects a read-only grant", () => {
     const target = makeTargetDefinition({
       data_sharing: [{ project_key: "EducationLab", access: "read", modules: ["profile"] }],
     });
     expect(() => resolveSharedWritableColumnNames("EducationLab", target, ["name"]))
       .toThrow(/no readwrite data_sharing grant/);
+  });
+});
+
+describe("data_sharing column schema", () => {
+  it("accepts active selected columns", () => {
+    const parsed = makeTargetDefinition({
+      data_sharing: [{
+        project_key: "aedilis",
+        access: "read",
+        columns: ["name", "grade"],
+      }],
+    });
+    expect(() => dataShareDefinitionSchema.parse(parsed.data_sharing?.[0])).not.toThrow();
+  });
+
+  it("rejects duplicate grants, duplicate columns, and inactive column names", () => {
+    const result = projectDefinitionSchema.safeParse(makeTargetDefinition({
+      data_sharing: [
+        {
+          project_key: "aedilis",
+          access: "read",
+          columns: ["name", "name", "missing"],
+        },
+        { project_key: "aedilis", access: "read", columns: ["grade"] },
+      ],
+    }));
+    expect(result.success).toBe(false);
+    const messages = result.error?.issues.map((issue) => issue.message) ?? [];
+    expect(messages).toContain("duplicate data_sharing project: aedilis");
+    expect(messages).toContain("duplicate shared column: name");
+    expect(messages).toContain("shared column is not active in user_data: missing");
   });
 });

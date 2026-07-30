@@ -79,6 +79,33 @@ describe("getSharedUserColumns (data_sharing enforcement, db + service delegatio
     expect(result).toEqual({ department_name: "IT", grade: 2 });
   });
 
+  it("delegates only administrator-selected columns", async () => {
+    const target: ProjectDefinition = {
+      project: { key: "volputas", name: "Volputas", description: "" },
+      data_sharing: [{
+        project_key: "EducationLab",
+        access: "read",
+        columns: ["persona_analysis"],
+      }],
+      user_data: {
+        columns: {
+          persona_analysis: { type: "json", module: "persona", nullable: true },
+          voice_records: { type: "json", module: "profile_evidence", nullable: true },
+        },
+      },
+    };
+    mockManagedProjectRow.mockReturnValue(targetRow(target));
+    mockGetUserColumns.mockResolvedValue({ persona_analysis: { schemaVersion: 1 } });
+
+    await getSharedUserColumns("EducationLab", "volputas", "user-1");
+
+    expect(mockGetUserColumns).toHaveBeenCalledWith(
+      "volputas",
+      "user-1",
+      ["persona_analysis"],
+    );
+  });
+
   it("404s when the target project does not exist", async () => {
     mockManagedProjectRow.mockReturnValue([]);
     await expect(getSharedUserColumns("aedilis", "unknown_project", "user-1"))
@@ -157,6 +184,30 @@ describe("setSharedUserColumns (readwrite enforcement, db + service delegation m
       name: "Neco",
       internal_note: "blocked",
     })).rejects.toThrow(/not writable/);
+    expect(mockSetUserData).not.toHaveBeenCalled();
+  });
+
+  it("rejects any column outside the administrator selection", async () => {
+    const target: ProjectDefinition = {
+      project: { key: "volputas", name: "Volputas", description: "" },
+      data_sharing: [{
+        project_key: "EducationLab",
+        access: "readwrite",
+        columns: ["persona_analysis"],
+      }],
+      user_data: {
+        columns: {
+          persona_analysis: { type: "json", module: "persona", nullable: true },
+          voice_records: { type: "json", module: "profile_evidence", nullable: true },
+        },
+      },
+    };
+    mockManagedProjectRow.mockReturnValue(targetRow(target));
+
+    await expect(setSharedUserColumns("EducationLab", "volputas", "user-1", {
+      persona_analysis: { schemaVersion: 1 },
+      voice_records: [{ id: "blocked" }],
+    })).rejects.toThrow(/voice_records/);
     expect(mockSetUserData).not.toHaveBeenCalled();
   });
 });
