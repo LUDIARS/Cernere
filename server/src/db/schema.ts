@@ -458,3 +458,50 @@ export const volputasSurveyAnswers = pgTable("volputas_survey_answers", {
     sql`${t.answerText} IS NULL OR char_length(${t.answerText}) <= 4000`,
   ),
 ]);
+
+// ── Volputas Survey Access Audit ───────────────────────────────
+// The project WS command path bypasses operation_logs, so survey reads and
+// overwrites are audited here instead. Metadata only: no answer values, no
+// payload bodies, no tokens, and a closed error enumeration (never free text).
+// Retention / deletion policy: spec/data/retention.md.
+
+export const volputasSurveyAccessLogs = pgTable("volputas_survey_access_logs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectKey: text("project_key").notNull(),
+  // No FK to users(id) on purpose: denied/malformed commands may carry an
+  // unknown user id and a rejected insert would lose the audit record itself.
+  userId: uuid("user_id"),
+  surveyId: uuid("survey_id"),
+  action: text("action").notNull(),
+  status: text("status").notNull(),
+  errorCode: text("error_code"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("idx_volputas_survey_access_logs_user").on(t.userId, t.createdAt.desc()),
+  index("idx_volputas_survey_access_logs_project").on(t.projectKey, t.createdAt.desc()),
+  index("idx_volputas_survey_access_logs_created").on(t.createdAt),
+  check(
+    "chk_volputas_survey_access_log_project_key",
+    sql`char_length(${t.projectKey}) <= 100`,
+  ),
+  check(
+    "chk_volputas_survey_access_log_action",
+    sql`${t.action} IN ('list_response_statuses', 'get_response', 'save_response')`,
+  ),
+  check(
+    "chk_volputas_survey_access_log_status",
+    sql`${t.status} IN ('ok', 'error', 'denied')`,
+  ),
+  check(
+    "chk_volputas_survey_access_log_error_code",
+    sql`(
+      (${t.status} = 'ok' AND ${t.errorCode} IS NULL)
+      OR (${t.status} <> 'ok' AND ${t.errorCode} IN (
+        'project_not_authorized',
+        'invalid_payload',
+        'storage_failure',
+        'internal_error'
+      ))
+    )`,
+  ),
+]);
