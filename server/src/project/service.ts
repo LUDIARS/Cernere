@@ -17,6 +17,7 @@ import { encryptToken, decryptToken } from "./oauth-token-crypto.js";
 import * as cache from "./user-data-cache.js";
 import { getAllProjectStatus, getProjectConnections, getProjectStatus } from "../ws/project-registry.js";
 import { issueProjectSecret } from "./credentials.js";
+import { toUserDataParameter } from "./user-data-parameter.js";
 
 // ── Project definition helpers ───────────────────────────────
 
@@ -886,12 +887,9 @@ export async function setUserData(
       .map((c) => `"${c}" = EXCLUDED."${c}"`)
       .concat([`updated_at = NOW()`])
       .join(", ");
-    const values = [userId, ...targetCols.map((c) => {
-      const v = data[c];
-      // JSON 型の場合は stringify
-      const isJson = schemaColumns[c].type === "json" || schemaColumns[c].type === "jsonb";
-      return isJson ? JSON.stringify(v) : v;
-    })];
+    const values = [userId, ...targetCols.map((c) =>
+      toUserDataParameter(sqlClient, data[c], schemaColumns[c].type)
+    )];
     await sqlClient.unsafe(
       `INSERT INTO "${tableName}" (${colList}, created_at, updated_at)
        VALUES (${placeholders}, NOW(), NOW())
