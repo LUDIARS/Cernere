@@ -62,15 +62,20 @@ export const config = {
   discordRedirectUri: env("DISCORD_REDIRECT_URI", "http://localhost:8080/auth/discord/callback"),
 
   // JWT
-  jwtSecret: (() => {
+  //
+  // フォールバック禁止 (RULE §7.1 無言降格禁止)。 dev/prod いずれも JWT_SECRET
+  // 未設定は fail-fast。 以前の 「dev はエフェメラル乱数」 は、 設定ミスを隠したまま
+  // 「再起動で全 token が突然無効」 という別の事故を生むため撤去。
+  //
+  // getter にしているのは **import しただけでは throw させない**ため。 DB しか触らない
+  // 管理 CLI (scripts/register-oidc-client.ts 等) も config → db/connection 経由で
+  // この値を要求され、 「RP を 1 個登録するのに Cernere をフル起動できる env が要る」
+  // 状態になっていた。 起動時の fail-fast は assertRuntimeSecrets() が担う。
+  get jwtSecret(): string {
     const secret = process.env.JWT_SECRET;
     if (secret) return secret;
-    // フォールバック禁止 (RULE §7.1 無言降格禁止)。 dev/prod いずれも JWT_SECRET
-    // 未設定は起動時 fail-fast。 以前の 「dev はエフェメラル乱数」 は、 設定ミスを
-    // 隠したまま 「再起動で全 token が突然無効」 という別の事故を生むため撤去。
-    // ローカル単独起動でも env / Infisical (env-bootstrap) 経由で必ず注入すること。
     throw new Error("JWT_SECRET must be set (no fallback). Provide it via env or Infisical/Excubitor inject.");
-  })(),
+  },
 
   // AWS MFA
   awsRegion: env("AWS_REGION", "ap-northeast-1"),
@@ -143,3 +148,17 @@ export const config = {
     env("WEBAUTHN_ORIGINS", env("FRONTEND_URL", "http://localhost:5173"))
       .split(",").map(s => s.trim()).filter(Boolean),
 } as const;
+
+/**
+ * サーバー起動時に必要な secret が揃っているかを明示的に検査する。
+ *
+ * 遅延評価にした値 (jwtSecret) は「使われるまで throw しない」ので、 起動時の
+ * fail-fast はここで担保する。 リクエストを受け始めてから初回のログインで初めて
+ * 落ちる、 という壊れ方を避けるため、 listen より前に必ず呼ぶこと。
+ *
+ * DB しか触らない管理 CLI はこれを呼ばない (= JWT_SECRET を要求しない)。
+ */
+export function assertRuntimeSecrets(): void {
+  // アクセスすることが検査そのもの (未設定なら getter が throw する)。
+  void config.jwtSecret;
+}

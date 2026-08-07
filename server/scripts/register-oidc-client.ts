@@ -49,5 +49,21 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
   console.error("registration failed:", err instanceof Error ? err.message : err);
+  // postgres ドライバは実際の理由 (relation does not exist / 認証失敗 等) を cause に
+  // 入れる。 message だけ出すと 「失敗した SQL」 しか見えず、 DATABASE_URL が
+  // Cernere とは別の DB を指しているのか、 schema が古いのかを切り分けられない。
+  const printedCauses = new Set<unknown>();
+  for (
+    let cause = (err as { cause?: unknown }).cause;
+    cause && !printedCauses.has(cause);
+    cause = (cause as { cause?: unknown }).cause
+  ) {
+    printedCauses.add(cause);
+    console.error("  caused by:", cause instanceof Error ? cause.message : cause);
+  }
+  console.error(
+    "\nDATABASE_URL が Cernere 本体と同じ DB を指しているか確認してください"
+      + " (既定値は空の localhost DB を指すことがあります)。",
+  );
   process.exit(1);
 });

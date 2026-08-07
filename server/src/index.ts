@@ -2,7 +2,7 @@
  * Cernere Server — エントリポイント (uWebSockets.js)
  */
 
-import { config } from "./config.js";
+import { assertRuntimeSecrets, config } from "./config.js";
 import { createApp } from "./app.js";
 import { redis } from "./redis.js";
 import { runMigrations } from "./db/migrate.js";
@@ -16,6 +16,10 @@ async function main() {
       ? "development (verbose dev logging on)"
       : "unknown";
   console.log(`  Environment: ${envLabel}`);
+
+  // 遅延評価にした secret の起動時 fail-fast。 listen 後に初回ログインで落ちる、
+  // という壊れ方を避けるため、 I/O を始める前に検査する。
+  assertRuntimeSecrets();
 
   await runMigrations();
   await redis.connect();
