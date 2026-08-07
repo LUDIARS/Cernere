@@ -326,8 +326,9 @@ IdP のグループ名変更が Cernere の管理権限に直結すると事故�
 
 - Cernere は groups を保存し、`auth.edge_assertion` のレスポンスに含めて Hub へ返す。
   Hub 側の認可 (Corpus の admin 判定など) はそれを見て決める
-- Cernere の role を groups で決めたい場合は binding の `admin_groups` に
-  グループ名を明示列挙したときだけ有効にする (opt-in)
+- `admin_groups` は将来の opt-in role mapping 用に予約する。現在は、昇格の出所を
+  永続化して「edge が付与した admin だけ」を安全に失効できる仕組みが無いため、
+  非空値を登録時に拒否し、既存の非空 binding も認証時に fail-closed で拒否する
 
 > custom claim は Cookie サイズ制限のため **約 1KB でトリム**される (best-effort)。
 > グループ一覧のような大きい属性は custom claim ではなく get-identity で取ること。
@@ -353,43 +354,37 @@ Cernere は退職を能動的に知らない (IdP から消えても Cernere に
 
 #### 削除範囲
 
+実体は既存の `deleteUserAccount()` (`server/src/project/service.ts`) を再利用する。
+同じ削除経路を二重に作らない。
+
 | 対象 | 扱い |
 |---|---|
-| `users` 行 | **削除**。 FK cascade で `refresh_sessions` / `passkeys` / `trusted_devices` / `edge_identities` も消える |
-| `project_data_<key>` の行 | **削除** (全 project 横断) |
-| `operation_logs` | **残す**。 監査記録のため。 ただし残るのは `user_id` (UUID) だけで、 email や氏名は `users` 削除で消える |
+| `users` 行 | **削除**。 FK cascade で `refresh_sessions` / `passkeys` / `trusted_devices` / `edge_identities` / `project_data_<key>` も消える |
+| `operation_logs` | **削除**。 `params` に PII / token が入り得るため、 「個人データを消す」 操作で監査行だけ残すのは筋が通らない (既存の right-to-be-forgotten 方針に合わせる) |
+| `project_definition_history.applied_by` | **NULL 化**。 admin 操作の履歴自体は残す |
 
 削除は 1 トランザクションで行い、 途中失敗で中途半端な状態を残さない。
 
-#### FK の扱い (削除をブロックする 3 箇所)
+#### FK の扱い (migration での変更は不要)
 
-`users(id)` を参照する FK のうち **CASCADE でない 3 箇所**は、 そのままでは
-`users` 行の削除が外部キー違反で失敗する。 扱いを個別に決める。
+`users(id)` を参照する FK のうち CASCADE でないものが 3 箇所あるが、
+**`deleteUserAccount()` が既に全部先処理している**ので、 038 で FK をいじる必要は無い。
 
-| 参照元 | 現状 | 扱い |
-|---|---|---|
-| `operation_logs.user_id` (005) | `NOT NULL REFERENCES users(id)` | **FK を外し、 列は残す**。 監査行はユーザより長生きするのが正 |
-| `project_definitions_history.applied_by` (011) | `REFERENCES users(id)` | 同上 (履歴・監査テーブルのため) |
-| `organizations.created_by` (004) | `NOT NULL REFERENCES users(id)` | **FK は外さない。 purge を拒否する** |
-
-```sql
--- migration 037 に含める。 列は落とさない (migration 規約: DROP COLUMN 禁止)
-ALTER TABLE operation_logs DROP CONSTRAINT IF EXISTS operation_logs_user_id_fkey;
-ALTER TABLE project_definitions_history DROP CONSTRAINT IF EXISTS project_definitions_history_applied_by_fkey;
-```
-
-Drizzle schema 側も対応する `.references(() => users.id)` を外す (列は `uuid` +
-`notNull` のまま)。 外さないと以後の生成物で FK が復活する。
+| 参照元 | 既存の扱い |
+|---|---|
+| `operation_logs.user_id` (005) | 行ごと削除してから `users` を消す |
+| `project_definition_history.applied_by` (011) | NULL 化してから `users` を消す |
+| `organizations.created_by` (004) | FK のまま = 組織を持つユーザの削除は外部キー違反で fail-closed |
 
 **組織を持つユーザは purge しない。** `organizations.created_by` は監査行ではなく
 生きたドメインオブジェクトへの参照であり、 cascade させると「ユーザを消したら
-組織が消えた」という事故になる。 該当がある場合は
-`reason:"owns_organizations"` と対象組織 ID を返して拒否し、 admin に所有権の
-移譲を先に行わせる (fail-closed)。
+組織が消えた」という事故になる。 `purge_user` は生の FK エラーにする前に
+`owns_organizations` と対象組織 ID を返して拒否し、 admin に所有権の移譲を
+先に行わせる。
 
-> 削除後の `operation_logs.user_id` は **存在しないユーザを指す UUID** になる。
-> これは意図した状態で、 「誰が何をしたか」の相関を保ちつつ個人特定可能な情報
-> (email・氏名) だけを消すための設計。
+> 監査行を残さない判断は既存の right-to-be-forgotten 実装に合わせたもの。
+> `operation_logs.params` にはリクエスト内容がそのまま入るため、 個人データ削除を
+> 謳いながら監査行だけ残すと PII が残留する。
 
 #### 実行経路
 
@@ -414,8 +409,12 @@ step-up 対象と同格 ([`../interface/auth-flows.md`](../interface/auth-flows.
 composite の端末チャレンジ (メール 6 桁コード) は本経路では **既定で省略**する。
 上流の企業 IdP で MFA 済みであり、二重に社員へコード入力を求める実益が薄いため。
 
-ただし `trusted_devices` への記録は行い、異常検知の材料は残す。
 binding 単位で必須化できるよう `require_device_check` を持たせる。
+
+> **本 PR での実装状況**: `trusted_devices` への記録と端末チャレンジ UI は未配線。
+> そのため `require_device_check = true` の binding は認証を
+> `device_check_required` で fail-closed に拒否する。設定値を黙って無視して弱い経路を
+> 通すことはない。実際のチャレンジを有効化する段でこの拒否を置き換える。
 
 ---
 
@@ -425,6 +424,11 @@ binding 単位で必須化できるよう `require_device_check` を持たせる
 'edge:cf_access'`) を付ける。既存の Action authentication (破壊的操作直前の
 passkey User Verification、[`auth-flows.md`](../interface/auth-flows.md) 共通節) は
 **そのまま適用**する。
+
+> **本 PR での実装状況**: `refresh_sessions` に `auth_method` 列自体がまだ無く、
+> エッジ経由のセッションは他経路と同じ authCode (`issueAuthCodeForUserId`) で
+> 発行している。認証方式マークは列追加とあわせて別途入れる。step-up の適用
+> (`edge_idp.*` を含む破壊的操作の action proof) は本 PR で配線済み。
 
 > 日常操作は SSO 一発、危険操作は passkey。
 > エッジ認証は「誰か」を保証するが「その端末を今操作しているのが本人か」は保証しないため、
@@ -449,7 +453,8 @@ passkey User Verification、[`auth-flows.md`](../interface/auth-flows.md) 共通
 
 ## 10. データモデル
 
-migration は **037 以降**を取る (030〜035 は別途整合作業中のため空ける)。
+本機能の migration は **038**。同じ変更系列では OIDC 鍵永続化が 039、
+Discord identity claim が 040 を使用する。
 
 ```sql
 CREATE TABLE IF NOT EXISTS edge_identities (
@@ -488,7 +493,7 @@ CREATE TABLE IF NOT EXISTS edge_idp_bindings (
   allowed_email_domains jsonb NOT NULL,     -- ["example.co.jp"]
   provisioning          text NOT NULL,      -- 'auto' | 'link_only' | 'invite_only'
   default_role          text NOT NULL DEFAULT 'general',
-  admin_groups          jsonb NOT NULL DEFAULT '[]', -- 明示列挙したときだけ role=admin へ昇格 (§5.3)
+  admin_groups          jsonb NOT NULL DEFAULT '[]', -- role provenance 実装までは非空値を拒否 (§5.3)
   fetch_identity        boolean NOT NULL DEFAULT true, -- get-identity を呼ぶか (§5.3)
 
   require_device_check  boolean NOT NULL DEFAULT false,
@@ -516,7 +521,7 @@ WS module `edge_idp` (admin 専用)。OIDC client 管理 (`oidc_client`) と同�
 |---|---|
 | `register` | binding 登録 (project_key / team_domain / aud_tags / allowed_email_domains / provisioning) |
 | `list` | 一覧 |
-| `update` | aud_tags / allowed_email_domains / provisioning / default_role / subject_claim / admin_groups / fetch_identity の更新 |
+| `update` | aud_tags / allowed_email_domains / provisioning / default_role / subject_claim / fetch_identity の更新 (`admin_groups` の非空値は §5.3 に従い拒否) |
 | `enable` / `disable` | 有効・無効 |
 | `stale_identities` | 指定日数 (既定 90 日) ログインの無い identity を棚卸しリストとして返す (§5.4) |
 | `purge_user` | 退職者の個人データを削除 (§5.4)。 **step-up 必須**。 email の復唱を要求する |
@@ -536,12 +541,26 @@ binding の変更は **破壊的操作**として Action authentication (passkey
 | binding ストア | `server/src/project/edge-bindings.ts` |
 | WS 配線 | `server/src/ws/project-dispatch.ts` (`auth.edge_assertion` を 1 case 追加) |
 | 管理 module | `server/src/commands.ts` (`edge_idp`) |
-| migration | `migrations/037_edge_identities.sql` |
+| migration | `migrations/038_edge_identities.sql` |
 
 ### テスト (最低ライン)
 
 署名不正 / `aud` 不一致 / 期限切れ / サービストークン / ドメイン外 / binding 無効 /
 自動作成 / email リンク / 既存リンクの再訪 — の 9 ケース。
+
+> **本 PR での実装状況**: DB / Redis に触らない層は自動テスト済み
+> (`server/tests/auth/edge-assertion-verify.test.ts` = 署名 / alg / `aud` / `iss` /
+> 期限 / サービストークン / ドメイン、`edge-jwks.test.ts`、`edge-identity.test.ts`、
+> `server/tests/project/edge-bindings-input.test.ts` = binding 入力検証、
+> `server/tests/auth/action-policy.test.ts` = step-up 対象、
+> `server/tests/ws/profile-display-name-source.test.ts` = 表示名の出所)。
+>
+> 一方、**DB を伴う経路は自動テストが無い**: ID 解決とプロビジョニング
+> (`resolveUser` / `followEmailChange` / レート制限)、
+> `purge_user` と `stale_identities`、`auth.edge_assertion` の WS 経路、
+> migration 038 の適用。上記のうち「自動作成 / email リンク / 既存リンクの再訪」
+> 「email 変更 / IdP 移行 / `email_conflict`」「退職者削除」の各項目は
+> **未カバー**であり、実 DB を用いた検証が必要。
 
 加えて subject 決定まわり:
 
@@ -563,8 +582,8 @@ binding の変更は **破壊的操作**として Action authentication (passkey
 
 退職者削除 (§5.4):
 
-- `purge_user` で `users` / `edge_identities` / `project_data_<key>` の行が消え、
-  `operation_logs` は残ること (残った行の `user_id` は存在しないユーザを指す)
+- `purge_user` で `users` / `edge_identities` / `project_data_<key>` / `operation_logs`
+  の行が消えること
 - 組織を作成したユーザの `purge_user` が `owns_organizations` で拒否され、
   **組織が消えていない**こと
 - 削除後に同じ email でログインすると **新規ユーザとして作られる**こと
@@ -579,6 +598,8 @@ get-identity まわり (§5.3):
 - get-identity の `email` がアサーションの `email` と食い違う場合に拒否されること
 - `admin_groups` 未設定なら、どのグループに属していても `role` が `admin` に
   昇格しないこと
+- `admin_groups` の非空値が登録時に拒否され、既存の非空 binding は認証時に
+  `role_mapping_unsupported` で拒否されること
 
 ---
 

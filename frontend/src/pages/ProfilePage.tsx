@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import QRCode from "qrcode";
 import { useAuth } from "../contexts/AuthContext";
+import { LinkedAccountsSection } from "./LinkedAccountsSection";
 import { profile as profileApi, auth as authApi, type UserProfileData, type ProfilePrivacy } from "../lib/api";
 
 export function ProfilePage() {
@@ -246,6 +247,8 @@ export function ProfilePage() {
         </div>
 
         <DeviceLinkSection />
+
+        <LinkedAccountsSection />
 
         <PasskeySection />
       </div>

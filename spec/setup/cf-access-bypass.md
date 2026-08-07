@@ -221,7 +221,7 @@ curl -s https://<team>.cloudflareaccess.com/cdn-cgi/access/certs | jq '.keys | l
   { "module": "edge_idp", "action": "purge_user",
     "payload": { "userId": "...", "confirmEmail": "taro@example.co.jp" } }
   // step-up (passkey) 必須。users / edge_identities / project_data_<key> を削除し、
-  // operation_logs は監査のため残す。
+  // operation_logs も削除する (params に PII / token が入り得るため)。
   ```
 
   これにより、同じアドレスを後任者が引き継いでも**前任者のアカウントを掴まない**

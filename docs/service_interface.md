@@ -208,3 +208,25 @@ operation_logs
 ```
 
 インデックス: `user_id`, `session_id`, `method`, `created_at`
+
+---
+
+## `GET /api/auth/me`
+
+The authenticated user response includes `hasDiscordAuth: boolean` and
+`discordUsername: string | null` for the account-link UI. It does not include
+`discordId`; raw Discord identities are GLAB RPC-only data.
+
+It also reports the available login methods so the UI can mirror the server's
+last-login-method rule: `hasPassword`, `hasPasskey`, `hasGitHubAuth`, and
+`hasGoogleAuth`. `hasDiscordAuth` is not a login method and never counts.
+
+## `POST /api/auth/link`
+
+Starts GitHub, Google, or Discord account linking for the authenticated Bearer
+user. The JSON body is `{ "provider": "github" | "google" | "discord" }` and
+the response contains `{ "authorizationUrl": string }`. The response also sets
+the HttpOnly OAuth state cookie, so browser clients must use credentials mode
+before navigating to the returned URL. When the account has a passkey, callers
+must first obtain an `oauth.link` action proof for the provider and send it in
+`X-Cernere-Action-Proof`; unlink uses the corresponding `oauth.unlink` proof.

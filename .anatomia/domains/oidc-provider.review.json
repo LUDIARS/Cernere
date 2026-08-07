@@ -1,0 +1,32 @@
+{
+  "name": "oidc-provider",
+  "description": "Cernere を IdP とする OpenID Connect Provider。認可・token・userinfo に加え、id_token 署名鍵の解決、永続化、ローテーション、JWKS 公開を所有する。",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/server/src/oidc/|/server/src/auth/oidc-|/server/tests/oidc/|/server/tests/auth/oidc-|/migrations/039_oidc_signing_keys",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Oo][Ii][Dd][Cc]|[Jj][Ww][Kk][Ss]|[Ss][Ii][Gg][Nn][Ii][Nn][Gg][Kk][Ee][Yy]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the oidc-provider domain: OIDC protocol flow and the complete id_token signing-key lifecycle, including persistent key storage and JWKS publication.",
+  "source": "review-decision",
+  "mechanics": [],
+  "specRefs": [
+    "spec/feature/oidc-provider.md §1.1",
+    "spec/setup/oidc-provider.md"
+  ],
+  "rationale": "署名鍵は OIDC id_token と JWKS の契約に専用で、一般ユーザ認証や PASETO 鍵とはライフサイクルが異なるため。",
+  "updatedAt": "2026-08-04T03:50:00.000Z"
+}

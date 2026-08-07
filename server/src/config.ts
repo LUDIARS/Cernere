@@ -56,6 +56,11 @@ export const config = {
   googleClientSecret: env("GOOGLE_CLIENT_SECRET", ""),
   googleRedirectUri: env("GOOGLE_REDIRECT_URI", "http://localhost:8080/auth/google/callback"),
 
+  // Discord OAuth (identity linking only)
+  discordClientId: env("DISCORD_CLIENT_ID", ""),
+  discordClientSecret: env("DISCORD_CLIENT_SECRET", ""),
+  discordRedirectUri: env("DISCORD_REDIRECT_URI", "http://localhost:8080/auth/discord/callback"),
+
   // JWT
   jwtSecret: (() => {
     const secret = process.env.JWT_SECRET;

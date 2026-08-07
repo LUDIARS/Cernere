@@ -14,13 +14,28 @@ Cernere を OpenID Connect IdP として外部サービスのログインに使�
 |------|------|------|------|
 | `CERNERE_PUBLIC_URL` | 本番ほぼ必須 | URL (末尾 `/` 無視) | 外部から Cernere に到達する URL。 OIDC エンドポイントと issuer の基準 |
 | `CERNERE_OIDC_ISSUER` | 任意 (既定 = `CERNERE_PUBLIC_URL`) | URL | discovery の `issuer` と id_token の `iss` |
-| `CERNERE_OIDC_PRIVATE_KEY` | 本番必須 | RSA PKCS8 PEM (raw or base64) | id_token 署名鍵 (現行) |
+| `CERNERE_OIDC_MODE` | 任意 (既定 `auto`) | `auto` / `off` | `off` で OIDC を明示的に使わない。 鍵の生成も DB 参照もしない |
+| `CERNERE_OIDC_PRIVATE_KEY` | 任意 | RSA PKCS8 PEM (raw or base64) | id_token 署名鍵 (現行)。 未設定なら DB の鍵を使う |
 | `CERNERE_OIDC_KID` | 任意 (既定 `oidc-1`) | 文字列 | JWKS の現行 key id |
 | `CERNERE_OIDC_PREVIOUS_PUBLIC_KEYS` | 任意 (ローテーション時のみ) | `kid:base64(PEM)` をカンマ区切り | 検証専用の旧 public key。 JWKS に並べて移行ウィンドウ中の id_token 検証を維持する |
 
-> `CERNERE_OIDC_PRIVATE_KEY` が **未設定の場合**:
-> - development: 起動毎に ephemeral RSA 鍵を生成 (再起動で失効、 検証用途のみ)。
-> - production: **OIDC を無効化** (各エンドポイントが 503 を返す)。 既存デプロイを落とさないための挙動。
+鍵の解決順は **env → DB → 生成して DB に保存** (`oidc_signing_keys`、 migration 039)。
+`CERNERE_OIDC_PRIVATE_KEY` を置かなくても kid は再起動をまたいで安定するので、
+外部 secret store への登録は必須ではない。 env を置いた場合は従来どおりそちらが優先される
+(多重インスタンスで鍵を共有したい場合はこちら)。
+
+DB に保存する private key は `CERNERE_SECRET_KEY` で AES-256-GCM 暗号化する
+(RULE.md §7.2、 平文フォールバック無し)。 **env に鍵を置かず DB 経路を使うなら
+`CERNERE_SECRET_KEY` の設定が前提**で、 未設定だと鍵を保存/復号できず OIDC は
+警告のうえ無効化される (起動は止まらない)。
+
+> **OIDC を使わない構成が正常系にある** (neco 裁定 2026-08-04)。 EducationLab のように Cernere 認証だけで
+> 完結するデプロイは OIDC Provider を必要としない。 そのため:
+> - `CERNERE_OIDC_MODE=off` — 明示的に無効化。 鍵を生成せず DB も触らない。 **起動は止まらない**
+> - DB の鍵ストアに到達できない場合も、 警告を出して無効化するだけで起動は続行する
+> - 無効時は各 OIDC エンドポイントが `503 oidc_disabled` を返す (クラッシュしない)
+>
+> 例外は「env に鍵を明示したのに読めない」ケースだけで、 これは設定ミスなので起動時に落とす。
 
 リバースプロキシ / Cloudflare Tunnel 配下では `LISTEN_PORT` ではなく
 **公開ホスト名** を `CERNERE_PUBLIC_URL` に設定すること

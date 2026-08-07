@@ -1,0 +1,57 @@
+{
+  "name": "message-relay",
+  "description": "Cross-session/cross-device message relay: broadcast, per-user, and per-session targets, restricted to same-user sessions by default.",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/server/src/ws/.*relay",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/server/src/project/relay-service",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Rr][Ee][Ll][Aa][Yy]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Bb][Rr][Oo][Aa][Dd][Cc][Aa][Ss][Tt]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Rr][Ee][Ll][Aa][Yy][Ee][Dd]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the \"message-relay\" domain: Cross-session/cross-device message relay: broadcast, per-user, and per-session targets, restricted to same-user sessions by default.",
+  "source": "spec-draft",
+  "mechanics": [],
+  "specRefs": [
+    "Step 4: リレーメッセージの実装",
+    "リレーターゲット",
+    "リレー設計"
+  ],
+  "rationale": "Relay is a named pillar of Cernere (data-relay server) with its own targeting/permission model, separate from generic transport.",
+  "updatedAt": "2026-08-04T00:45:26.850Z"
+}

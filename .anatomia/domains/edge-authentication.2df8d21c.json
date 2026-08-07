@@ -1,0 +1,72 @@
+{
+  "name": "edge-authentication",
+  "description": "Edge/gateway-issued identity assertion path (Cloudflare Access bypass): edge JWKS verification, edge identities, and project edge bindings/offboarding.",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/server/src/auth/edge-",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/server/src/project/edge-",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/server/src/ws/composite-auth",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Ee][Dd][Gg][Ee]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Aa][Ss][Ss][Ee][Rr][Tt][Ii][Oo][Nn]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Jj][Ww][Kk][Ss]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Bb][Ii][Nn][Dd][Ii][Nn][Gg]|[Oo][Ff][Ff][Bb][Oo][Aa][Rr][Dd]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the \"edge-authentication\" domain: Edge/gateway-issued identity assertion path (Cloudflare Access bypass): edge JWKS verification, edge identities, and project edge bindings/offboarding.",
+  "source": "spec-draft",
+  "mechanics": [],
+  "specRefs": [
+    "1.4 脅威モデルと対策",
+    "Step 1: WebSocket 接続の確立"
+  ],
+  "rationale": "The feat/edge-assertion branch adds a distinct edge-trust auth path (edge-assertion, edge-jwks, edge-identity, edge-bindings) that layers onto core auth.",
+  "updatedAt": "2026-08-04T00:45:26.848Z"
+}

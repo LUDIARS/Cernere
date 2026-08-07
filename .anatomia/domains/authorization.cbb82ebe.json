@@ -1,0 +1,73 @@
+{
+  "name": "authorization",
+  "description": "Permission model and the 4-layer destructive-operation defense: system roles (admin/general), org roles (owner/admin/member), token→TTL→user-state→resource-ownership checks.",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/server/src/auth/action-policy",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/server/src/auth/action-proof",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/packages/id-service/src/core/",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Rr][Oo][Ll][Ee]|[Rr][Ee][Qq][Uu][Ii][Rr][Ee].?[Rr][Oo][Ll][Ee]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn]|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Pp][Oo][Ll][Ii][Cc][Yy]|[Pp][Rr][Oo][Oo][Ff]|[Gg][Uu][Aa][Rr][Dd]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Oo][Ww][Nn][Ee][Rr]|[Aa][Dd][Mm][Ii][Nn]|[Mm][Ee][Mm][Bb][Ee][Rr]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the \"authorization\" domain: Permission model and the 4-layer destructive-operation defense: system roles (admin/general), org roles (owner/admin/member), token→TTL→user-state→resource-ownership checks.",
+  "source": "spec-draft",
+  "mechanics": [],
+  "specRefs": [
+    "Step 5: 認可モデルの適用",
+    "Step 6: 破壊的操作の防御層の実装",
+    "多層防御"
+  ],
+  "rationale": "Role hierarchy plus the layered defense against destructive operations is a cross-cutting concern applied by every module.",
+  "updatedAt": "2026-08-04T00:45:26.846Z"
+}

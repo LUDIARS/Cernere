@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     include: ["tests/**/*.test.ts"],
     environment: "node",
+    setupFiles: ["tests/setup.ts"],
     // 認証ユニットテスト用の決定的な値。本番では絶対に使わない。
     // PASETO 鍵はテストごとに動的生成して別途 env へ注入する (paseto.test.ts)。
     env: {

@@ -1,0 +1,82 @@
+{
+  "name": "service-integration-sdk",
+  "description": "SDKs and adapters letting external services authenticate against Cernere: service-adapter WebSocket auth, id-service SDK, id-cache, and compatibility shims.",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/packages/service-adapter/",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/packages/id-service/",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/packages/id-cache/",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/lib/vestigium/",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Aa][Dd][Aa][Pp][Tt][Ee][Rr]|[Ss][Dd][Kk]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Ss][Ee][Rr][Vv][Ii][Cc][Ee].?[Aa][Dd][Aa][Pp][Tt][Ee][Rr]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Pp][Ee][Ee][Rr]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Ii][Dd].?[Ss][Ee][Rr][Vv][Ii][Cc][Ee]|[Ii][Dd].?[Cc][Aa][Cc][Hh][Ee]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the \"service-integration-sdk\" domain: SDKs and adapters letting external services authenticate against Cernere: service-adapter WebSocket auth, id-service SDK, id-cache, and compatibility shims.",
+  "source": "spec-draft",
+  "mechanics": [],
+  "specRefs": [
+    "サービスインターフェース",
+    "2. @cernere/id-service",
+    "3. @cernere/auth",
+    "別プロジェクトへの実装ガイド"
+  ],
+  "rationale": "The packages/ SDKs exist so other LUDIARS services consume Cernere auth; a distinct integration surface separate from the core server.",
+  "updatedAt": "2026-08-04T00:45:26.854Z"
+}

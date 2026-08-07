@@ -10,6 +10,7 @@ describe("redactSensitive", () => {
       refreshToken: "1//0secret",
       password: "hunter2",
       clientSecret: "shh",
+      confirmEmail: "person@example.com",
     }) as Record<string, unknown>;
     expect(out.userId).toBe("u1");
     expect(out.provider).toBe("google");
@@ -17,6 +18,7 @@ describe("redactSensitive", () => {
     expect(out.refreshToken).toBe("[REDACTED]");
     expect(out.password).toBe("[REDACTED]");
     expect(out.clientSecret).toBe("[REDACTED]");
+    expect(out.confirmEmail).toBe("[REDACTED]");
   });
 
   it("masks sensitive keys nested in objects and arrays", () => {

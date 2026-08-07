@@ -8,6 +8,8 @@ export const protectedActionSchema = z.enum([
   "passkey.register",
   "passkey.delete",
   "passkey.device_link",
+  "oauth.link",
+  "oauth.unlink",
   "organization.delete",
   "member.remove",
   "member.update_role",
@@ -20,6 +22,11 @@ export const protectedActionSchema = z.enum([
   "oidc_client.rotate_secret",
   "oidc_client.update_redirect_uris",
   "oidc_client.disable",
+  "edge_idp.register",
+  "edge_idp.update",
+  "edge_idp.enable",
+  "edge_idp.disable",
+  "edge_idp.purge_user",
 ]);
 
 export type ProtectedAction = z.infer<typeof protectedActionSchema>;
@@ -47,6 +54,11 @@ const protectedWsActions = new Set<ProtectedAction>([
   "oidc_client.rotate_secret",
   "oidc_client.update_redirect_uris",
   "oidc_client.disable",
+  "edge_idp.register",
+  "edge_idp.update",
+  "edge_idp.enable",
+  "edge_idp.disable",
+  "edge_idp.purge_user",
 ]);
 
 export function resolveWsActionTarget(
@@ -80,6 +92,15 @@ export function resolveWsActionTarget(
     case "oidc_client.update_redirect_uris":
     case "oidc_client.disable":
       return target(parsedAction.data, requiredString(p, "clientId"));
+    // binding の変更は「どの CF Access アプリのアサーションを受理するか」を書き換える
+    // = セッション発行の前提そのもの。 spec §11 に従い redirect URI 変更と同格に扱う。
+    case "edge_idp.register":
+    case "edge_idp.update":
+    case "edge_idp.enable":
+    case "edge_idp.disable":
+      return target(parsedAction.data, requiredString(p, "projectKey"));
+    case "edge_idp.purge_user":
+      return target(parsedAction.data, requiredString(p, "userId"));
     default:
       return null;
   }

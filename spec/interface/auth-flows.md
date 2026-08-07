@@ -307,7 +307,56 @@ proof は Redis にハッシュキーで保存し、ユーザ、HTTP access toke
 へ結び付ける。TTLは5分で、検証時は `GETDEL` により成功・失敗にかかわらず一度だけ消費する。
 別操作・別対象・別セッションへの流用とリプレイは拒否する。
 
-対象は passkey の追加/削除、アカウント削除、組織削除、メンバー除外/権限変更、プロジェクト削除・
+対象は passkey の追加/削除、OAuth アカウントの link/unlink、アカウント削除、組織削除、メンバー除外/権限変更、プロジェクト削除・
 スキーマ変更・秘密鍵ローテーション、OIDC client の秘密鍵/redirect URI/無効化である。
 ユーザがまだ passkey を1本も持たない場合の最初の登録だけはブートストラップとしてstep-upを免除し、
 最後の1本の削除は拒否する。
+
+## 7. Discord account link / unlink
+
+An authenticated account posts `{ provider: "discord" }` to `/api/auth/link`
+with its Bearer access token. Cernere creates a random state, returns the fixed
+provider authorization URL, sets the HttpOnly `cernere_csrf_state` cookie for
+600 seconds, and stores a structured `oauthlink:<state>` grant in Redis with the
+same TTL. The callback requires
+an exact cookie/state match before exchanging the code with Discord. It requests
+only `identify`, stores `discord_id` and a display username, and discards the
+access token. A Discord identity linked to another user redirects with
+`linkError=discord_already_linked`. Discord-only signup is rejected: no
+`/auth/discord/login` route exists, and a callback whose state has no
+`oauthlink:` entry is refused.
+
+The SPA uses the authenticated POST before navigating, so Google, password,
+passkey, composite, and GitHub sessions can all start a link. The state cookie
+binds the returned URL to the initiating browser: forwarding only the provider
+URL to another browser cannot complete the callback. Link initiation is POST-only;
+there is no credential-changing GET route that can bypass action authentication.
+
+If the account already has a passkey, both link and unlink require a fresh
+`oauth.link` / `oauth.unlink` action proof bound to the provider. Accounts with
+no passkey follow the existing first-credential bootstrap rule; the server does
+not pretend that a step-up method exists when none is registered.
+
+The same Redis-backed handshake handles GitHub and Google linking. The link
+target user id and provider are read only from `oauthlink:<state>`, never from
+the state string itself. A direct callback client can choose its state/cookie,
+so `link:<userId>` carries no authority without the authenticated Redis grant.
+
+Link states are minted as `link:<uuid>`. The prefix is a marker with no
+authority — forging it cannot link anything, because the callback still refuses
+without a matching `oauthlink:<state>` entry. Its only purpose is fail-closed
+routing: a `link:` callback whose Redis entry has expired (600 s) is rejected
+with "Account link expired" instead of falling through to the ordinary sign-in
+path, which would otherwise sign the user into — or newly create — the account
+that owns the OAuth identity.
+
+The structured grant binds both the target user and provider and relies on the
+HttpOnly state cookie issued to that same browser. The callback consumes the
+grant as soon as it resolves the target, so it cannot be replayed with another
+code or moved to another provider callback. Legacy user-id-only grants are
+rejected because they cannot prove the provider-specific action target.
+
+`POST /api/auth/unlink` accepts `{ provider }`. GitHub and Google unlinking is
+rejected with HTTP 409 when it would remove the last password, passkey, or other
+OAuth login method. Discord can always be unlinked because it is not a login
+method.

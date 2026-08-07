@@ -36,6 +36,10 @@ export const users = pgTable("users", {
   googleTokenExpiresAt: bigint("google_token_expires_at", { mode: "number" }),
   googleScopes: jsonb("google_scopes"),
 
+  // Discord is an identifier link only; access tokens are intentionally not retained.
+  discordId: text("discord_id").unique(),
+  discordUsername: text("discord_username"),
+
   // MFA
   // totpSecret は秘密鍵。MFA 配線時は encryptSecret()/decryptSecret() を必ず通す
   // こと (現状未配線で書込みコードは無い)。RULE.md §7.2。
@@ -45,6 +49,12 @@ export const users = pgTable("users", {
   phoneVerified: boolean("phone_verified").notNull().default(false),
   mfaEnabled: boolean("mfa_enabled").notNull().default(false),
   mfaMethods: jsonb("mfa_methods").notNull().default([]),
+
+  // 表示名の出所 (spec/feature/edge-assertion-login.md §5.2.2)。
+  // 'provisional' = email ローカル部の暫定値 / 'idp' = IdP 由来 / 'user' = 本人設定。
+  // 'user' は自動上書きしない。 既定を 'user' にしてあるのは、 既存ユーザの
+  // 表示名をエッジ認証の初回ログインで書き換えないため。
+  displayNameSource: text("display_name_source").notNull().default("user"),
 
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -392,6 +402,24 @@ export const oidcClients = pgTable("oidc_clients", {
   index("idx_oidc_clients_client_id").on(t.clientId),
 ]);
 
+// ── OIDC Signing Keys (id_token 署名専用 RSA 鍵) ──────────────
+// private_key_pem は秘密鍵。 書込みは必ず encryptSecret()、 読出しは decryptSecret()
+// を通すこと (auth/oidc-key-repository.ts に集約)。RULE.md §7.2。
+// public_key_pem は暗号化も改竄検知もしないので運用参照用。 JWKS に載せる public key は
+// 必ず private_key_pem から導出する (auth/oidc-keys.ts)。
+
+export const oidcSigningKeys = pgTable("oidc_signing_keys", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  kid: text("kid").notNull().unique(),
+  privateKeyPem: text("private_key_pem").notNull(),
+  publicKeyPem: text("public_key_pem").notNull(),
+  isCurrent: boolean("is_current").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  retiredAt: timestamp("retired_at", { withTimezone: true }),
+}, (t) => [
+  uniqueIndex("idx_oidc_signing_keys_current").on(t.isCurrent).where(sql`${t.isCurrent}`),
+]);
+
 // ── Project OAuth Tokens (プロジェクト別 OAuth トークンストレージ) ──
 // Cernere を個人データの単一情報源とするため、各プロジェクトは
 // OAuth refresh/access token を自前で保管せず Cernere に預ける。
@@ -458,3 +486,47 @@ export const volputasSurveyAnswers = pgTable("volputas_survey_answers", {
     sql`${t.answerText} IS NULL OR char_length(${t.answerText}) <= 4000`,
   ),
 ]);
+
+// ── Edge Assertion (Cloudflare Access バイパス認証) ──
+// spec/feature/edge-assertion-login.md。 アカウントの正本キーは email で、
+// idp_subject は email 変更に追従するための副次インデックス (任意)。
+
+export const edgeIdentities = pgTable("edge_identities", {
+  id: uuid("id").primaryKey(),
+  provider: text("provider").notNull(),
+  teamDomain: text("team_domain").notNull(),
+  email: text("email").notNull(),
+  idpSubject: text("idp_subject"),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  cfSub: text("cf_sub"),
+  cfUserUuid: text("cf_user_uuid"),
+  idpType: text("idp_type"),
+  idpName: text("idp_name"),
+  groups: jsonb("groups").notNull().default([]),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("idx_edge_identities_email").on(t.provider, t.teamDomain, t.email),
+  index("idx_edge_identities_user").on(t.userId),
+  index("idx_edge_identities_last_seen").on(t.lastSeenAt),
+  // 注: (provider, team_domain, idp_subject) の **部分** unique index
+  // (idx_edge_identities_subject, WHERE idp_subject IS NOT NULL) は
+  // migrations/038_edge_identities.sql 側にだけ存在する。 findIdentityBySubject()
+  // が依存する一意性なので、 この表を触るときは 038 も併せて見ること。
+]);
+
+export const edgeIdpBindings = pgTable("edge_idp_bindings", {
+  projectKey: text("project_key").primaryKey(),
+  provider: text("provider").notNull().default("cf_access"),
+  teamDomain: text("team_domain").notNull(),
+  audTags: jsonb("aud_tags").notNull(),
+  subjectClaim: text("subject_claim"),
+  allowedEmailDomains: jsonb("allowed_email_domains").notNull(),
+  provisioning: text("provisioning").notNull(),
+  defaultRole: text("default_role").notNull().default("general"),
+  adminGroups: jsonb("admin_groups").notNull().default([]),
+  fetchIdentity: boolean("fetch_identity").notNull().default(true),
+  requireDeviceCheck: boolean("require_device_check").notNull().default(false),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});

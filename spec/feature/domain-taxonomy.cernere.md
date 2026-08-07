@@ -35,6 +35,7 @@ Cernere を IdP とする OpenID Connect プロバイダ。認可コード発行
 
 - **oidc-flow** — 認可生成・トークン交換・承認/拒否・userinfo (server/src/oidc)  `paths: (^|/)server/src/oidc/[^/]+$, (^|/)server/tests/oidc/[^/]+$`
 - **oidc-admin-ui** — OIDC クライアント登録・同意画面 (frontend/src/pages/admin, oidc)  `paths: (^|/)frontend/src/pages/admin/[^/]+$, (^|/)frontend/src/pages/oidc/[^/]+$`
+- **oidc-signing-keys** — OIDC id_token の署名鍵解決・永続化・JWKS 公開 (server/src/auth/oidc-*, migration 039)  `paths: (^|/)server/src/auth/oidc-[^/]+$, (^|/)server/tests/auth/oidc-[^/]+$, (^|/)migrations/039_oidc_signing_keys\.sql$`
 
 ## platform-ops
 

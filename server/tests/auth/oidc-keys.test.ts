@@ -4,7 +4,8 @@ import { createPublicKey, type JsonWebKey } from "node:crypto";
 import { getOidcJwks, signIdToken, isOidcEnabled, oidcKid } from "../../src/auth/oidc-keys";
 
 // テスト env (CERNERE_ENV=test, CERNERE_OIDC_PRIVATE_KEY 未設定) では
-// ephemeral RSA キーペアが生成され OIDC は有効になる。
+// tests/setup.ts が空のインメモリ鍵ストアで initOidcKeys() を呼ぶため、
+// RSA キーペアがその場で生成され OIDC は有効になる (DB には触らない)。
 
 describe("oidc-keys", () => {
   it("is enabled with an ephemeral keypair", () => {

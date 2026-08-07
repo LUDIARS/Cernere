@@ -8,7 +8,11 @@ dist
 *.tsbuildinfo
 logs/
 *.log
-.anatomia/
+.anatomia/*
+# ドメイン定義は Revisor の target domain ゲートが参照する成果物なので追跡する
+# (解析キャッシュは上の行のまま無視)。
+!.anatomia/domains/
+!.anatomia/domains/**
 .claude/
 *.stackdump
 **/.pnpm-store/

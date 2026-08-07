@@ -10,6 +10,8 @@ export type ProtectedAction =
   | "passkey.register"
   | "passkey.delete"
   | "passkey.device_link"
+  | "oauth.link"
+  | "oauth.unlink"
   | "organization.delete"
   | "member.remove"
   | "member.update_role"

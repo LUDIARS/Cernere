@@ -1,0 +1,106 @@
+{
+  "name": "authentication",
+  "description": "Credential verification and token issuance: password (bcrypt), GitHub/Google OAuth, MFA (TOTP/SMS/Email), JWT/PASETO signing, and OIDC provider.",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/server/src/auth/",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/server/src/oidc/",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/server/src/http/",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/packages/id-service/src/",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Aa][Uu][Tt][Hh]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Ll][Oo][Gg][Ii][Nn]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Oo][Aa][Uu][Tt][Hh]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Oo][Ii][Dd][Cc]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Jj][Ww][Tt]|[Pp][Aa][Ss][Ee][Tt][Oo]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Mm][Ff][Aa]|[Tt][Oo][Tt][Pp]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Tt][Oo][Kk][Ee][Nn]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Bb][Cc][Rr][Yy][Pp][Tt]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the \"authentication\" domain: Credential verification and token issuance: password (bcrypt), GitHub/Google OAuth, MFA (TOTP/SMS/Email), JWT/PASETO signing, and OIDC provider.",
+  "source": "spec-draft",
+  "mechanics": [],
+  "specRefs": [
+    "1.1 Cernere 概要",
+    "Step 1: WebSocket 接続の確立",
+    "1. cernere (コアサーバー) / 認証機能",
+    "2. @cernere/id-service"
+  ],
+  "rationale": "Multiple auth methods converge in server/src/auth + oidc + http; the id-service package is the reusable SDK for the same concern.",
+  "updatedAt": "2026-08-04T00:45:26.837Z"
+}

@@ -1,0 +1,56 @@
+{
+  "name": "web-frontend",
+  "description": "React 19 + React Router 7 client: pages, hooks, and the WebSocket/auth client library that drives all state changes through the session.",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/frontend/src/",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/packages/composite/src/ui/",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Pp][Aa][Gg][Ee]|[Cc][Oo][Mm][Pp][Oo][Nn][Ee][Nn][Tt]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Hh][Oo][Oo][Kk]|[Uu][Ss][Ee][[Aa]-[Zz]]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Cc][Ll][Ii][Ee][Nn][Tt]|[Qq][Uu][Ee][Rr][Yy]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the \"web-frontend\" domain: React 19 + React Router 7 client: pages, hooks, and the WebSocket/auth client library that drives all state changes through the session.",
+  "source": "spec-draft",
+  "mechanics": [],
+  "specRefs": [
+    "1.1 Cernere 概要",
+    "フロントエンド"
+  ],
+  "rationale": "The React frontend (pages, hooks, client lib) is a coherent presentation domain consuming the WS/auth backend.",
+  "updatedAt": "2026-08-04T00:45:26.856Z"
+}

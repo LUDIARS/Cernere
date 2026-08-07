@@ -1,0 +1,89 @@
+{
+  "name": "session-lifecycle",
+  "description": "Always-connected session state machine: Redis user-state (ustate) tracking, TTL (7d), None→LoggedIn→SessionExpired transitions, session store, and reconnection by session ID.",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/server/src/ws/session-registry",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/server/src/ws/auth",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/server/src/redis",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/server/src/auth/auth-session",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/packages/id-cache/src/",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Ss][Ee][Ss][Ss][Ii][Oo][Nn]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Uu][Ss][Tt][Aa][Tt][Ee]|[Uu][Ss][Ee][Rr]_[Ss][Tt][Aa][Tt][Ee]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Tt][Tt][Ll]|[Ee][Xx][Pp][Ii][Rr][Ee]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "[Rr][Ee][Cc][Oo][Nn][Nn][Ee][Cc][Tt]",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the \"session-lifecycle\" domain: Always-connected session state machine: Redis user-state (ustate) tracking, TTL (7d), None→LoggedIn→SessionExpired transitions, session store, and reconnection by session ID.",
+  "source": "spec-draft",
+  "mechanics": [],
+  "specRefs": [
+    "Step 7: セッション状態管理",
+    "再接続（セッション ID）",
+    "1.3 セキュリティ設計原則"
+  ],
+  "rationale": "The Always-Connected Session and its Redis lifecycle are a distinct concern from credential verification, spanning ws session registry and id-cache.",
+  "updatedAt": "2026-08-04T00:45:26.855Z"
+}

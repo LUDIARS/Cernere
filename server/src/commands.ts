@@ -97,6 +97,7 @@ async function execute(
     case "profile": return profileCmd(userId, action, payload);
     case "managed_project": return managedProjectCmd(userId, action, payload);
     case "oidc_client": return oidcClientCmd(userId, action, payload);
+    case "edge_idp": return edgeIdpCmd(userId, action, payload);
     case "oidc_keys": return oidcKeysCmd(userId, action, payload);
     default:
       throw AppError.badRequest(`Unknown module: ${module}`);
@@ -564,8 +565,51 @@ async function oidcClientCmd(userId: string, action: string, p?: Record<string, 
   }
 }
 
+// -- Edge IdP (Cloudflare Access バイパス認証の binding 管理、 admin 専用) --
+// spec/feature/edge-assertion-login.md §11。 purge_user は破壊的なので
+// action proof (passkey step-up) を WS 層で要求している。
+
+async function edgeIdpCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
+  await requireSystemAdmin(userId);
+
+  switch (action) {
+    case "list": {
+      const svc = await import("./project/edge-bindings.js");
+      return svc.listBindings();
+    }
+    case "register": {
+      const svc = await import("./project/edge-bindings.js");
+      return svc.registerBinding(p);
+    }
+    case "update": {
+      const svc = await import("./project/edge-bindings.js");
+      return svc.updateBinding(requireStr(p, "projectKey"), p ?? {});
+    }
+    case "enable": {
+      const svc = await import("./project/edge-bindings.js");
+      return svc.setBindingActive(requireStr(p, "projectKey"), true);
+    }
+    case "disable": {
+      const svc = await import("./project/edge-bindings.js");
+      return svc.setBindingActive(requireStr(p, "projectKey"), false);
+    }
+    case "stale_identities": {
+      const svc = await import("./project/edge-offboarding.js");
+      const days = p?.days === undefined ? undefined : Number(p.days);
+      return svc.listStaleIdentities(days);
+    }
+    case "purge_user": {
+      const svc = await import("./project/edge-offboarding.js");
+      return svc.purgeEdgeUser(requireStr(p, "userId"), requireStr(p, "confirmEmail"));
+    }
+    default:
+      throw AppError.badRequest(`Unknown edge_idp action: ${action}`);
+  }
+}
+
 // -- OIDC 署名鍵 (JWKS) の状態参照、 admin 専用 --
-// 鍵そのものは env / Infisical で管理する (ローテーション手順は spec/setup/oidc-provider.md)。
+// 鍵そのものは env / Infisical、 または DB (oidc_signing_keys) で管理する
+// (解決順とローテーション手順は spec/setup/oidc-provider.md)。
 // ここでは admin GUI が現行 kid / 公開中の旧 kid を可視化するための読み取りのみ提供する。
 
 async function oidcKeysCmd(userId: string, action: string, _p?: Record<string, unknown>): Promise<unknown> {

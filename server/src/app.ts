@@ -122,13 +122,19 @@ function readBody(res: uWS.HttpResponse): Promise<string> {
   });
 }
 
-function jsonResponse(res: uWS.HttpResponse, status: string, data: unknown): void {
+function jsonResponse(
+  res: uWS.HttpResponse,
+  status: string,
+  data: unknown,
+  cookies: string[] = [],
+): void {
   res.cork(() => {
     res.writeStatus(status)
       .writeHeader("Content-Type", "application/json")
       .writeHeader("Access-Control-Allow-Origin", config.frontendUrl)
-      .writeHeader("Access-Control-Allow-Credentials", "true")
-      .end(JSON.stringify(data));
+      .writeHeader("Access-Control-Allow-Credentials", "true");
+    for (const cookie of cookies) res.writeHeader("Set-Cookie", cookie);
+    res.end(JSON.stringify(data));
   });
 }
 
@@ -194,7 +200,10 @@ export function createApp() {
       res.writeStatus("204 No Content")
         .writeHeader("Access-Control-Allow-Origin", config.frontendUrl)
         .writeHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        .writeHeader("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        .writeHeader(
+          "Access-Control-Allow-Headers",
+          "Content-Type, Authorization, X-Cernere-Action-Proof",
+        )
         .writeHeader("Access-Control-Allow-Credentials", "true")
         .end();
     });
@@ -373,6 +382,7 @@ export function createApp() {
   app.post("/api/auth/:action", async (res, req) => {
     const action = req.getParameter(0) ?? "";
     const authHeader = req.getHeader("authorization") ?? "";
+    const actionProof = req.getHeader("x-cernere-action-proof") ?? "";
     const userAgent = req.getHeader("user-agent") ?? undefined;
     const ip = getRemoteIp(res);
     let aborted = false;
@@ -383,9 +393,9 @@ export function createApp() {
       const body = await readBody(res);
       if (aborted) return;
       devLog("http.auth.body", { action, bodyLen: body.length });
-      const result = await handleAuthRoute(action, body, authHeader, { ip, userAgent });
+      const result = await handleAuthRoute(action, body, authHeader, { ip, userAgent, actionProof });
       devLog("http.auth.ok", { action, status: result.status });
-      jsonResponse(res, result.status, result.data);
+      jsonResponse(res, result.status, result.data, result.cookies);
     } catch (err) {
       if (aborted) return;
       const { status, message } = classifyError(err);
@@ -553,6 +563,8 @@ export function createApp() {
   app.get("/auth/github/callback", (res, req) => handleOAuthRoute(res, req, "github", "callback"));
   app.get("/auth/google/login", (res, req) => handleOAuthRoute(res, req, "google", "login"));
   app.get("/auth/google/callback", (res, req) => handleOAuthRoute(res, req, "google", "callback"));
+  // Discord は link 専用 (login 経路なし)。
+  app.get("/auth/discord/callback", (res, req) => handleOAuthRoute(res, req, "discord", "callback"));
 
   // ── PASETO 公開鍵 (well-known) ────────────────────────────
   // service (= Memoria Hub 等) が起動時 + 定期 fetch して project-token を

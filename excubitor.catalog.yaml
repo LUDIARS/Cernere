@@ -1,0 +1,63 @@
+# Excubitor catalog 断片 — このリポジトリが所有するサービス定義。
+# Excubitor が ${ARS_ROOT} 配下を走査して集積する (Excubitor/catalog/FRAGMENTS.md)。
+#
+# 中央 catalog/services.yaml の撤去 (Excubitor: require service-owned definitions) に伴い、
+# 旧 catalog にあった定義をそのまま移設したもの。
+services:
+  - code: cernere
+    name: Cernere
+    tier: saas
+    project_code: cernere
+    component: backend
+    port: 8080
+    repo: LUDIARS/Cernere
+    runtime: node
+    cwd: ${ARS_ROOT}/Cernere/server
+    command: npm run dev
+    allow_hot_reload: true
+    autostart: false
+    env:
+      LISTEN_PORT: "8080"
+      CERNERE_COMPOSITE_ALLOWED_ORIGINS: http://localhost:5187
+    health:
+      type: http
+      url: http://localhost:8080/health
+      interval_sec: 30
+    infisical:
+      project_id: 19c9e77d-646c-4a0e-a091-b494234953ea
+      environment: dev
+      inject: true
+    # 全サービスへ配る Cernere の接続先 (URL/port は Excubitor が特定可能 → 各サービスの個別設定不要)。
+    provides:
+      CERNERE_URL: http://${host}:${port}
+      CERNERE_BASE_URL: http://${host}:${port}
+      CERNERE_WS_URL: ws://${host}:${port}
+    auto_fix:
+      enabled: false  # pnpm v10 構成のハマりで暴走中、 手動で main を安定化させてから再有効化
+      agent: claude-code
+      max_auto_attempts: 3
+      working_dir: ${ARS_ROOT}/Cernere
+      branch_prefix: excubitor/auto-fix/
+      create_pr: true
+      pr_draft: true
+  - code: cernere-frontend
+    name: Cernere login frontend
+    tier: saas
+    project_code: cernere
+    component: frontend
+    port: 5173
+    repo: LUDIARS/Cernere
+    runtime: node
+    cwd: ${ARS_ROOT}/Cernere/frontend
+    command: npm run dev -- --host 0.0.0.0
+    allow_hot_reload: true
+    depends_on: [cernere]
+    autostart: false
+    env:
+      VITE_BACKEND_URL: http://localhost:8080
+    health:
+      type: http
+      url: http://localhost:5173/
+      interval_sec: 30
+    provides:
+      CERNERE_FRONTEND_URL: http://${host}:${port}

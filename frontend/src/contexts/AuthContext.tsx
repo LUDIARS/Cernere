@@ -29,8 +29,6 @@ interface AuthContextType {
   mfaCancelChallenge: () => void;
   googleAuthUrl: string;
   githubAuthUrl: string;
-  linkGitHubUrl: string;
-  linkGoogleUrl: string;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -76,9 +74,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const refreshToken = params.get("refreshToken");
     const authError = params.get("authError");
     const linked = params.get("linked");
+    // link 失敗のうち、 定型コードで返るもの (現状は Discord の重複連携)。
+    // 拾わないと ?linkError=... が URL に残ったまま無反応になる。
+    const linkError = params.get("linkError");
 
     if (authError) {
       console.error("[AuthContext] OAuth error:", authError);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
+    if (linkError) {
+      console.error("[AuthContext] Account link failed:", linkError);
       window.history.replaceState({}, "", window.location.pathname);
     }
 
@@ -167,8 +173,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         mfaCancelChallenge,
         googleAuthUrl: authApi.getGoogleAuthUrl(),
         githubAuthUrl: authApi.getGitHubAuthUrl(),
-        linkGitHubUrl: authApi.getLinkGitHubUrl(),
-        linkGoogleUrl: authApi.getLinkGoogleUrl(),
       }}
     >
       {children}

@@ -67,6 +67,27 @@ export const dataShareDefinitionSchema = z.object({
 });
 export type DataShareDefinition = z.infer<typeof dataShareDefinitionSchema>;
 
+// ── identity claim 定義 ──────────────────────────────────────
+
+/**
+ * プロジェクトへ開示できる users 側の identity 列。
+ *
+ * これらは project_data_<key> ではなく Cernere 中核の users 行にあるため、
+ * user_data.columns の宣言では届かない。どのプロジェクトがどの claim を
+ * 読めるかは `identity_claims` で宣言する。
+ *
+ * data_sharing と同じく **管理者所有フィールド**。プロジェクトクライアントが
+ * update_schema で自己申告しても保存されない (自己付与の禁止)。
+ * 未宣言なら読めない (fail-closed)。
+ *
+ * 新しい claim を足すときはここに列名を追加する。値は users テーブルの列名で、
+ * SQL へは識別子として補間せず、この許可リストとの照合だけに使う。
+ */
+export const IDENTITY_CLAIMS = ["discord_id", "discord_username"] as const;
+export type IdentityClaim = (typeof IDENTITY_CLAIMS)[number];
+
+export const identityClaimSchema = z.enum(IDENTITY_CLAIMS);
+
 // ── プロジェクト定義 ─────────────────────────────────────────
 
 const projectKeyRegex = /^[a-z][a-z0-9_]{1,62}$/;
@@ -82,6 +103,8 @@ export const projectDefinitionSchema = z.object({
   endpoint: endpointDefinitionSchema.optional(),
   /** データを共有できるプロジェクト */
   data_sharing: z.array(dataShareDefinitionSchema).optional(),
+  /** 開示を許可された users 側 identity 列 (管理者所有、未宣言なら開示しない) */
+  identity_claims: z.array(identityClaimSchema).optional(),
   /** ユーザーデータのカラム定義 (各カラムの module フィールドでモジュール帰属を管理) */
   user_data: z.object({
     columns: z.record(z.string(), columnDefinitionSchema),

@@ -42,6 +42,7 @@ Cernere（PostgreSQL 17 + Drizzle ORM）が **自身で定義・所有する** �
 | サービス / ツール認証 | `tool_clients` | CLI / API ツールの client credentials |
 | | `service_registry` | 登録サービス（service secret・endpoint） |
 | | `service_tickets` | SSO ハンドオフ用 one-time チケット |
+| | `oidc_signing_keys` | OIDC id_token 署名鍵（private key は `encryptSecret()` で暗号化保存） |
 | 委託データ保管 | `project_oauth_tokens` | プロジェクト別 OAuth トークン（個人データ単一情報源） |
 | | `volputas_survey_responses` | Volputas survey×Cernere userの回答header |
 | | `volputas_survey_answers` | 設問単位のTEXT / INTEGER回答 |

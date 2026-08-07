@@ -37,6 +37,11 @@ const config: EnvCliConfig = {
     GOOGLE_CLIENT_SECRET: "",
     GOOGLE_REDIRECT_URI: "http://localhost:8080/auth/google/callback",
 
+    // ─── Discord OAuth ─────────────────────────────────────
+    DISCORD_CLIENT_ID: "",
+    DISCORD_CLIENT_SECRET: "",
+    DISCORD_REDIRECT_URI: "http://localhost:8080/auth/discord/callback",
+
     // ─── AWS ───────────────────────────────────────────────
     AWS_REGION: "ap-northeast-1",
     AWS_SNS_ENABLED: "false",

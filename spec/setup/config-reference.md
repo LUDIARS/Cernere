@@ -38,6 +38,9 @@ Cernere が実際に読む環境変数の正本テーブル。各キーは下記
 | `GOOGLE_CLIENT_ID` | `""` | Google OAuth |
 | `GOOGLE_CLIENT_SECRET` | `""` | 〃 |
 | `GOOGLE_REDIRECT_URI` | `http://localhost:8080/auth/google/callback` | 〃 コールバック |
+| `DISCORD_CLIENT_ID` | `""` | Discord OAuth (link 専用。 未設定なら Discord 連携は無効) |
+| `DISCORD_CLIENT_SECRET` | `""` | 〃 |
+| `DISCORD_REDIRECT_URI` | `http://localhost:8080/auth/discord/callback` | 〃 コールバック |
 
 ## PASETO project-token (paseto.ts)
 

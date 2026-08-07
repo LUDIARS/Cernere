@@ -124,6 +124,15 @@
             "(^|/)frontend/src/pages/admin/[^/]+$",
             "(^|/)frontend/src/pages/oidc/[^/]+$"
           ]
+        },
+        {
+          "name": "oidc-signing-keys",
+          "description": "OIDC id_token の署名鍵解決・永続化・JWKS 公開 (server/src/auth/oidc-*, migration 039)",
+          "paths": [
+            "(^|/)server/src/auth/oidc-[^/]+$",
+            "(^|/)server/tests/auth/oidc-[^/]+$",
+            "(^|/)migrations/039_oidc_signing_keys\\.sql$"
+          ]
         }
       ]
     },

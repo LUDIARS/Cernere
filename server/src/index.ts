@@ -6,6 +6,7 @@ import { config } from "./config.js";
 import { createApp } from "./app.js";
 import { redis } from "./redis.js";
 import { runMigrations } from "./db/migrate.js";
+import { initOidcKeys } from "./auth/oidc-keys.js";
 
 async function main() {
   console.log("=== Cernere Server (uWebSockets.js) ===");
@@ -18,6 +19,7 @@ async function main() {
 
   await runMigrations();
   await redis.connect();
+  await initOidcKeys();
 
   const app = createApp();
 

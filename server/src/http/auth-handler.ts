@@ -21,19 +21,27 @@ import {
   logUserRegister,
   logProjectLogin,
   logProjectLoginFailed,
+  logAuthEvent,
 } from "../logging/auth-logger.js";
 import { devLog } from "../logging/dev-logger.js";
 import { issueAuthCodeForUserId } from "../auth/auth-code.js";
 import { isCompositeTargetAllowed } from "../auth/composite-redirect.js";
+import { AppError } from "../error.js";
+import { canUnlinkProvider } from "../auth/login-methods.js";
+import { actionProofStore, httpActionBinding } from "../auth/action-proof.js";
+import { prepareOAuthLinkForUser } from "./oauth-handler.js";
+import type { OAuthLinkProvider } from "../auth/oauth-link.js";
 
 interface RouteResult {
   status: string;
   data: unknown;
+  cookies?: string[];
 }
 
 export interface RequestCtx {
   ip?: string;
   userAgent?: string;
+  actionProof?: string;
 }
 
 export async function handleAuthRoute(
@@ -51,6 +59,8 @@ export async function handleAuthRoute(
     case "verify": return verify(parseBody(body), ctx);
     case "exchange": return exchange(parseBody(body));
     case "me": return me(authHeader);
+    case "link": return linkProvider(parseBody(body), authHeader, ctx);
+    case "unlink": return unlink(parseBody(body), authHeader, ctx);
     case "composite-session-code": return compositeSessionCode(parseBody(body), authHeader);
     case "project-token": return projectUserToken(parseBody(body), authHeader, ctx);
     case "project-launch-credential": return projectLaunchCredential(parseBody(body), ctx);
@@ -340,14 +350,126 @@ async function me(authHeader: string): Promise<RouteResult> {
     .where(eq(schema.users.id, claims.sub)).limit(1);
   if (!rows[0]) throw new Error("Unauthorized: User not found");
   const u = rows[0];
+  // passkey も独立したログイン手段なので、 連携解除 UI が「最後の1本」を
+  // 正しく判定できるよう有無を返す (server 側 unlink の判定と同じ集合)。
+  const passkeyRows = await db.select({ count: sql<number>`count(*)` }).from(schema.passkeys)
+    .where(eq(schema.passkeys.userId, u.id));
   return {
     status: "200 OK",
     data: {
       id: u.id, name: u.displayName, email: u.email, role: u.role,
-      hasGoogleAuth: !!u.googleId, hasPassword: !!u.passwordHash,
+      hasGoogleAuth: !!u.googleId, hasGitHubAuth: !!u.githubId,
+      hasDiscordAuth: !!u.discordId, discordUsername: u.discordUsername ?? null,
+      hasPassword: !!u.passwordHash,
+      hasPasskey: Number(passkeyRows[0]?.count ?? 0) > 0,
       googleScopes: u.googleScopes ?? [],
     },
   };
+}
+
+async function linkProvider(
+  p: Record<string, unknown>,
+  authHeader: string,
+  ctx: RequestCtx,
+): Promise<RouteResult> {
+  const token = extractBearerToken(authHeader);
+  if (!token) throw new Error("Unauthorized: No token provided");
+  const provider = p.provider;
+  if (provider !== "github" && provider !== "google" && provider !== "discord") {
+    throw AppError.badRequest("Unsupported OAuth provider");
+  }
+
+  const claims = verifyToken(token);
+  const users = await db.select({ id: schema.users.id }).from(schema.users)
+    .where(eq(schema.users.id, claims.sub)).limit(1);
+  if (!users[0]) throw new Error("Unauthorized: User not found");
+
+  await requireCredentialChangeProofIfAvailable(
+    claims.sub,
+    token,
+    ctx.actionProof,
+    "oauth.link",
+    provider,
+  );
+  await checkRateLimit(`oauth-link:${claims.sub}`, 20, 60);
+  const start = await prepareOAuthLinkForUser(provider as OAuthLinkProvider, claims.sub);
+  return {
+    status: "200 OK",
+    data: { authorizationUrl: start.authorizationUrl },
+    cookies: [start.csrfCookie],
+  };
+}
+
+async function unlink(p: Record<string, unknown>, authHeader: string, ctx: RequestCtx): Promise<RouteResult> {
+  const token = extractBearerToken(authHeader);
+  if (!token) throw new Error("Unauthorized: No token provided");
+  const provider = p.provider;
+  if (provider !== "github" && provider !== "google" && provider !== "discord") {
+    throw new AppError(400, "Unsupported OAuth provider");
+  }
+  const claims = verifyToken(token);
+  const rows = await db.select().from(schema.users).where(eq(schema.users.id, claims.sub)).limit(1);
+  const user = rows[0];
+  if (!user) throw new Error("Unauthorized: User not found");
+
+  const hasPasskey = await requireCredentialChangeProofIfAvailable(
+    user.id,
+    token,
+    ctx.actionProof,
+    "oauth.unlink",
+    provider,
+  );
+
+  // Discord is not a login method. Other providers may only be removed if an
+  // alternative password, passkey, or OAuth login remains.
+  if (provider !== "discord") {
+    if (!canUnlinkProvider(provider, {
+      hasPassword: !!user.passwordHash,
+      passkeyCount: hasPasskey ? 1 : 0,
+      hasGitHubAuth: !!user.githubId,
+      hasGoogleAuth: !!user.googleId,
+    })) {
+      logAuthEvent({
+        event: "user.oauth.failed", userId: user.id, provider, unlinkAttempt: true,
+        error: "refused to unlink the last login method", ip: ctx.ip, userAgent: ctx.userAgent,
+      });
+      throw AppError.conflict("Cannot unlink the last login method");
+    }
+  }
+
+  const now = new Date();
+  if (provider === "github") {
+    await db.update(schema.users).set({ githubId: null, updatedAt: now }).where(eq(schema.users.id, user.id));
+  } else if (provider === "google") {
+    await db.update(schema.users).set({
+      googleId: null, googleAccessToken: null, googleRefreshToken: null, googleTokenExpiresAt: null, googleScopes: null, updatedAt: now,
+    }).where(eq(schema.users.id, user.id));
+  } else {
+    await db.update(schema.users).set({ discordId: null, discordUsername: null, updatedAt: now })
+      .where(eq(schema.users.id, user.id));
+  }
+  // link と同じく解除も監査対象 (RULE.md Step 8)。
+  logAuthEvent({ event: "user.oauth", userId: user.id, provider, linked: false, ip: ctx.ip, userAgent: ctx.userAgent });
+  return { status: "200 OK", data: { ok: true } };
+}
+
+async function requireCredentialChangeProofIfAvailable(
+  userId: string,
+  bearerToken: string,
+  proof: string | undefined,
+  action: "oauth.link" | "oauth.unlink",
+  provider: OAuthLinkProvider,
+): Promise<boolean> {
+  const passkeys = await db.select({ id: schema.passkeys.id }).from(schema.passkeys)
+    .where(eq(schema.passkeys.userId, userId)).limit(1);
+  if (passkeys.length === 0) return false;
+  await actionProofStore.consume(proof, {
+    userId,
+    binding: httpActionBinding(bearerToken),
+    action,
+    resource: provider,
+  });
+  return true;
 }
 
 /**

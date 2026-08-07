@@ -85,7 +85,11 @@ interface UserProfile {
   email: string | null;
   role: string;
   hasGoogleAuth: boolean;
+  hasGitHubAuth: boolean;
+  hasDiscordAuth: boolean;
+  discordUsername: string | null;
   hasPassword: boolean;
+  hasPasskey: boolean;
   mfaEnabled: boolean;
   mfaMethods: string[];
   hasPhone: boolean;
@@ -508,17 +512,28 @@ export const auth = {
 
   // ── フェデレーション (アカウントリンク) ──────
 
-  getLinkGitHubUrl() {
-    return "/auth/link/github";
+  async startLinkProvider(
+    provider: "github" | "google" | "discord",
+    requireStepUp: boolean,
+  ): Promise<string> {
+    const proof = requireStepUp ? await authorizeAction("oauth.link", provider) : undefined;
+    const result = await request<{ authorizationUrl: string }>("/api/auth/link", {
+      method: "POST",
+      credentials: "include",
+      headers: proof ? { "X-Cernere-Action-Proof": proof } : undefined,
+      body: JSON.stringify({ provider }),
+    });
+    return result.authorizationUrl;
   },
 
-  getLinkGoogleUrl() {
-    return "/auth/link/google";
-  },
-
-  async unlinkProvider(provider: string): Promise<void> {
+  async unlinkProvider(
+    provider: "github" | "google" | "discord",
+    requireStepUp: boolean,
+  ): Promise<void> {
+    const proof = requireStepUp ? await authorizeAction("oauth.unlink", provider) : undefined;
     await request("/api/auth/unlink", {
       method: "POST",
+      headers: proof ? { "X-Cernere-Action-Proof": proof } : undefined,
       body: JSON.stringify({ provider }),
     });
   },

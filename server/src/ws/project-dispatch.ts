@@ -45,6 +45,33 @@ export async function dispatchProjectCommand(
       return getUserProfile(payload as ProfileGetParams);
     case "profile.update":
       return updateUserProfile(payload as ProfileUpdateParams);
+    // ─── edge assertion (Cloudflare Access バイパス、 spec/feature/edge-assertion-login.md) ───
+    // Hub から生アサーションを受け取り、 Cernere 自身が CF の JWKS で検証する。
+    // Hub の主張は信用しない。 REST は生やさず project WS 限定にしてある。
+    case "auth.edge_assertion": {
+      const { authenticateEdgeAssertion, EdgeAssertionError } = await import("../auth/edge-assertion.js");
+      const { ensureUserProjectRow } = await import("../project/service.js");
+      // payload の形の検査は try の外。 内側に置くと下の catch が握り潰してしまう。
+      const assertion = requireStr(payload, "assertion");
+      const cfAuthorization = typeof payload.cfAuthorization === "string"
+        ? payload.cfAuthorization
+        : undefined;
+      try {
+        const result = await authenticateEdgeAssertion({ projectKey, assertion, cfAuthorization });
+        // composite と同じく、 認証成立時に project_data_<key> の行を確保する。
+        await ensureUserProjectRow(result.userId, projectKey);
+        return { authCode: result.authCode, groups: result.groups };
+      } catch (err) {
+        if (err instanceof EdgeAssertionError) {
+          throw new Error(`edge_assertion_rejected: ${err.reason}`);
+        }
+        // project WS のエラーは message がそのままクライアントへ返る。 想定外の失敗
+        // (DB 制約違反等) の生メッセージで内部構造を晒さないよう、 ここで潰す。
+        console.error("[edge_assertion] unexpected failure:",
+          err instanceof Error ? err.message : err);
+        throw new Error("edge_assertion_rejected: internal");
+      }
+    }
     // ─── auth (embedded SPA login for mobile; CORS-free via project WS) ───
     case "auth.login":
     case "auth.register":
@@ -109,9 +136,15 @@ export async function dispatchProjectCommand(
       if (payload.key && payload.key !== projectKey) {
         throw new Error("project key mismatch");
       }
-      const hasAdminOwnedDataSharing = Object.prototype.hasOwnProperty.call(payload, "data_sharing");
+      // 管理者所有フィールドはプロジェクト側の自己申告で書き換えさせない。
+      // identity_claims を自己付与できると、プロジェクトが users の identity 列を
+      // 勝手に開示対象にできてしまうため data_sharing と同じ扱いにする。
+      const adminOwnedFields = ["data_sharing", "identity_claims"] as const;
+      const submittedAdminOwned = adminOwnedFields.filter(
+        (f) => Object.prototype.hasOwnProperty.call(payload, f),
+      );
       const projectOwnedPayload = { ...payload };
-      delete projectOwnedPayload.data_sharing;
+      for (const field of adminOwnedFields) delete projectOwnedPayload[field];
       const protectedDef = {
         ...projectOwnedPayload,
         project: { ...(projectOwnedPayload.project as object ?? {}), key: projectKey },
@@ -119,8 +152,8 @@ export async function dispatchProjectCommand(
       // project client の schema auto-sync では管理者所有の data_sharing を保存対象から
       // 外す。updateProjectSchema の partial-update semantics が現行 grant を保持する。
       const result = await svc.updateProjectSchema(projectKey, protectedDef, undefined);
-      return hasAdminOwnedDataSharing
-        ? { ...result, adminOwnedFieldsPreserved: ["data_sharing"] }
+      return submittedAdminOwned.length > 0
+        ? { ...result, adminOwnedFieldsPreserved: submittedAdminOwned }
         : result;
     }
     // ─── OAuth token storage (個人データ保管禁止ルールの基盤) ───
@@ -192,6 +225,36 @@ export async function dispatchProjectCommand(
       requireVolputasProject(projectKey);
       const service = await import("../project/volputas-survey-response.js");
       return service.saveResponse(payload);
+    }
+    // ─── identity claim / 横断検索 ───
+    //
+    // users 側の identity 列 (discord_id 等) と「条件に合うユーザの列挙」を、
+    // サービス名に依存しない形で提供する。可否は managed_projects の
+    // schema_definition (identity_claims / user_data.columns) だけで決まるため、
+    // Cernere は呼び出し元が何のサービスかを知らなくてよい。
+    case "managed_project.get_identity_claims": {
+      const service = await import("../project/identity-claims.js");
+      const userId = requireStr(payload, "userId");
+      const claims = Array.isArray(payload.claims) ? payload.claims as string[] : undefined;
+      return service.getIdentityClaims(projectKey, userId, claims);
+    }
+    case "managed_project.resolve_user_by_claim": {
+      const service = await import("../project/identity-claims.js");
+      return service.resolveUserByClaim(
+        projectKey,
+        requireStr(payload, "claim"),
+        requireStr(payload, "value"),
+      );
+    }
+    case "managed_project.list_user_data": {
+      const service = await import("../project/user-data-query.js");
+      return service.listUserData(projectKey, {
+        columns: Array.isArray(payload.columns) ? payload.columns as string[] : undefined,
+        where: (payload.where ?? undefined) as Record<string, string | number | boolean | null> | undefined,
+        activeAt: (payload.activeAt ?? undefined) as { column: string; at?: string } | undefined,
+        claims: Array.isArray(payload.claims) ? payload.claims as string[] : undefined,
+        limit: typeof payload.limit === "number" ? payload.limit : undefined,
+      });
     }
     // ─── managed_relay: peer SA 間の仲介 (Phase 0b) ───
     //
@@ -279,7 +342,13 @@ async function updateUserProfile(p: ProfileUpdateParams): Promise<unknown> {
 
   // users テーブル側の更新 (displayName / avatarUrl)
   const userUpdates: Record<string, unknown> = { updatedAt: now };
-  if (typeof p.displayName === "string") userUpdates.displayName = p.displayName;
+  if (typeof p.displayName === "string") {
+    userUpdates.displayName = p.displayName;
+    // 本人が名乗った時点で表示名の出所は 'user' に確定する。 ここで印を付けないと
+    // エッジ認証の次回ログインが IdP 名で上書きしてしまう
+    // (spec/feature/edge-assertion-login.md §5.2.2)。
+    userUpdates.displayNameSource = "user";
+  }
   if (typeof p.avatarUrl === "string" || p.avatarUrl === null) userUpdates.avatarUrl = p.avatarUrl;
   if (Object.keys(userUpdates).length > 1) {
     await db.update(schema.users).set(userUpdates).where(eq(schema.users.id, userId));

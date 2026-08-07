@@ -24,6 +24,7 @@ const SENSITIVE_KEY_PARTS = [
   "totp",
   "privatekey",
   "private_key",
+  "email",        // email / confirmEmail are personal data, not audit payload
 ];
 
 function isSensitiveKey(key: string): boolean {
