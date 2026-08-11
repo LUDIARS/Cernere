@@ -77,10 +77,27 @@ Layer 4: リソース所有権・ロールチェック (403)
 
 ### 依存インストール
 
+clone 直後・`git worktree add` 直後は、まずルートで bootstrap を実行する:
+
+```bash
+npm run bootstrap
+```
+
+`lib/vestigium` は git submodule で、 server が `file:../lib/vestigium` で参照している。
+submodule が空のまま `npm ci` すると解決に失敗し、 submodule を取得しただけでも
+vestigium の `prepare` が `npx tsc` を解決できずに失敗する。 bootstrap は
+「submodule 取得 → vestigium ビルド → ルート・server・frontend・bootstrap 対象 package を install」を
+正しい順序で実行する。
+
+依存を個別に入れ直す場合は bootstrap 後に:
+
 ```bash
 cd server && npm install
 cd frontend && npm install
 ```
+
+> パッケージマネージャは **npm に統一**している (lockfile は `package-lock.json` のみ)。
+> pnpm で install すると CI・Revisor と別のツリーになるため使わないこと。
 
 ### 環境変数
 

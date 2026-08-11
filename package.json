@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "bootstrap": "node scripts/bootstrap.mjs",
     "dev": "npm run env:gen && npx dotenv-cli -- concurrently -n api,web -c green,cyan \"npm run dev --prefix server\" \"npx dotenv-cli -- npm run dev --prefix frontend\"",
     "dev:server": "npx dotenv-cli -- npm run dev --prefix server",
     "dev:front": "npx dotenv-cli -- npm run dev --prefix frontend",

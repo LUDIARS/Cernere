@@ -16,5 +16,4 @@ logs/
 .claude/
 *.stackdump
 **/.pnpm-store/
-packages/*/package-lock.json
 .env.bak*

@@ -27,11 +27,9 @@ jobs:
         with:
           node-version: '24.14.1'
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
+      # lib/vestigium は file: 依存なので、 server の npm ci より先に dist を作る。
+      # --ignore-scripts で prepare を止めてから build するのは、 prepare の npx tsc が
+      # node_modules 未展開の状態では解決できないため (scripts/bootstrap.mjs と同じ手順)。
       - name: Build Vestigium submodule
         working-directory: lib/vestigium
         run: |
@@ -39,7 +37,7 @@ jobs:
           npm run build
 
       - name: Install dependencies
-        run: pnpm install
+        run: npm ci
 
       - name: Type check
         run: npx tsc --noEmit
@@ -47,7 +45,7 @@ jobs:
       # 認証コア (JWT / PASETO トークンの署名・検証・異常系) の unit テスト。
       # DB/Redis 不要で動く純ロジックのみ。
       - name: Tests
-        run: pnpm test
+        run: npm test
 
   frontend-typecheck:
     name: Frontend TypeScript Check
@@ -63,13 +61,8 @@ jobs:
         with:
           node-version: '24.14.1'
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
       - name: Install dependencies
-        run: pnpm install
+        run: npm ci
 
       - name: Type check
         run: npx tsc -b --noEmit
@@ -88,13 +81,8 @@ jobs:
         with:
           node-version: '24.14.1'
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
       - name: Install dependencies
-        run: pnpm install
+        run: npm ci
 
       - name: Type check
         run: npx tsc --noEmit
