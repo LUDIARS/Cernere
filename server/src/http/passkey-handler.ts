@@ -21,7 +21,7 @@
  */
 
 import crypto from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   generateRegistrationOptions,
   verifyRegistrationResponse,
@@ -760,7 +760,12 @@ async function exportPasskeys(authHeader: string, query: string): Promise<RouteR
 
   // ?project=<key> は将来の絞り込み用。 passkeys テーブルに project 概念が
   // 無い (= user に紐付くのみ) ため、 現状は受け取るだけで全件を返す。
-  const project = new URLSearchParams(query).get("project") ?? undefined;
+  const params = new URLSearchParams(query);
+  const project = params.get("project") ?? undefined;
+  const rawFacilityId = params.get("facilityId") ?? undefined;
+  const parsedFacilityId = z.string().uuid().optional().safeParse(rawFacilityId);
+  if (!parsedFacilityId.success) throw AppError.badRequest("facilityId must be a UUID");
+  const facilityId = parsedFacilityId.data;
 
   const rows = await db.select({
     userId: schema.passkeys.userId,
@@ -770,14 +775,35 @@ async function exportPasskeys(authHeader: string, query: string): Promise<RouteR
     transports: schema.passkeys.transports,
   }).from(schema.passkeys);
 
-  const credentials = rows.map((r) => ({
-    userId: r.userId,
-    credentialId: r.credentialId,                              // base64url (登録時のまま)
-    publicKey: Buffer.from(r.publicKey).toString("base64"),   // COSE bytes → base64
-    counter: Number(r.counter),
-    transports: Array.isArray(r.transports) ? (r.transports as string[]) : [],
-  }));
+  const userIds = [...new Set(rows.map((r) => r.userId))];
+  const memberships = userIds.length === 0 ? [] : await db.select({
+    userId: schema.organizationMembers.userId,
+    facilityId: schema.organizationMembers.organizationId,
+    role: schema.organizationMembers.role,
+  }).from(schema.organizationMembers).where(inArray(schema.organizationMembers.userId, userIds));
+  const membershipByUser = new Map<string, typeof memberships>();
+  for (const membership of memberships) {
+    const list = membershipByUser.get(membership.userId) ?? [];
+    list.push(membership); membershipByUser.set(membership.userId, list);
+  }
 
-  devLog("passkey.export", { count: credentials.length, project: project ?? null });
+  const credentials = rows
+    .filter((r) => !facilityId || membershipByUser.get(r.userId)?.some((m) => m.facilityId === facilityId))
+    .map((r) => {
+      // 施設指定時に、同じユーザーが所属する別施設の ID / role を漏らさない。
+      const visibleMemberships = (membershipByUser.get(r.userId) ?? [])
+        .filter((membership) => !facilityId || membership.facilityId === facilityId);
+      return {
+        userId: r.userId,
+        credentialId: r.credentialId,                              // base64url (登録時のまま)
+        publicKey: Buffer.from(r.publicKey).toString("base64"),   // COSE bytes → base64
+        counter: Number(r.counter),
+        transports: Array.isArray(r.transports) ? (r.transports as string[]) : [],
+        roles: [...new Set(visibleMemberships.map((m) => m.role))],
+        facilityIds: [...new Set(visibleMemberships.map((m) => m.facilityId))],
+      };
+    });
+
+  devLog("passkey.export", { count: credentials.length, project: project ?? null, facilityId: facilityId ?? null });
   return { status: "200 OK", data: { credentials } };
 }

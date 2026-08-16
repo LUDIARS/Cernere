@@ -147,6 +147,11 @@ export const config = {
   webauthnOrigins:
     env("WEBAUTHN_ORIGINS", env("FRONTEND_URL", "http://localhost:5173"))
       .split(",").map(s => s.trim()).filter(Boolean),
+
+  // 顔テンプレートは保存鍵と施設配布鍵を分離する。どちらも Infisical/env-cli が
+  // 注入し、リポジトリや .env.example に値を置かない。
+  faceTemplateStorageKey: env("FACE_TEMPLATE_STORAGE_KEY", ""),
+  faceTemplateDistributionKeys: env("FACE_TEMPLATE_DISTRIBUTION_KEYS", ""),
 } as const;
 
 /**

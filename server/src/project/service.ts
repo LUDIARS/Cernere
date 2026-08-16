@@ -526,6 +526,18 @@ export async function deleteUserAccount(
     throw AppError.notFound("User not found");
   }
 
+  // 顔テンプレートの物理削除より先に既知の FK blocker を確認する。ここを後回しに
+  // すると、組織所有者の退会が失敗したのに生体登録だけ失われる部分削除になる。
+  const ownedOrganizations = await db.select({ id: dbSchema.organizations.id })
+    .from(dbSchema.organizations)
+    .where(eq(dbSchema.organizations.createdBy, userId))
+    .limit(1);
+  if (ownedOrganizations.length > 0) {
+    throw AppError.conflict("User owns organizations and cannot be deleted");
+  }
+
+  const { revokeFaceTemplates } = await import("../identity/face-template-store.js");
+  await revokeFaceTemplates(userId, undefined, "account_deleted", true);
   await db.transaction(async (tx) => {
     // 監査ログを purge (token/PII が params に残らないよう、かつ FK ブロック解消)。
     await tx.delete(dbSchema.operationLogs)

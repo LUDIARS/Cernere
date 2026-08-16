@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import QRCode from "qrcode";
 import { useAuth } from "../contexts/AuthContext";
 import { LinkedAccountsSection } from "./LinkedAccountsSection";
-import { profile as profileApi, auth as authApi, type UserProfileData, type ProfilePrivacy } from "../lib/api";
+import { profile as profileApi, auth as authApi, faceTemplates, type UserProfileData, type ProfilePrivacy } from "../lib/api";
 
 export function ProfilePage() {
   const { user } = useAuth();
@@ -251,9 +251,31 @@ export function ProfilePage() {
         <LinkedAccountsSection />
 
         <PasskeySection />
+        <FaceTemplateSection />
       </div>
     </div>
   );
+}
+
+function FaceTemplateSection() {
+  const [items, setItems] = useState<Array<{ facilityId: string; modelId: string; version: number; enrolledAt: string }>>([]);
+  const [message, setMessage] = useState("");
+  const refresh = useCallback(async () => {
+    try { setItems((await faceTemplates.status()).items); }
+    catch (error) { setMessage(`⚠ ${(error as Error).message}`); }
+  }, []);
+  useEffect(() => { void refresh(); }, [refresh]);
+  const remove = async (facilityId: string) => {
+    if (!window.confirm("この施設の顔認証登録を削除しますか？ この操作は取り消せません。")) return;
+    try { await faceTemplates.remove(facilityId); setMessage("✓ 顔認証の登録を削除しました"); await refresh(); }
+    catch (error) { setMessage(`⚠ ${(error as Error).message}`); }
+  };
+  return <div style={{ background: "var(--bg-surface-2)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "1.5rem", marginTop: "1rem" }}>
+    <h2 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.5rem", color: "var(--text-muted)" }}>顔認証</h2>
+    <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>登録済みの顔テンプレートは暗号化して保持されます。写真は保存しません。</p>
+    {message && <p style={{ fontSize: "0.8rem", color: message.startsWith("⚠") ? "var(--red)" : "var(--green)" }}>{message}</p>}
+    {items.length === 0 ? <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>顔認証は登録されていません。</p> : <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>{items.map((item) => <li key={item.facilityId} style={{ display: "flex", gap: "0.75rem", alignItems: "center", padding: "0.5rem 0" }}><span style={{ flex: 1, fontSize: "0.85rem" }}>登録済み ({new Date(item.enrolledAt).toLocaleDateString()})</span><button type="button" onClick={() => { void remove(item.facilityId); }} style={{ color: "var(--red)", border: "1px solid var(--red)", background: "transparent", borderRadius: "var(--radius-sm)", padding: "0.25rem 0.6rem" }}>削除</button></li>)}</ul>}
+  </div>;
 }
 
 // ── 他のデバイスを登録 (one-time link 発行) ────────────────────

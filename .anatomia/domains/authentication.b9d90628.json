@@ -1,6 +1,6 @@
 {
   "name": "authentication",
-  "description": "Credential verification and token issuance: password (bcrypt), GitHub/Google OAuth, MFA (TOTP/SMS/Email), JWT/PASETO signing, and OIDC provider.",
+  "description": "Credential verification, token issuance, and biometric identity templates: password (bcrypt), GitHub/Google OAuth, MFA, passkeys, JWT/PASETO, OIDC, and consent-bound face templates.",
   "presetRules": [
     {
       "preset": "couplingCap",
@@ -14,6 +14,14 @@
       "preset": "couplingCap",
       "params": {
         "targetPattern": "/server/src/oidc/",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/server/src/identity/",
         "by": "path",
         "maxFanOut": 9007199254740991
       }
@@ -92,15 +100,16 @@
     }
   ],
   "templateRules": [],
-  "cardTemplate": "Summarise the \"authentication\" domain: Credential verification and token issuance: password (bcrypt), GitHub/Google OAuth, MFA (TOTP/SMS/Email), JWT/PASETO signing, and OIDC provider.",
+  "cardTemplate": "Summarise the \"authentication\" domain: Credential verification, token issuance, and consent-bound biometric identity templates.",
   "source": "spec-draft",
   "mechanics": [],
   "specRefs": [
     "1.1 Cernere 概要",
     "Step 1: WebSocket 接続の確立",
     "1. cernere (コアサーバー) / 認証機能",
-    "2. @cernere/id-service"
+    "2. @cernere/id-service",
+    "顔テンプレート保存・配布"
   ],
-  "rationale": "Multiple auth methods converge in server/src/auth + oidc + http; the id-service package is the reusable SDK for the same concern.",
-  "updatedAt": "2026-08-04T00:45:26.837Z"
+  "rationale": "Authentication methods and biometric identity material converge in server/src/auth, identity, oidc, and http; the id-service package is the reusable SDK for the same concern.",
+  "updatedAt": "2026-08-16T00:00:00.000Z"
 }

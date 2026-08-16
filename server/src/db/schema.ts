@@ -146,6 +146,50 @@ export const organizations = pgTable("organizations", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const faceConsents = pgTable("face_consents", {
+  id: uuid("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  policyVersion: text("policy_version").notNull(),
+  facilityId: uuid("facility_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+}, (t) => [
+  index("idx_face_consents_user_facility").on(t.userId, t.facilityId),
+]);
+
+// ── Face templates ──────────────────────────────────────────
+// 生テンプレートは決して DB に置かない。templateEnc は AES-256-GCM の
+// nonce/ciphertext/tag を結合した bytea で、復号は専用 service に閉じる。
+export const faceTemplates = pgTable("face_templates", {
+  id: uuid("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  templateEnc: bytea("template_enc").notNull(),
+  keyId: text("key_id").notNull(),
+  modelId: text("model_id").notNull(),
+  quality: integer("quality").notNull(),
+  version: integer("version").notNull(),
+  facilityId: uuid("facility_id").notNull().references(() => organizations.id),
+  // 登録担当者の退会が、他ユーザーのテンプレート削除をブロックしないよう nullable。
+  enrolledBy: uuid("enrolled_by").references(() => users.id, { onDelete: "set null" }),
+  consentId: uuid("consent_id").notNull().references(() => faceConsents.id),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("idx_face_templates_user_facility").on(t.userId, t.facilityId),
+  index("idx_face_templates_facility_active").on(t.facilityId, t.revokedAt),
+]);
+
+export const faceTemplateTombstones = pgTable("face_template_tombstones", {
+  id: uuid("id").primaryKey(),
+  userId: uuid("user_id").notNull(),
+  facilityId: uuid("facility_id").notNull(),
+  version: integer("version").notNull(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }).notNull(),
+  reason: text("reason").notNull(),
+}, (t) => [
+  index("idx_face_template_tombstones_facility_time").on(t.facilityId, t.revokedAt),
+]);
+
 export const organizationMembers = pgTable("organization_members", {
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),

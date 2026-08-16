@@ -9,6 +9,7 @@ import uWS from "uWebSockets.js";
 import { config } from "./config.js";
 import { handleAuthRoute } from "./http/auth-handler.js";
 import { handlePasskeyRoute } from "./http/passkey-handler.js";
+import { handleFaceTemplateRoute } from "./http/face-template-handler.js";
 import { handleActionAuthRoute } from "./http/action-auth-handler.js";
 import { exportProjectSchemas } from "./http/project-schema-handler.js";
 import { getPublicKeys } from "./auth/paseto.js";
@@ -111,14 +112,34 @@ function parseWsAuthProtocol(
   return { creds, echo };
 }
 
-function readBody(res: uWS.HttpResponse): Promise<string> {
+function readBody(
+  res: uWS.HttpResponse,
+  maxBytes = Number.POSITIVE_INFINITY,
+  onAborted?: () => void,
+): Promise<string> {
   return new Promise((resolve, reject) => {
-    let buffer = "";
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    let tooLarge = false;
     res.onData((chunk, isLast) => {
-      buffer += Buffer.from(chunk).toString();
-      if (isLast) resolve(buffer);
+      const bytes = Buffer.from(chunk);
+      totalBytes += bytes.length;
+      if (totalBytes > maxBytes) {
+        tooLarge = true;
+        chunks.length = 0;
+      } else if (!tooLarge) {
+        // Buffer として結合してから UTF-8 decode し、chunk 境界での文字化けを防ぐ。
+        chunks.push(bytes);
+      }
+      if (isLast) {
+        if (tooLarge) reject(AppError.badRequest("Request body is too large"));
+        else resolve(Buffer.concat(chunks, totalBytes).toString("utf8"));
+      }
     });
-    res.onAborted(() => reject(new Error("Request aborted")));
+    res.onAborted(() => {
+      onAborted?.();
+      reject(new Error("Request aborted"));
+    });
   });
 }
 
@@ -199,7 +220,7 @@ export function createApp() {
     res.cork(() => {
       res.writeStatus("204 No Content")
         .writeHeader("Access-Control-Allow-Origin", config.frontendUrl)
-        .writeHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        .writeHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         .writeHeader(
           "Access-Control-Allow-Headers",
           "Content-Type, Authorization, X-Cernere-Action-Proof",
@@ -468,6 +489,47 @@ export function createApp() {
       jsonResponse(res, status, { error: message });
     }
   });
+
+  // ── Face template / consent / roster ──────────────────────
+  // 全メソッドを一箇所で受け、認可と保存境界は face-template-handler に閉じる。
+  const registerFaceRoute = (method: "get" | "post" | "put" | "delete", url: string, path: string) => {
+    const handler = async (res: uWS.HttpResponse, req: uWS.HttpRequest) => {
+      const authHeader = req.getHeader("authorization") ?? "";
+      const query = req.getQuery() ?? "";
+      const readsBody = method === "post" || method === "put"
+        || (method === "delete" && path === "template/:userId");
+      let aborted = false;
+      if (!readsBody) res.onAborted(() => { aborted = true; });
+      try {
+        // base64 template を含めても 1 MiB を超える payload は受理しない。
+        const body = readsBody
+          ? await readBody(res, 1_100_000, () => { aborted = true; })
+          : "";
+        if (aborted) return;
+        const actualPath = path === "template/:userId" ? `template/${req.getParameter(0) ?? ""}` : path;
+        const result = await handleFaceTemplateRoute(method.toUpperCase(), actualPath, body, authHeader, query);
+        jsonResponse(res, result.status, result.data);
+      } catch (err) {
+        if (aborted) return;
+        const { status, message } = classifyError(err);
+        jsonResponse(res, status, { error: message });
+      }
+    };
+    switch (method) {
+      case "get": app.get(url, handler); break;
+      case "post": app.post(url, handler); break;
+      case "put": app.put(url, handler); break;
+      case "delete": app.del(url, handler); break;
+    }
+  };
+  registerFaceRoute("get", "/api/identity/face-consent/policy", "policy");
+  registerFaceRoute("post", "/api/identity/face-consent", "consent");
+  registerFaceRoute("get", "/api/identity/face-template/status", "status");
+  registerFaceRoute("put", "/api/identity/face-template", "template");
+  registerFaceRoute("delete", "/api/identity/face-template", "template");
+  registerFaceRoute("delete", "/api/identity/face-template/:userId", "template/:userId");
+  registerFaceRoute("get", "/api/identity/face-template/export", "export");
+  registerFaceRoute("get", "/api/identity/roster", "roster");
 
   // ── Project schema export (GET): スキーマ定義 shape のみ (admin/service 限定) ──
   // Foedus (クロスサービス契約/PII レビューア) がコミット済み JSON の代わりに

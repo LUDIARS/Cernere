@@ -19,6 +19,7 @@ import { eq, and, sql, inArray } from "drizzle-orm";
 import { AppError } from "./error.js";
 import { getUserState } from "./redis.js";
 import { redactSensitive } from "./lib/redact.js";
+import { revokeFaceTemplates, revokeFacilityFaceTemplates } from "./identity/face-template-store.js";
 
 /**
  * Layer 2-3 を要求しないコマンド (主に「現在ログイン中であることを必須としない」もの).
@@ -157,6 +158,7 @@ async function organizationCmd(userId: string, action: string, p?: Record<string
     case "delete": {
       await requireSystemAdmin(userId);
       const orgId = requireStr(p, "organizationId");
+      await revokeFacilityFaceTemplates(orgId, "facility_deleted");
       await db.delete(schema.organizations).where(eq(schema.organizations.id, orgId));
       return { ok: true };
     }
@@ -211,6 +213,7 @@ async function memberCmd(userId: string, action: string, p?: Record<string, unkn
       if (targetUserId !== userId) {
         await requireOrgRole(userId, orgId, ["admin", "owner", "maintainer"]);
       }
+      await revokeFaceTemplates(targetUserId, orgId, "membership_removed", true);
       await db.delete(schema.organizationMembers)
         .where(and(
           eq(schema.organizationMembers.organizationId, orgId),

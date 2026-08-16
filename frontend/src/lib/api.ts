@@ -539,6 +539,16 @@ export const auth = {
   },
 };
 
+export const faceTemplates = {
+  status(): Promise<{ items: Array<{ facilityId: string; modelId: string; version: number; enrolledAt: string }> }> {
+    return request("/api/identity/face-template/status");
+  },
+  remove(facilityId?: string): Promise<{ ok: true; removed: number }> {
+    const suffix = facilityId ? `?facilityId=${encodeURIComponent(facilityId)}` : "";
+    return request(`/api/identity/face-template${suffix}`, { method: "DELETE" });
+  },
+};
+
 // ── OIDC Provider consent API ─────────────────────
 // Cernere を IdP とする RP (Cloudflare Access 等) の認可同意フロー。
 // /oidc/authorize がフロントの /oidc/consent に飛ばし、 ここで承認/拒否する。
