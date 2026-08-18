@@ -322,16 +322,76 @@ export async function deleteProject(key: string) {
   return { message: "Project deactivated", key };
 }
 
+/**
+ * payload.project に key / name が無ければ既存 managed_project の値で補う。
+ * 呼び出し側が明示した値は上書きしない。
+ */
+export function withExistingProjectMeta(
+  payload: unknown,
+  existing: { key: string; name: string; description: string },
+): unknown {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const body = payload as Record<string, unknown>;
+  if (body.project !== undefined && (
+    body.project === null
+    || typeof body.project !== "object"
+    || Array.isArray(body.project)
+  )) return payload;
+  const project = (body.project ?? {}) as Record<string, unknown>;
+  return {
+    ...body,
+    project: {
+      key: existing.key,
+      name: existing.name,
+      ...(existing.description ? { description: existing.description } : {}),
+      ...project,
+    },
+  };
+}
+
+/**
+ * partial update で省略された既存フィールドを保持する。
+ * data_sharing / identity_claims は管理者所有なので、project auto-sync で消さない。
+ */
+export function preserveExistingDefinitionFields(
+  definition: ProjectDefinition,
+  existing: ProjectDefinition | null | undefined,
+): ProjectDefinition {
+  if (!existing) return definition;
+
+  return {
+    ...definition,
+    project: {
+      ...definition.project,
+      ...(!definition.project.description && existing.project?.description
+        ? { description: existing.project.description }
+        : {}),
+    },
+    ...(definition.endpoint === undefined && existing.endpoint !== undefined
+      ? { endpoint: existing.endpoint }
+      : {}),
+    ...(definition.data_sharing === undefined && existing.data_sharing !== undefined
+      ? { data_sharing: existing.data_sharing }
+      : {}),
+    ...(definition.identity_claims === undefined && existing.identity_claims !== undefined
+      ? { identity_claims: existing.identity_claims }
+      : {}),
+  };
+}
+
 export async function updateProjectSchema(key: string, payload: unknown, userId?: string) {
   const rows = await db.select().from(dbSchema.managedProjects)
     .where(eq(dbSchema.managedProjects.key, key)).limit(1);
   if (rows.length === 0) throw AppError.notFound("Project not found");
 
-  const parsed = projectDefinitionSchema.safeParse(payload);
+  // partial-update セマンティクス: プロジェクト側の起動時 auto-sync は
+  // `{ user_data }` だけを送ってくる (project.name を持たない)。既存行の
+  // name / description を補ってから検証し、宣言経路が 400 で落ちないようにする。
+  const parsed = projectDefinitionSchema.safeParse(withExistingProjectMeta(payload, rows[0]));
   if (!parsed.success) {
     throw AppError.badRequest(`Invalid definition: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`);
   }
-  const definition = parsed.data;
+  let definition = parsed.data;
 
   if (definition.project.key !== key) {
     throw AppError.badRequest("Project key in body does not match request key");
@@ -357,16 +417,8 @@ export async function updateProjectSchema(key: string, payload: unknown, userId?
 
   // payload に top-level field が無ければ旧値を保持 (partial-update セマンティクス).
   // サービスの起動時 auto-sync は user_data のみ送ってくるが、その際に
-  // 既存の endpoint / data_sharing を消してしまわないようにする。
-  if (definition.endpoint === undefined && oldDef?.endpoint) {
-    definition.endpoint = oldDef.endpoint;
-  }
-  if (definition.data_sharing === undefined && oldDef?.data_sharing) {
-    definition.data_sharing = oldDef.data_sharing;
-  }
-  if (!definition.project.description && oldDef?.project?.description) {
-    definition.project.description = oldDef.project.description;
-  }
+  // 既存の endpoint / data_sharing / identity_claims を消してしまわないようにする。
+  definition = preserveExistingDefinitionFields(definition, oldDef);
 
   await db.update(dbSchema.managedProjects).set({
     name: definition.project.name,
