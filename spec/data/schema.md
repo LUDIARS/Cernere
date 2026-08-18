@@ -4,7 +4,7 @@ Cernere 所有テーブルの列定義一覧。型は PostgreSQL 型で表記
 （`timestamptz` = `timestamp with time zone`）。出典:
 [`server/src/db/schema.ts`](../../server/src/db/schema.ts) / `migrations/*.sql`。
 
-> 除外: 動的 `project_data_<key>` テーブル（他サービス委託データ）。スコープは
+> 除外: 動的 `project_data_<storage_slug>` テーブル（他サービス委託データ）。スコープは
 > [`README.md`](./README.md) を参照。
 
 ---
@@ -191,11 +191,15 @@ WebAuthn / FIDO2 公開鍵（1 user に複数可）。
 
 ### `managed_projects`
 実行時に登録される外部サービス。`key` が PK。`schema_definition` が
-動的 `project_data_<key>` テーブルの形を決める。
+動的 `project_data_<storage_slug>` テーブルの形を決める。表名を決めるのは
+`storage_slug` であって `key` ではない (migration 043、Corpus
+`spec/plan/auth-plane-consolidation.md` §4.4)。`storage_slug` は登録時に key から
+導出して固定し、以後変えない。サーバーは補間前に必ず値を検証する (`storage-slug.ts`)。
 
 | 列 | 型 | 制約 / 既定 |
 |---|---|---|
-| key | text | PK |
+| key | text | PK。`^[A-Za-z][A-Za-z0-9_-]{1,62}$` (人が読むラベル、SQL 識別子ではない) |
+| storage_slug | text | NOT NULL, UNIQUE, CHECK `^[a-z][a-z0-9_]{1,49}$` |
 | name | text | NOT NULL |
 | description | text | NOT NULL, default `''` |
 | client_id | text | NOT NULL, UNIQUE |
@@ -207,6 +211,7 @@ WebAuthn / FIDO2 公開鍵（1 user に複数可）。
 | updated_at | timestamptz | NOT NULL, default now() |
 
 - INDEX: `idx_managed_projects_client_id` (client_id)
+- UNIQUE INDEX: `idx_managed_projects_storage_slug` (storage_slug)
 
 ### `project_credential_issuers`
 起動時にtarget projectのcredentialを更新できるlauncher projectの許可リスト。

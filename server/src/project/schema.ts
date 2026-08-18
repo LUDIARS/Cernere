@@ -90,12 +90,15 @@ export const identityClaimSchema = z.enum(IDENTITY_CLAIMS);
 
 // ── プロジェクト定義 ─────────────────────────────────────────
 
-const projectKeyRegex = /^[a-z][a-z0-9_]{1,62}$/;
+// project key は表示ラベル + URL/log に出る識別子。SQL 識別子は storage_slug が担うので
+// (migration 043 / storage-slug.ts)、大文字とハイフンを許す。URL や log に出る以上、
+// 空白・記号・非 ASCII は引き続き弾く。
+const projectKeyRegex = /^[A-Za-z][A-Za-z0-9_-]{1,62}$/;
 
 export const projectDefinitionSchema = z.object({
   project: z.object({
     key: z.string()
-      .regex(projectKeyRegex, "key must be lowercase alphanumeric + underscore, 2-63 chars, starting with a letter"),
+      .regex(projectKeyRegex, "key must be alphanumeric, underscore or hyphen, 2-63 chars, starting with a letter"),
     name: z.string().min(1, "name is required"),
     description: z.string().optional().default(""),
   }),

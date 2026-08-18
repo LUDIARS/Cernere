@@ -30,7 +30,7 @@ function projectRow(columns: Record<string, unknown>, identityClaims?: string[])
     user_data: { columns },
     ...(identityClaims ? { identity_claims: identityClaims } : {}),
   } as unknown as ProjectDefinition;
-  return [{ key: "somesvc", isActive: true, schemaDefinition: definition }];
+  return [{ key: "somesvc", storageSlug: "somesvc", isActive: true, schemaDefinition: definition }];
 }
 
 const PRESENCE_COLUMNS = {
@@ -107,8 +107,9 @@ describe("listUserData (declared columns only, no service name hardcoded)", () =
     expect(sqlText).toContain('u."discord_id"');
   });
 
-  it("不正な project key はテーブル名に補間しない", async () => {
-    await expect(listUserData('bad"; DROP TABLE users; --')).rejects.toThrow(/Invalid project key/);
+  it("未登録の project key は DB 識別子に補間しない", async () => {
+    mockManagedProjectRow.mockReturnValue([]);
+    await expect(listUserData('bad"; DROP TABLE users; --')).rejects.toThrow(/Project not found/);
     expect(mockUnsafe).not.toHaveBeenCalled();
   });
 
@@ -127,6 +128,50 @@ describe("listUserData (declared columns only, no service name hardcoded)", () =
     ["non-finite limit", { limit: Number.NaN }],
   ])("rejects malformed runtime input: %s", async (_label, input) => {
     await expect(listUserData("somesvc", input as never)).rejects.toThrow();
+    expect(mockUnsafe).not.toHaveBeenCalled();
+  });
+  it("表名は project key ではなく行の storage_slug から解決する", async () => {
+    const definition = {
+      project: { key: "EducationLab", name: "EducationLab", description: "" },
+      user_data: { columns: PRESENCE_COLUMNS },
+    } as unknown as ProjectDefinition;
+    mockManagedProjectRow.mockReturnValue([
+      { key: "EducationLab", storageSlug: "educationlab", isActive: true, schemaDefinition: definition },
+    ]);
+
+    await listUserData("EducationLab", { columns: ["available_now"] });
+
+    const [sqlText] = mockUnsafe.mock.calls[0];
+    expect(sqlText).toContain('FROM "project_data_educationlab" d');
+    expect(sqlText).not.toContain("EducationLab");
+  });
+
+  it("ハイフン付き project key も storage_slug 経由で検索できる", async () => {
+    const definition = {
+      project: { key: "my-app", name: "My App", description: "" },
+      user_data: { columns: PRESENCE_COLUMNS },
+    } as unknown as ProjectDefinition;
+    mockManagedProjectRow.mockReturnValue([
+      { key: "my-app", storageSlug: "my_app", isActive: true, schemaDefinition: definition },
+    ]);
+
+    await listUserData("my-app", { columns: ["available_now"] });
+
+    const [sqlText] = mockUnsafe.mock.calls[0];
+    expect(sqlText).toContain('FROM "project_data_my_app" d');
+    expect(sqlText).not.toContain("my-app");
+  });
+
+  it("storage_slug が欠けている/不正な行は無言で通さず失敗する", async () => {
+    const definition = {
+      project: { key: "somesvc", name: "SomeSvc", description: "" },
+      user_data: { columns: PRESENCE_COLUMNS },
+    } as unknown as ProjectDefinition;
+    mockManagedProjectRow.mockReturnValue([
+      { key: "somesvc", storageSlug: null, isActive: true, schemaDefinition: definition },
+    ]);
+    await expect(listUserData("somesvc", { columns: ["available_now"] }))
+      .rejects.toThrow(/Project storage configuration is invalid/);
     expect(mockUnsafe).not.toHaveBeenCalled();
   });
 });

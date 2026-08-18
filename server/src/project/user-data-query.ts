@@ -21,6 +21,7 @@ import * as dbSchema from "../db/schema.js";
 import { config } from "../config.js";
 import { AppError } from "../error.js";
 import { assertSafeIdentifier } from "./identifier.js";
+import { storageTableFromRow } from "./storage-resolver.js";
 import { loadDeclaredClaims, isIdentityClaim } from "./identity-claims.js";
 import type { ProjectDefinition } from "./schema.js";
 
@@ -40,28 +41,28 @@ export interface ListUserDataInput {
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 1000;
 
-function tableNameFor(projectKey: string): string {
-  if (!/^[a-z][a-z0-9_]{1,62}$/.test(projectKey)) {
-    throw AppError.badRequest("Invalid project key");
-  }
-  return `project_data_${projectKey}`;
-}
+type ActiveColumns = Record<string, { type: string; _deleted?: boolean }>;
 
-async function loadActiveColumns(
+/**
+ * managed_projects を 1 回だけ引き、宣言済みの有効列と storage 表名を返す。
+ * 表名は project key ではなく行の storage_slug から解決する (migration 043)。
+ */
+async function loadProjectStorage(
   projectKey: string,
-): Promise<Record<string, { type: string; _deleted?: boolean }>> {
+): Promise<{ table: string; active: ActiveColumns }> {
   const rows = await db.select().from(dbSchema.managedProjects)
     .where(eq(dbSchema.managedProjects.key, projectKey)).limit(1);
   if (rows.length === 0) throw AppError.notFound("Project not found");
 
+  const table = storageTableFromRow(rows[0]);
   const definition = rows[0].schemaDefinition as ProjectDefinition | null;
-  const all = (definition?.user_data?.columns ?? {}) as Record<string, { type: string; _deleted?: boolean }>;
+  const all = (definition?.user_data?.columns ?? {}) as ActiveColumns;
 
-  const active: Record<string, { type: string; _deleted?: boolean }> = {};
+  const active: ActiveColumns = {};
   for (const [name, def] of Object.entries(all)) {
     if (!def._deleted) active[name] = def;
   }
-  return active;
+  return { table, active };
 }
 
 /** 宣言済みかを検査する。未宣言なら throw (無言スキップしない)。 */
@@ -81,8 +82,7 @@ export async function listUserData(
   input: ListUserDataInput = {},
 ): Promise<Array<Record<string, unknown>>> {
   validateInput(input);
-  const table = tableNameFor(projectKey);
-  const active = await loadActiveColumns(projectKey);
+  const { table, active } = await loadProjectStorage(projectKey);
 
   const selectCols = (input.columns && input.columns.length > 0)
     ? input.columns

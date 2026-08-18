@@ -9,7 +9,7 @@ Cernere（PostgreSQL 17 + Drizzle ORM）が **自身で定義・所有する** �
 - **含む**: Cernere がスキーマを定義・所有する静的テーブル。
   認証・ユーザー・組織・プロジェクト管理・サービス連携・監査など。
 - **除く（他プロジェクトからの委託データ）**:
-  - **動的 `project_data_<key>` テーブル** — managed project が登録されるたびに
+  - **動的 `project_data_<storage_slug>` テーブル** — managed project が登録されるたびに
     実行時生成される、その **外部サービスのユーザーデータ** 用テーブル。スキーマは
     `managed_projects.schema_definition`（= 各サービスが定義）で決まるため、
     Cernere の固定スキーマではない。**各サービス側の `spec/data/` で文書化する**。

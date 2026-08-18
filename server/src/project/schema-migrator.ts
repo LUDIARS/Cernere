@@ -12,13 +12,10 @@ import { config } from "../config.js";
 import type { ProjectDefinition } from "./schema.js";
 import { COLUMN_TYPE_MAP } from "./schema.js";
 import { assertSafeIdentifier } from "./identifier.js";
+import { resolveStorageTable } from "./storage-resolver.js";
 
-function tableNameFor(projectKey: string): string {
-  // projectKey は DDL の識別子 (`project_data_<key>`) に補間されるため、 ここで
-  // 境界検証する。 不正なキーは無言で通さず即 throw (RULE §7.1)。
-  assertSafeIdentifier(projectKey, "projectKey");
-  return `project_data_${projectKey}`;
-}
+// 表名は project key ではなく managed_projects.storage_slug から解決する (migration 043)。
+// key は DDL に補間しない。slug の検証は storage-slug.ts が補間手前で行う。
 
 /**
  * プロジェクトのユーザーデータテーブルを作成・更新する。
@@ -28,8 +25,8 @@ export async function migrateProjectSchema(
   projectKey: string,
   definition: ProjectDefinition,
 ): Promise<{ created: boolean; columnsAdded: string[] }> {
+  const tableName = await resolveStorageTable(projectKey);
   const sql = postgres(config.databaseUrl, { max: 1 });
-  const tableName = tableNameFor(projectKey);
   const columns = definition.user_data?.columns ?? {};
 
   // 列名は DDL に `"${colName}"` で補間される。 `"` 等を含む不正な識別子は
@@ -95,8 +92,8 @@ export async function migrateProjectSchema(
  * 既存テーブルのカラム一覧を取得
  */
 export async function getExistingColumns(projectKey: string): Promise<string[]> {
+  const tableName = await resolveStorageTable(projectKey);
   const sql = postgres(config.databaseUrl, { max: 1 });
-  const tableName = tableNameFor(projectKey);
 
   try {
     const rows = await sql`
@@ -116,4 +113,3 @@ function escapeDefault(value: string, type: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-export { tableNameFor };

@@ -13,6 +13,7 @@ import { config } from "../config.js";
 import { AppError } from "../error.js";
 import { projectDefinitionSchema, type ProjectDefinition } from "./schema.js";
 import { migrateProjectSchema } from "./schema-migrator.js";
+import { allocateStorageSlug, storageTableFromRow } from "./storage-resolver.js";
 import { encryptToken, decryptToken } from "./oauth-token-crypto.js";
 import * as cache from "./user-data-cache.js";
 import { getAllProjectStatus, getProjectConnections, getProjectStatus } from "../ws/project-registry.js";
@@ -255,9 +256,12 @@ export async function registerProject(payload: unknown, userId?: string) {
 
   const clientId = `proj_${definition.project.key}_${crypto.randomUUID().slice(0, 8)}`;
   const { clientSecret, clientSecretHash } = await issueProjectSecret();
+  // storage slug は発行時に固定し以後変えない。key を変えても表は動かない (migration 043)。
+  const storageSlug = await allocateStorageSlug(definition.project.key);
 
   await db.insert(dbSchema.managedProjects).values({
     key: definition.project.key,
+    storageSlug,
     name: definition.project.name,
     description: definition.project.description,
     clientId,
@@ -422,7 +426,7 @@ export async function listModuleOptouts(userId: string, projectKey: string) {
 /**
  * プロジェクト・モジュール単位のオプトアウト。
  * 1. userDataOptouts テーブルにレコード記録
- * 2. project_data_{key} の該当モジュールのカラムを NULL にクリア
+ * 2. project_data_{storage_slug} の該当モジュールのカラムを NULL にクリア
  *    - 元の値は _deleted_columns JSONB に退避 (監査目的)
  */
 export async function setModuleOptout(userId: string, projectKey: string, moduleKey: string) {
@@ -447,8 +451,8 @@ export async function setModuleOptout(userId: string, projectKey: string, module
     .filter(([, col]) => col.module === moduleKey && !col._deleted)
     .map(([name]) => name);
 
-  if (moduleCols.length > 0 && /^[a-z][a-z0-9_]{1,62}$/.test(projectKey)) {
-    const tableName = `project_data_${projectKey}`;
+  if (moduleCols.length > 0) {
+    const tableName = storageTableFromRow(projRows[0]);
     const { default: postgres } = await import("postgres");
     const sqlClient = postgres(config.databaseUrl, { max: 1 });
     try {
@@ -505,7 +509,7 @@ export async function setModuleOptout(userId: string, projectKey: string, module
  *   refresh_sessions / verification_codes / trusted_devices / passkeys /
  *   organization_members / tool_clients / user_profiles / projects /
  *   service_tickets / user_data_optouts / project_oauth_tokens /
- *   project_data_<key> (各動的テーブルも user_id ON DELETE CASCADE)。
+ *   project_data_<storage_slug> (各動的テーブルも user_id ON DELETE CASCADE)。
  *
  * CASCADE を持たない参照は削除をブロックするため明示的に先処理する:
  *   - operation_logs.user_id (no action) → 監査ログごと purge (個人データ/トークン
@@ -589,11 +593,8 @@ export async function getUserProjectData(userId: string, projectKey: string): Pr
   const definition = proj[0].schemaDefinition as ProjectDefinition;
   const columns = definition.user_data?.columns ?? {};
 
-  // 安全な識別子チェック (SQLインジェクション対策)
-  if (!/^[a-zA-Z0-9_]+$/.test(projectKey)) {
-    throw AppError.badRequest("Invalid project key");
-  }
-  const tableName = `project_data_${projectKey}`;
+  // 表名は key ではなく行の storage_slug から (検証は storage-slug.ts)
+  const tableName = storageTableFromRow(proj[0]);
 
   // テーブルに保存されている自分のデータを取得
   let data: Record<string, unknown> | null = null;
@@ -740,17 +741,9 @@ export async function listAllUserProjectData(userId: string) {
 // Schedula 等の外部サービスが /ws/project 経由で呼び出す想定。
 // 書き込みはカラム単位の opt-out 状況を判定し、オプトアウト中は拒否する。
 
-/** 安全なテーブル名チェック */
-function safeTableName(projectKey: string): string {
-  if (!/^[a-z][a-z0-9_]{1,62}$/.test(projectKey)) {
-    throw AppError.badRequest("Invalid project key");
-  }
-  return `project_data_${projectKey}`;
-}
-
 /**
  * 「ユーザがそのプロジェクトを使い始めた」タイミングで
- * `project_data_<key>` に空行を確保する.
+ * `project_data_<storage_slug>` に空行を確保する.
  *
  * トリガ:
  *   - Cernere ダッシュボードの「開く」 (issueProjectOpenUrl)
@@ -776,7 +769,7 @@ export async function ensureUserProjectRow(userId: string, projectKey: string): 
   const hasActive = Object.values(columns).some((c) => !c._deleted);
   if (!hasActive) return; // user_data 定義なし → row 不要
 
-  const tableName = safeTableName(projectKey);
+  const tableName = storageTableFromRow(proj[0]);
   const { default: postgres } = await import("postgres");
   const sqlClient = postgres(config.databaseUrl, { max: 1 });
   try {
@@ -798,16 +791,23 @@ function assertSafeColumn(name: string): void {
   }
 }
 
-async function loadProjectColumns(
+type ProjectColumns = Record<string, { type: string; module?: string; _deleted?: boolean }>;
+
+/**
+ * managed_projects を 1 回だけ引き、宣言済み列と storage 表名を返す。
+ * 表名は key ではなく行の storage_slug から解決する (migration 043)。
+ */
+async function loadProjectStorage(
   projectKey: string,
-): Promise<Record<string, { type: string; module?: string; _deleted?: boolean }>> {
+): Promise<{ tableName: string; schemaColumns: ProjectColumns }> {
   const proj = await db.select().from(dbSchema.managedProjects)
     .where(eq(dbSchema.managedProjects.key, projectKey)).limit(1);
   if (proj.length === 0) throw AppError.notFound("Project not found");
   const definition = proj[0].schemaDefinition as ProjectDefinition;
-  return (definition.user_data?.columns ?? {}) as Record<string, {
-    type: string; module?: string; _deleted?: boolean;
-  }>;
+  return {
+    tableName: storageTableFromRow(proj[0]),
+    schemaColumns: (definition.user_data?.columns ?? {}) as ProjectColumns,
+  };
 }
 
 /**
@@ -819,8 +819,7 @@ export async function getUserColumns(
   userId: string,
   columns?: string[],
 ): Promise<Record<string, unknown>> {
-  const tableName = safeTableName(projectKey);
-  const schemaColumns = await loadProjectColumns(projectKey);
+  const { tableName, schemaColumns } = await loadProjectStorage(projectKey);
 
   const targetCols = (columns && columns.length > 0)
     ? columns.filter((c) => c in schemaColumns && !schemaColumns[c]._deleted)
@@ -866,8 +865,7 @@ export async function setUserData(
   userId: string,
   data: Record<string, unknown>,
 ): Promise<{ ok: true; updated: string[] }> {
-  const tableName = safeTableName(projectKey);
-  const schemaColumns = await loadProjectColumns(projectKey);
+  const { tableName, schemaColumns } = await loadProjectStorage(projectKey);
 
   const targetCols = Object.keys(data).filter(
     (c) => c in schemaColumns && !schemaColumns[c]._deleted,
@@ -921,8 +919,7 @@ export async function deleteUserColumns(
   userId: string,
   columns: string[],
 ): Promise<{ ok: true; deleted: string[] }> {
-  const tableName = safeTableName(projectKey);
-  const schemaColumns = await loadProjectColumns(projectKey);
+  const { tableName, schemaColumns } = await loadProjectStorage(projectKey);
   const targetCols = columns.filter(
     (c) => c in schemaColumns && !schemaColumns[c]._deleted,
   );

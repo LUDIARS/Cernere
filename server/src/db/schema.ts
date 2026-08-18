@@ -340,6 +340,8 @@ export const userDataOptouts = pgTable("user_data_optouts", {
 
 export const managedProjects = pgTable("managed_projects", {
   key: text("key").primaryKey(),
+  /** project_data_<slug> を決める不変の SQL 識別子。key とは独立 (migration 043)。 */
+  storageSlug: text("storage_slug").notNull().unique(),
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
   clientId: text("client_id").notNull().unique(),

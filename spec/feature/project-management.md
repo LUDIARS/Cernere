@@ -19,7 +19,7 @@ Cernere は外部連携するプロジェクトを動的に登録・管理する
 ```yaml
 # project-definition.yaml
 project:
-  key: "schedula"          # 英数字のみ (DBスキーマキー、ユニーク)
+  key: "schedula"          # 英字始まり + 英数字/_/- (人が読むラベル、ユニーク。表名は決めない)
   name: "Schedula"         # 表示名 (自由入力)
   description: "学校スケジューリング & 予約プラットフォーム"
 
@@ -87,7 +87,9 @@ project client自身は変更できない。
 ```sql
 -- プロジェクト登録情報
 CREATE TABLE managed_projects (
-    key             TEXT PRIMARY KEY,         -- 英数字のみ (例: "schedula")
+    key             TEXT PRIMARY KEY,         -- 人が読むラベル (例: "schedula")、`^[A-Za-z][A-Za-z0-9_-]{1,62}$`
+    storage_slug    TEXT NOT NULL UNIQUE,     -- project_data_<slug> を決める不変の SQL 識別子 (migration 043)
+                                              -- `^[a-z][a-z0-9_]{1,49}$`、登録時に key から導出して固定
     name            TEXT NOT NULL,            -- 表示名
     description     TEXT NOT NULL DEFAULT '',
     client_id       TEXT NOT NULL UNIQUE,     -- 認証用キー
@@ -99,9 +101,9 @@ CREATE TABLE managed_projects (
 );
 
 -- プロジェクト別ユーザーデータ (動的テーブル)
--- テーブル名: project_data_{key}
+-- テーブル名: project_data_{storage_slug}  (key ではない。key を変えても表は動かない)
 -- 例: project_data_schedula
-CREATE TABLE project_data_{key} (
+CREATE TABLE project_data_{storage_slug} (
     user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     -- 以下は schema_definition に基づいて動的生成
     {column_name}   {column_type},
@@ -160,11 +162,18 @@ Memoria Hub Shell が manifest probe (`<origin>/.well-known/ludiars-app.json`) �
 
 ## マイグレーションロジック
 
+#### SPEC-PROJECT-STORAGE-RESOLUTION
+
+`managed_projects.storage_slug` が動的テーブル名の唯一の正本である。登録時は key から
+安全な slug を導出し、既存 slug と衝突する場合は `_2`, `_3` の順で一意な値を発行する。
+DB 行から表名を解決する全経路は、補間前に storage slug と完全な SQL 識別子を検証する。
+project key 自体は SQL 識別子として検査・補間しない。
+
 ### プロジェクト登録時
 
 1. YAML をパース・バリデーション
 2. `managed_projects` にレコード挿入
-3. `project_data_{key}` テーブルを CREATE IF NOT EXISTS
+3. `project_data_{storage_slug}` テーブルを CREATE IF NOT EXISTS
 4. YAML のカラム定義に従いカラムを追加 (既存カラムはスキップ)
 
 ### スキーマ更新時

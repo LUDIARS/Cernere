@@ -1,6 +1,6 @@
 # ユーザ × プロジェクトの初回行確保
 
-ユーザがあるプロジェクトを「使い始めた」瞬間に、Cernere DB の `project_data_<key>` テーブルに空行を 1 件確保する。サービス側がいきなり `get_user_data` を呼んだとき null が返るのではなく、user_id 付きの実体行があるようにするための初期化。
+ユーザがあるプロジェクトを「使い始めた」瞬間に、Cernere DB の `project_data_<storage_slug>` テーブルに空行を 1 件確保する。サービス側がいきなり `get_user_data` を呼んだとき null が返るのではなく、user_id 付きの実体行があるようにするための初期化。
 
 ## トリガ
 
@@ -30,7 +30,7 @@ sequenceDiagram
     CF->>CS: WS managed_project.open_url<br/>{ projectKey }
     CS->>CS: issueAuthCode
     CS->>CS: ensureUserProjectRow(userId, projectKey)
-    CS->>DB: INSERT INTO project_data_<key> (user_id) VALUES ($1)<br/>ON CONFLICT (user_id) DO NOTHING
+    CS->>DB: INSERT INTO project_data_<storage_slug> (user_id) VALUES ($1)<br/>ON CONFLICT (user_id) DO NOTHING
     CS-->>CF: { url: "<frontend>?code=<authCode>" }
     end
 
@@ -47,7 +47,7 @@ sequenceDiagram
     CS->>CS: device 検証 (trusted or challenge)
     CS->>CS: issueAuthCode
     CS->>CS: ensureUserProjectRow(userId, session.projectKey)
-    CS->>DB: INSERT INTO project_data_<key> (user_id) VALUES ($1)<br/>ON CONFLICT (user_id) DO NOTHING
+    CS->>DB: INSERT INTO project_data_<storage_slug> (user_id) VALUES ($1)<br/>ON CONFLICT (user_id) DO NOTHING
     CS-->>SF: { type:"authenticated", authCode }
     end
 ```
@@ -79,7 +79,7 @@ export async function ensureUserProjectRow(userId: string, projectKey: string) {
 
 - **冪等**: `ON CONFLICT DO NOTHING` なので何度呼んでも同じ結果
 - **失敗を握り潰す**: DB エラーやプロジェクト不在は warn ログに出すのみ。本筋の認証フロー (authCode 発行 + ws.end) を巻き込まない
-- **テーブル名サニタイズ**: `safeTableName(projectKey)` で `^[a-z][a-z0-9_]{1,62}$` を強制
+- **テーブル名サニタイズ**: 表名は `managed_projects.storage_slug` から `storageTableFromRow()` で解決し、補間前に `^[a-z][a-z0-9_]{1,49}$` を強制 (project key は補間しない、migration 043)
 - **権限**: `INSERT` のみ。既存行の更新は別経路 (`setUserData`) を経由
 
 ## auth_session スキーマ拡張
