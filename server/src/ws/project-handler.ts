@@ -14,9 +14,7 @@
  */
 
 import type uWS from "uWebSockets.js";
-import { eq } from "drizzle-orm";
-import { db } from "../db/connection.js";
-import * as schema from "../db/schema.js";
+import { isCurrentProjectCredential } from "../project/project-credential-state.js";
 import { verifyProjectToken, type ProjectJwtClaims } from "../auth/jwt.js";
 import { logProjectWsConnect, logProjectWsDisconnect } from "../logging/auth-logger.js";
 import { publicProjectCommandError } from "./project-errors.js";
@@ -81,28 +79,6 @@ function close(ws: uWS.WebSocket<ProjectWsUserData>, code: number, reason: strin
   }
 }
 
-export async function isCurrentProjectSession(
-  clientId: string,
-  projectKey: string,
-  credentialGeneration: number,
-): Promise<boolean> {
-  const rows = await db.select({
-    key: schema.managedProjects.key,
-    clientId: schema.managedProjects.clientId,
-    isActive: schema.managedProjects.isActive,
-    credentialGeneration: schema.managedProjects.credentialGeneration,
-  })
-    .from(schema.managedProjects)
-    .where(eq(schema.managedProjects.clientId, clientId))
-    .limit(1);
-  const project = rows[0];
-  return Boolean(
-    project?.isActive
-    && project.key === projectKey
-    && project.credentialGeneration === credentialGeneration,
-  );
-}
-
 /**
  * upgrade 時にプロジェクトトークンを検証 (4 層防御の Layer 1+4 相当).
  *
@@ -121,7 +97,7 @@ export async function resolveProjectWsAuth(
     const claims = verifyProjectToken(token);
     // プロジェクトの DB レコードと突き合わせ. clientId / projectKey
     // のいずれかが managed_projects の値と食い違うトークンは拒否.
-    const current = await isCurrentProjectSession(
+    const current = await isCurrentProjectCredential(
       claims.sub,
       claims.projectKey,
       claims.credentialGeneration ?? 0,
@@ -187,7 +163,7 @@ export async function handleProjectWsMessage(
     try {
       const data = ws.getUserData();
       const current = data.tokenExpiresAt * 1000 > Date.now()
-        && await isCurrentProjectSession(
+        && await isCurrentProjectCredential(
           data.clientId,
           data.projectKey,
           data.credentialGeneration,

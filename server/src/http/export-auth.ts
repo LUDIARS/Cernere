@@ -15,16 +15,27 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { verifyToken, verifyProjectToken, extractBearerToken } from "../auth/jwt.js";
+import { isCurrentProjectCredential } from "../project/project-credential-state.js";
 
 export async function requireExportAuth(authHeader: string): Promise<void> {
   const token = extractBearerToken(authHeader);
   if (!token) throw new Error("Unauthorized: missing bearer token");
 
-  // (2) service: project token (project_credentials 由来) を先に試す
-  try {
-    verifyProjectToken(token);
+  // (2) service: project token (project_credentials 由来) を先に試す。
+  // 署名が通っても、無効化されたプロジェクトや rotate 済みの世代は拒否する
+  // (WebSocket upgrade と同じ判定を isCurrentProjectCredential で共有)。
+  let projectClaims: ReturnType<typeof verifyProjectToken> | null = null;
+  try { projectClaims = verifyProjectToken(token); }
+  catch { /* user token として再評価 */ }
+  if (projectClaims) {
+    const current = await isCurrentProjectCredential(
+      projectClaims.sub,
+      projectClaims.projectKey,
+      projectClaims.credentialGeneration ?? 0,
+    );
+    if (!current) throw new Error("Unauthorized: project credential is inactive or rotated");
     return; // 有効な project token = service 認証成立
-  } catch { /* user token として再評価 */ }
+  }
 
   // (1) user: accessToken を検証し、 DB の role が admin かを確認
   const payload = verifyToken(token);

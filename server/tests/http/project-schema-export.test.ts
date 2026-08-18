@@ -16,6 +16,13 @@ const mockProjectsRows = vi.fn<() => Array<{
   isActive: boolean;
 }>>();
 
+// export-auth は project token の世代を DB で突き合わせる。 ここでは schema export
+// 本体の挙動を見たいので、 資格情報の現行性チェックは有効として固定する
+// (この判定自体は tests/project/project-credential-state.test.ts で検証している)。
+vi.mock("../../src/project/project-credential-state.js", () => ({
+  isCurrentProjectCredential: () => Promise.resolve(true),
+}));
+
 vi.mock("../../src/db/connection.js", async () => {
   const schema = await import("../../src/db/schema.js");
   return {
