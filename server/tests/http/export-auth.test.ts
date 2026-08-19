@@ -44,7 +44,9 @@ describe("requireExportAuth の project token 判定", () => {
     mocks.verifyProjectToken.mockReturnValue({ sub: "client-1", projectKey: "ostiarius", credentialGeneration: 2 });
     mocks.isCurrentProjectCredential.mockResolvedValue(true);
 
-    await expect(requireExportAuth("Bearer t")).resolves.toBeUndefined();
+    await expect(requireExportAuth("Bearer t")).resolves.toEqual({
+      kind: "project", subject: "client-1", projectKey: "ostiarius",
+    });
     expect(mocks.isCurrentProjectCredential).toHaveBeenCalledWith("client-1", "ostiarius", 2);
   });
 
@@ -71,7 +73,9 @@ describe("requireExportAuth の project token 判定", () => {
     mocks.verifyProjectToken.mockReturnValue({ sub: "client-1", projectKey: "ostiarius" });
     mocks.isCurrentProjectCredential.mockResolvedValue(true);
 
-    await expect(requireExportAuth("Bearer t")).resolves.toBeUndefined();
+    await expect(requireExportAuth("Bearer t")).resolves.toEqual({
+      kind: "project", subject: "client-1", projectKey: "ostiarius",
+    });
     expect(mocks.isCurrentProjectCredential).toHaveBeenCalledWith("client-1", "ostiarius", 0);
   });
 
@@ -80,7 +84,7 @@ describe("requireExportAuth の project token 判定", () => {
     mocks.verifyToken.mockReturnValue({ sub: "user-1" });
     mocks.usersRows.mockReturnValue([{ role: "admin" }]);
 
-    await expect(requireExportAuth("Bearer t")).resolves.toBeUndefined();
+    await expect(requireExportAuth("Bearer t")).resolves.toEqual({ kind: "admin", subject: "user-1" });
     expect(mocks.isCurrentProjectCredential).not.toHaveBeenCalled();
   });
 });

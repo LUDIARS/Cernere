@@ -152,6 +152,14 @@ export const config = {
   // 注入し、リポジトリや .env.example に値を置かない。
   faceTemplateStorageKey: env("FACE_TEMPLATE_STORAGE_KEY", ""),
   faceTemplateDistributionKeys: env("FACE_TEMPLATE_DISTRIBUTION_KEYS", ""),
+
+  // 顔写真はテンプレートと別鍵で封緘する。鍵が空なら写真 API は 503 で
+  // fail closed にし、平文の写真が DB に落ちる経路を作らない。
+  facePhotoStorageKey: env("FACE_PHOTO_STORAGE_KEY", ""),
+  facePhotoKeyId: env("FACE_PHOTO_KEY_ID", "photo-storage:v1"),
+  // Ostiarius face-sidecar (FastAPI)。未設定なら写真 API は 503。
+  faceSidecarUrl: env("FACE_SIDECAR_URL", ""),
+  faceSidecarTimeoutMs: parseInt(env("FACE_SIDECAR_TIMEOUT_MS", "10000"), 10),
 } as const;
 
 /**

@@ -540,7 +540,7 @@ export const auth = {
 };
 
 export const faceTemplates = {
-  status(): Promise<{ items: Array<{ facilityId: string; modelId: string; version: number; enrolledAt: string }> }> {
+  status(): Promise<{ items: Array<{ facilityId: string; modelId: string; version: number; state: "pending" | "active" | "revoked"; enrolledAt: string }> }> {
     return request("/api/identity/face-template/status");
   },
   remove(facilityId?: string): Promise<{ ok: true; removed: number }> {

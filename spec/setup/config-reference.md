@@ -96,14 +96,18 @@ PASETO (project-token、 Ed25519) とは別の鍵・別用途 (外部 RP に配�
 |---|---|---|
 | `CERNERE_IDENTITY_VERIFICATION_DISABLED` | `false` | true で本人確認を全スキップ (常に trusted)。**production では true 不可** (起動時例外)。dev / メール送信障害時の緊急退避用 ([../identity-verification.md](../identity-verification.md)) |
 
-## 顔テンプレート (config.ts / Infisical)
+## 顔テンプレート・プロフィール顔写真 (config.ts / Infisical)
 
 | キー | 既定 | 用途 |
 |---|---|---|
 | `FACE_TEMPLATE_STORAGE_KEY` | なし | base64 32 byte。Cernere 内の AES-256-GCM 保存鍵。未設定時は顔テンプレート操作を fail-closed。 |
 | `FACE_TEMPLATE_DISTRIBUTION_KEYS` | なし | `facilityId` → base64 32 byte の JSON。export 時の施設別再暗号化鍵。対象施設の鍵がなければ export を拒否。 |
+| `FACE_PHOTO_STORAGE_KEY` | なし | base64 32 byte。テンプレート鍵とは分離したプロフィール顔写真の AES-256-GCM 保存鍵。未設定時は写真 API を 503 で fail-closed。 |
+| `FACE_PHOTO_KEY_ID` | `photo-storage:v1` | 保存行へ記録する写真鍵 ID。ローテーション時の鍵選択に使う。 |
+| `FACE_SIDECAR_URL` | なし | 顔抽出 sidecar の base URL。credential・query・fragment は不可。未設定・不正時は写真 upload を 503 で fail-closed。 |
+| `FACE_SIDECAR_TIMEOUT_MS` | `10000` | sidecar 呼び出し timeout (正の整数、ms)。 |
 
-両キーは env-cli / Infisical で供給し、`.env.example`・ソース・ログには値を置かない。
+保存鍵・配布鍵・sidecar endpoint は env-cli / Infisical で供給し、`.env.example`・ソース・ログには値を置かない。
 
 ## ログ出力 (logging/*)
 

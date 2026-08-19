@@ -173,10 +173,15 @@ export const faceTemplates = pgTable("face_templates", {
   enrolledBy: uuid("enrolled_by").references(() => users.id, { onDelete: "set null" }),
   consentId: uuid("consent_id").notNull().references(() => faceConsents.id),
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  // 'pending' = 写真から自動抽出しただけで職員未承認。export (照合配布) に出さない。
+  // 'active'   = 職員が承認済み。照合に使ってよい。
+  // 'revoked'  = 失効済み (通常は物理削除 + tombstone なので過渡状態のみ)。
+  state: text("state").notNull().default("active"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   uniqueIndex("idx_face_templates_user_facility").on(t.userId, t.facilityId),
   index("idx_face_templates_facility_active").on(t.facilityId, t.revokedAt),
+  index("idx_face_templates_facility_state").on(t.facilityId, t.state),
 ]);
 
 export const faceTemplateTombstones = pgTable("face_template_tombstones", {
@@ -188,6 +193,27 @@ export const faceTemplateTombstones = pgTable("face_template_tombstones", {
   reason: text("reason").notNull(),
 }, (t) => [
   index("idx_face_template_tombstones_facility_time").on(t.facilityId, t.revokedAt),
+]);
+
+// ── Face photos ─────────────────────────────────────────────
+// プロフィール顔写真は 1 人 1 枚。ciphertext / iv / tag を分けて持ち、
+// テンプレートとは別鍵 (keyId) で封緘する。復号は face-photo-store に閉じる。
+export const facePhotos = pgTable("face_photos", {
+  id: uuid("id").primaryKey(),
+  userId: uuid("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+  ciphertext: bytea("ciphertext").notNull(),
+  iv: bytea("iv").notNull(),
+  tag: bytea("tag").notNull(),
+  keyId: text("key_id").notNull(),
+  mime: text("mime").notNull(),
+  width: integer("width").notNull(),
+  height: integer("height").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  consentId: uuid("consent_id").notNull().references(() => faceConsents.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("idx_face_photos_consent").on(t.consentId),
 ]);
 
 export const organizationMembers = pgTable("organization_members", {

@@ -1,6 +1,6 @@
 {
   "name": "authentication",
-  "description": "Credential verification, token issuance, and biometric identity templates: password (bcrypt), GitHub/Google OAuth, MFA, passkeys, JWT/PASETO, OIDC, and consent-bound face templates.",
+  "description": "Credential verification, token issuance, and biometric identity templates: password (bcrypt), GitHub/Google OAuth, MFA, passkeys, JWT/PASETO, OIDC, consent-bound face templates, and sealed profile face photos with pending-template review.",
   "presetRules": [
     {
       "preset": "couplingCap",
@@ -100,7 +100,7 @@
     }
   ],
   "templateRules": [],
-  "cardTemplate": "Summarise the \"authentication\" domain: Credential verification, token issuance, and consent-bound biometric identity templates.",
+  "cardTemplate": "Summarise the \"authentication\" domain: Credential verification, token issuance, consent-bound biometric identity templates, and sealed profile face photos with pending review.",
   "source": "spec-draft",
   "mechanics": [],
   "specRefs": [
@@ -110,6 +110,6 @@
     "2. @cernere/id-service",
     "顔テンプレート保存・配布"
   ],
-  "rationale": "Authentication methods and biometric identity material converge in server/src/auth, identity, oidc, and http; the id-service package is the reusable SDK for the same concern.",
-  "updatedAt": "2026-08-16T00:00:00.000Z"
+  "rationale": "Authentication methods and biometric identity material (templates and sealed face photos) converge in server/src/auth, identity, oidc, and http; the id-service package is the reusable SDK for the same concern.",
+  "updatedAt": "2026-08-18T00:00:00.000Z"
 }

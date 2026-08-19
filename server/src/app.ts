@@ -10,6 +10,7 @@ import { config } from "./config.js";
 import { handleAuthRoute } from "./http/auth-handler.js";
 import { handlePasskeyRoute } from "./http/passkey-handler.js";
 import { handleFaceTemplateRoute } from "./http/face-template-handler.js";
+import { handleFacePhotoRoute } from "./http/face-photo-handler.js";
 import { handleActionAuthRoute } from "./http/action-auth-handler.js";
 import { exportProjectSchemas } from "./http/project-schema-handler.js";
 import { getPublicKeys } from "./auth/paseto.js";
@@ -112,35 +113,47 @@ function parseWsAuthProtocol(
   return { creds, echo };
 }
 
+function readBodyBuffer(
+  res: uWS.HttpResponse,
+  maxBytes = Number.POSITIVE_INFINITY,
+  onAborted?: () => void,
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    let settled = false;
+    res.onData((chunk, isLast) => {
+      if (settled) return;
+      // uWS の ArrayBuffer は callback 後に再利用されるため、必ず所有コピーを取る。
+      const bytes = Buffer.from(new Uint8Array(chunk));
+      totalBytes += bytes.length;
+      if (totalBytes > maxBytes) {
+        settled = true;
+        chunks.length = 0;
+        reject(AppError.badRequest("Request body is too large"));
+        return;
+      }
+      chunks.push(bytes);
+      if (!isLast) return;
+      settled = true;
+      resolve(Buffer.concat(chunks, totalBytes));
+    });
+    res.onAborted(() => {
+      onAborted?.();
+      if (settled) return;
+      settled = true;
+      reject(new Error("Request aborted"));
+    });
+  });
+}
+
 function readBody(
   res: uWS.HttpResponse,
   maxBytes = Number.POSITIVE_INFINITY,
   onAborted?: () => void,
 ): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let totalBytes = 0;
-    let tooLarge = false;
-    res.onData((chunk, isLast) => {
-      const bytes = Buffer.from(chunk);
-      totalBytes += bytes.length;
-      if (totalBytes > maxBytes) {
-        tooLarge = true;
-        chunks.length = 0;
-      } else if (!tooLarge) {
-        // Buffer として結合してから UTF-8 decode し、chunk 境界での文字化けを防ぐ。
-        chunks.push(bytes);
-      }
-      if (isLast) {
-        if (tooLarge) reject(AppError.badRequest("Request body is too large"));
-        else resolve(Buffer.concat(chunks, totalBytes).toString("utf8"));
-      }
-    });
-    res.onAborted(() => {
-      onAborted?.();
-      reject(new Error("Request aborted"));
-    });
-  });
+  // Buffer として結合してから UTF-8 decode し、chunk 境界での文字化けを防ぐ。
+  return readBodyBuffer(res, maxBytes, onAborted).then((body) => body.toString("utf8"));
 }
 
 function jsonResponse(
@@ -160,6 +173,27 @@ function jsonResponse(
 }
 
 /**
+ * 画像などのバイナリ応答。個人データなので中間キャッシュに残さない
+ * (private, no-store) ことを応答側で強制する。
+ */
+function binaryResponse(
+  res: uWS.HttpResponse,
+  status: string,
+  contentType: string,
+  bytes: Buffer,
+): void {
+  res.cork(() => {
+    res.writeStatus(status)
+      .writeHeader("Content-Type", contentType)
+      .writeHeader("Cache-Control", "private, no-store")
+      .writeHeader("X-Content-Type-Options", "nosniff")
+      .writeHeader("Access-Control-Allow-Origin", config.frontendUrl)
+      .writeHeader("Access-Control-Allow-Credentials", "true");
+    res.end(bytes);
+  });
+}
+
+/**
  * 認証ハンドラの throw を HTTP ステータスにマップする。
  * 既知の業務エラー (Unauthorized / not found / Rate limit / required) は
  * 4xx に、それ以外は 500 として扱う (サーバー側の不具合をクライアントに
@@ -171,8 +205,10 @@ const STATUS_TEXT: Record<number, string> = {
   403: "403 Forbidden",
   404: "404 Not Found",
   409: "409 Conflict",
+  422: "422 Unprocessable Entity",
   429: "429 Too Many Requests",
   500: "500 Internal Server Error",
+  503: "503 Service Unavailable",
 };
 
 function classifyError(err: unknown): { status: string; message: string } {
@@ -530,6 +566,57 @@ export function createApp() {
   registerFaceRoute("delete", "/api/identity/face-template/:userId", "template/:userId");
   registerFaceRoute("get", "/api/identity/face-template/export", "export");
   registerFaceRoute("get", "/api/identity/roster", "roster");
+
+  // ── Face photo (プロフィール顔写真 / pending テンプレート審査) ──
+  // 写真は個人データそのものなので、一括取得の口を作らず 1 件ずつだけ返す。
+  // multipart と画像バイトを扱うため body は Buffer のまま handler へ渡す。
+  const FACE_PHOTO_MAX_BYTES = 12 * 1024 * 1024;
+  const registerFacePhotoRoute = (
+    method: "get" | "post" | "delete",
+    url: string,
+    resolvePath: (req: uWS.HttpRequest) => string,
+  ) => {
+    const handler = async (res: uWS.HttpResponse, req: uWS.HttpRequest) => {
+      const authHeader = req.getHeader("authorization") ?? "";
+      const contentType = req.getHeader("content-type") ?? "";
+      const query = req.getQuery() ?? "";
+      const path = resolvePath(req);
+      const readsBody = method === "post" || method === "delete";
+      let aborted = false;
+      if (!readsBody) res.onAborted(() => { aborted = true; });
+      try {
+        const body = readsBody
+          ? await readBodyBuffer(res, FACE_PHOTO_MAX_BYTES, () => { aborted = true; })
+          : Buffer.alloc(0);
+        if (aborted) return;
+        const result = await handleFacePhotoRoute({ method: method.toUpperCase(), path, body, contentType, authHeader, query });
+        if (result.binary) binaryResponse(res, result.status, result.binary.contentType, result.binary.bytes);
+        else jsonResponse(res, result.status, result.data);
+      } catch (err) {
+        if (aborted) return;
+        const { status, message } = classifyError(err);
+        jsonResponse(res, status, { error: message });
+      }
+    };
+    switch (method) {
+      case "get": app.get(url, handler); break;
+      case "post": app.post(url, handler); break;
+      case "delete": app.del(url, handler); break;
+    }
+  };
+  // /me と /:userId は uWS のパターン優先順位に依存させず、param 値で分岐する。
+  const photoTarget = (req: uWS.HttpRequest) => {
+    const param = req.getParameter(0) ?? "";
+    return param === "me" ? "photo/me" : `photo/${param}`;
+  };
+  registerFacePhotoRoute("post", "/api/identity/face-photo", () => "photo");
+  registerFacePhotoRoute("delete", "/api/identity/face-photo", () => "photo");
+  registerFacePhotoRoute("get", "/api/identity/face-photo/:userId", photoTarget);
+  registerFacePhotoRoute("delete", "/api/identity/face-photo/:userId", photoTarget);
+  registerFacePhotoRoute("post", "/api/identity/face-template/:userId/promote",
+    (req) => `template/${req.getParameter(0) ?? ""}/promote`);
+  registerFacePhotoRoute("post", "/api/identity/face-template/:userId/reject",
+    (req) => `template/${req.getParameter(0) ?? ""}/reject`);
 
   // ── Project schema export (GET): スキーマ定義 shape のみ (admin/service 限定) ──
   // Foedus (クロスサービス契約/PII レビューア) がコミット済み JSON の代わりに

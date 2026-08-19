@@ -15,11 +15,16 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { verifyToken, verifyProjectToken, extractBearerToken } from "../auth/jwt.js";
+import { AppError } from "../error.js";
 import { isCurrentProjectCredential } from "../project/project-credential-state.js";
 
-export async function requireExportAuth(authHeader: string): Promise<void> {
+export type ExportPrincipal =
+  | { kind: "project"; subject: string; projectKey: string }
+  | { kind: "admin"; subject: string };
+
+export async function requireExportAuth(authHeader: string): Promise<ExportPrincipal> {
   const token = extractBearerToken(authHeader);
-  if (!token) throw new Error("Unauthorized: missing bearer token");
+  if (!token) throw AppError.unauthorized("Unauthorized: missing bearer token");
 
   // (2) service: project token (project_credentials 由来) を先に試す。
   // 署名が通っても、無効化されたプロジェクトや rotate 済みの世代は拒否する
@@ -33,14 +38,19 @@ export async function requireExportAuth(authHeader: string): Promise<void> {
       projectClaims.projectKey,
       projectClaims.credentialGeneration ?? 0,
     );
-    if (!current) throw new Error("Unauthorized: project credential is inactive or rotated");
-    return; // 有効な project token = service 認証成立
+    if (!current) throw AppError.unauthorized("Unauthorized: project credential is inactive or rotated");
+    return {
+      kind: "project",
+      subject: projectClaims.sub,
+      projectKey: projectClaims.projectKey,
+    };
   }
 
   // (1) user: accessToken を検証し、 DB の role が admin かを確認
   const payload = verifyToken(token);
-  if (typeof payload.sub !== "string") throw new Error("Unauthorized: invalid token");
+  if (typeof payload.sub !== "string") throw AppError.unauthorized("Unauthorized: invalid bearer token");
   const rows = await db.select({ role: schema.users.role })
     .from(schema.users).where(eq(schema.users.id, payload.sub)).limit(1);
-  if (rows[0]?.role !== "admin") throw new Error("Forbidden: admin required");
+  if (rows[0]?.role !== "admin") throw AppError.forbidden("Forbidden: admin role is required");
+  return { kind: "admin", subject: payload.sub };
 }
