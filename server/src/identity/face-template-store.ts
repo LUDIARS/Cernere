@@ -183,7 +183,7 @@ export async function exportFaceTemplates(facilityId: string) {
     const context = { userId: row.userId, facilityId: row.facilityId, modelId: row.modelId, version: row.version };
     const plain = openStoredFaceTemplate(Buffer.from(row.templateEnc), context);
     try {
-      return { userId: row.userId, template: distributor.seal(plain).toString("base64"), keyId: distributor.keyId, modelId: row.modelId, quality: row.quality, version: row.version, enrolledAt: row.createdAt.toISOString(), revoked: false };
+      return { userId: row.userId, template: distributor.seal(plain).toString("base64"), keyId: distributor.keyId, modelId: row.modelId, quality: row.quality, version: row.version, state: row.state, enrolledAt: row.createdAt.toISOString(), revoked: false };
     } finally {
       plain.fill(0);
     }

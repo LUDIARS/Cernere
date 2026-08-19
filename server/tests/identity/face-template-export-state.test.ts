@@ -37,4 +37,30 @@ describe("face template export state filter", () => {
     const stateFiltered = rendered.filter((sql) => sql.includes('"state"') && sql.includes('"active"'));
     expect(stateFiltered.length).toBeGreaterThan(0);
   });
+
+  it("配布する各要素に state を載せる (Ostiarius が state 無しを弾くため)", async () => {
+    // purge が先に 2 回 select するので、3 本目が配布対象のクエリになる。
+    fake.queueSelect([]);
+    fake.queueSelect([]);
+    fake.queueSelect([{
+      face_templates: {
+        userId: "11111111-1111-4111-8111-111111111111",
+        facilityId: FACILITY_ID,
+        modelId: "insightface/glintr100@1",
+        quality: 0.9,
+        version: 3,
+        state: "active",
+        templateEnc: Buffer.alloc(4),
+        createdAt: new Date("2026-08-01T00:00:00.000Z"),
+      },
+    }]);
+
+    const result = await exportFaceTemplates(FACILITY_ID);
+
+    expect(result.templates).toHaveLength(1);
+    expect(result.templates[0]?.state).toBe("active");
+    for (const template of result.templates) {
+      expect(template.state).toBeDefined();
+    }
+  });
 });
