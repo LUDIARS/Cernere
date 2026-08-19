@@ -289,10 +289,11 @@ async function exchange(p: Record<string, unknown>): Promise<RouteResult> {
     devLog("auth.exchange.missingCode", {});
     throw new Error("code is required");
   }
-  const raw = await redis.get(`authcode:${code}`);
+  // kiosk の限定交換口も同じ keyspace を消費するため、GET + DEL を分けると
+  // 並行要求で両方が成功する。取得と削除を 1 コマンドに閉じる。
+  const raw = await redis.getdel(`authcode:${code}`);
   devLog("auth.exchange.lookup", { found: raw !== null });
   if (!raw) throw new Error("Unauthorized: Invalid or expired auth code");
-  await redis.del(`authcode:${code}`);
   const parsed = JSON.parse(raw);
   devLog("auth.exchange.done", {
     userId: parsed.user?.id ?? "(none)",

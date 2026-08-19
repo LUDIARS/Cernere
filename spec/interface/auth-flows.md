@@ -253,13 +253,38 @@ sequenceDiagram
     participant CS as Cernere Server
     participant R as Redis
     SF->>CS: POST /api/auth/exchange { code }
-    CS->>R: GET authcode:<code>
-    CS->>R: DEL authcode:<code> (one-time)
+    CS->>R: GETDEL authcode:<code> (atomic one-time consume)
     CS-->>SF: { accessToken, refreshToken, user }
 ```
 
 - 60 秒以内に exchange しないと失効
-- 一度 exchange したら破棄 (再利用は 401)
+- `GETDEL` で取得と削除を原子的に行い、一度 exchange した code の再利用は 401
+
+## 共通: kiosk 向け限定交換 (code/exchange)
+
+共有端末 (Ostiarius kiosk) は生徒の refreshToken を受け取ってはならない。 生徒が立ち去った後も
+30 日有効な資格情報が端末に残るため、 認可付きの限定交換口を分ける。
+
+```mermaid
+sequenceDiagram
+    participant KS as kiosk (Ostiarius)
+    participant CS as Cernere Server
+    participant R as Redis
+    participant DB as PostgreSQL
+    KS->>CS: POST /api/auth/code/exchange { code }<br/>Authorization: Bearer {service token}
+    CS->>CS: requireExportAuth (service / admin のみ)
+    CS->>R: GETDEL authcode:<code> (atomic one-time consume)
+    CS->>DB: DELETE refresh_sessions (未交付の refreshToken 行)
+    CS-->>KS: { userId, accessToken, expiresIn: 900 }
+```
+
+- 認可必須。 無認可で叩ける `/api/auth/exchange` と違い、 service token (または admin) を要求する
+- 返すのは `{ userId, accessToken, expiresIn }` のみ。 **refreshToken と user プロフィールは返さない**
+- bearer token を含む応答には `Cache-Control: no-store` を付け、共有端末や中間キャッシュへ残さない
+- `issueAuthCode` が先に作った `refresh_sessions` 行は交換時に削除する。 誰にも渡さない
+  refreshToken の行を 30 日残さないため
+- kiosk は受け取った accessToken (15 分) を同意記録 `POST /api/identity/face-consent` を
+  生徒本人として打つためだけに使い、 端末へ保存しない
 
 ## 共通: refresh
 

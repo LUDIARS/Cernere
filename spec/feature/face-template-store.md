@@ -10,6 +10,7 @@
   `{ userId, template, keyId, modelId, quality, version, state, enrolledAt, revoked }` を必ず含む。
   `state` を省略してはならない (Ostiarius は `state` を確認できないテンプレートを照合キャッシュへ入れない)。
 - `POST /api/identity/face-consent` と `GET /api/identity/face-consent/policy`: 本人同意と version 付き同意文。現行 policy version と本人の施設所属を検証する。
+  同意は常に**本人の access token** で記録する。 service token で他人の同意を代筆させてはならない。 kiosk (Ostiarius) は生徒が自分で発行した authCode を `POST /api/auth/code/exchange` (service Bearer) で `{ userId, accessToken }` に交換し、その accessToken で同意を打つ。 交換口は refreshToken を返さないため、共有端末に長期資格情報が残らない ([../interface/auth-flows.md](../interface/auth-flows.md) 「共通: kiosk 向け限定交換」)。
 - `DELETE /api/identity/face-template`: 本人撤回。`DELETE /api/identity/face-template/:userId?facilityId=`: service による施設指定・理由必須の無効化。
 - `GET /api/identity/roster?facilityId=`: service/admin に弱識別 hint と所属 role だけを返す。
 

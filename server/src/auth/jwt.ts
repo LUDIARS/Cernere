@@ -9,7 +9,7 @@ import { devLog } from "../logging/dev-logger.js";
 
 // user access token はステートレスで即時 revoke できないため、 露出時間を短く保つ。
 // 長期の継続ログインは refresh token (30日) 経由に寄せる。
-const ACCESS_TOKEN_MINUTES = 15;
+export const ACCESS_TOKEN_SECONDS = 15 * 60;
 // service-to-service token (tool / project HS256) は別枠で 60 分。
 // user のセッション UX とは切り離す。
 const SERVICE_TOKEN_MINUTES = 60;
@@ -44,7 +44,7 @@ export function generateAccessToken(userId: string, role: string): string {
   return jwt.sign(
     { sub: userId, role },
     config.jwtSecret,
-    { expiresIn: `${ACCESS_TOKEN_MINUTES}m` },
+    { expiresIn: ACCESS_TOKEN_SECONDS },
   );
 }
 

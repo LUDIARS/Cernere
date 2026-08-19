@@ -12,6 +12,7 @@ import { handlePasskeyRoute } from "./http/passkey-handler.js";
 import { handleFaceTemplateRoute } from "./http/face-template-handler.js";
 import { handleFacePhotoRoute } from "./http/face-photo-handler.js";
 import { handleActionAuthRoute } from "./http/action-auth-handler.js";
+import { handleAuthCodeExchange } from "./http/auth-code-exchange-handler.js";
 import { exportProjectSchemas } from "./http/project-schema-handler.js";
 import { getPublicKeys } from "./auth/paseto.js";
 import { handleCompositeRoute } from "./http/composite-handler.js";
@@ -161,12 +162,14 @@ function jsonResponse(
   status: string,
   data: unknown,
   cookies: string[] = [],
+  headers: Readonly<Record<string, string>> = {},
 ): void {
   res.cork(() => {
     res.writeStatus(status)
       .writeHeader("Content-Type", "application/json")
       .writeHeader("Access-Control-Allow-Origin", config.frontendUrl)
       .writeHeader("Access-Control-Allow-Credentials", "true");
+    for (const [name, value] of Object.entries(headers)) res.writeHeader(name, value);
     for (const cookie of cookies) res.writeHeader("Set-Cookie", cookie);
     res.end(JSON.stringify(data));
   });
@@ -428,6 +431,26 @@ export function createApp() {
       if (aborted) return;
       const result = await handleActionAuthRoute(phase, body, authHeader);
       jsonResponse(res, result.status, result.data);
+    } catch (err) {
+      if (aborted) return;
+      const { status, message } = classifyError(err);
+      jsonResponse(res, status, { error: message });
+    }
+  });
+
+  // ── kiosk 向け限定 authCode 交換 ────────────────────────
+  // service token 必須。 refreshToken を返さない代わりに userId と 15 分の
+  // accessToken だけを渡す (共有端末に長期資格情報を残さないため)。
+  app.post("/api/auth/code/exchange", async (res, req) => {
+    const authHeader = req.getHeader("authorization") ?? "";
+    let aborted = false;
+
+    try {
+      // body は { code } だけ。 大きな payload を読み込む理由が無いので上限を絞る。
+      const body = await readBody(res, 4096, () => { aborted = true; });
+      if (aborted) return;
+      const result = await handleAuthCodeExchange(body, authHeader);
+      jsonResponse(res, result.status, result.data, [], result.headers);
     } catch (err) {
       if (aborted) return;
       const { status, message } = classifyError(err);

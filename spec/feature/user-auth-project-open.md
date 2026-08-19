@@ -26,8 +26,7 @@ sequenceDiagram
     CF->>U: window.open(url, "_blank", "noopener")
     U->>SF: 別タブで遷移先 URL を開く
     SF->>CS: POST /api/auth/exchange<br/>{ code: "<authCode>" }
-    CS->>R: GET authcode:<code>
-    CS->>R: DEL authcode:<code> (one-time)
+    CS->>R: GETDEL authcode:<code> (atomic one-time consume)
     CS-->>SF: 200 OK<br/>{ accessToken, refreshToken,<br/>  user: { id, name, email, role } }
     SF->>SF: history.replaceState で<br/>?code= を URL から削除
     Note over SF,CS: 以降は通常セッションと同等
@@ -41,7 +40,7 @@ sequenceDiagram
 | 1-2 | `managed_project.open_url` (WS) | 既ログイン user セッション経由 → 認可済み |
 | 3-6 | `issueAuthCodeForUserId` (`server/src/auth/auth-code.ts:51`) | refresh token は DB、authCode は Redis に 60秒 TTL |
 | 8 | `window.open(url, "_blank", "noopener")` | opener へのアクセスを切る |
-| 10-12 | `exchange` (`server/src/http/auth-handler.ts:239`) | **取得即削除** で再利用不可 |
+| 10-12 | `exchange` (`server/src/http/auth-handler.ts`) | Redis `GETDEL` で**原子的に取得即削除**し再利用不可 |
 | 13 | `accessToken` | **HS256** で `JWT_SECRET` 署名 (60分有効) |
 | 13 | `refreshToken` | UUID (30日、`refresh_sessions` 表に保存) |
 
@@ -76,7 +75,7 @@ stateDiagram-v2
 |---|---|
 | `server/src/project/service.ts` `issueProjectOpenUrl()` | frontend_url + authCode を組み立てて返す |
 | `server/src/auth/auth-code.ts` `issueAuthCode()` / `issueAuthCodeForUserId()` | token pair 生成 → Redis 格納 |
-| `server/src/http/auth-handler.ts` `exchange()` | `/api/auth/exchange` の実体 (one-time GET+DEL) |
+| `server/src/http/auth-handler.ts` `exchange()` | `/api/auth/exchange` の実体 (one-time `GETDEL`) |
 | `server/src/auth/jwt.ts` `generateTokenPair()` | HS256 access token + UUID refresh token |
 | `server/src/commands.ts` `managedProjectCmd("open_url")` | WS コマンドのディスパッチ |
 | `frontend/src/pages/DashboardPage.tsx` `handleOpen()` | `open_url` を呼び window.open する側 |
