@@ -5,6 +5,8 @@ export type {
   CompositeLoginProps,
   DeviceAnomaly,
 } from "./CompositeLogin.js";
+export { LoginDivider } from "./LoginDivider.js";
+export type { LoginDividerProps } from "./LoginDivider.js";
 export {
   collectDeviceFingerprint,
   collectMachineInfo,

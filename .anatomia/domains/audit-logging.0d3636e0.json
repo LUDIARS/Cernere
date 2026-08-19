@@ -21,7 +21,7 @@
     {
       "preset": "couplingCap",
       "params": {
-        "targetPattern": "[Ll][Oo][Gg]|[Ll][Oo][Gg][Gg][Ee][Rr]",
+        "targetPattern": "[Ll][Oo][Gg](?:$|[_-]|[A-Z]|[Ss](?:$|[_-]|[A-Z])|[Gg][Ee][Rr])",
         "by": "name",
         "maxFanOut": 9007199254740991
       }

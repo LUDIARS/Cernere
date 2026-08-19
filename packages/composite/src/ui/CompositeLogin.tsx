@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from "react";
 import { collectDeviceFingerprint, type DeviceFingerprint } from "./device-fingerprint.js";
+import { LoginDivider } from "./LoginDivider.js";
 
 export type DeviceAnomaly =
   | "new_device"
@@ -65,6 +66,14 @@ export interface CompositeLoginProps {
   };
   /** 表示テキストの上書き (i18n) */
   labels?: Partial<Labels>;
+  /**
+   * カード内の主フォーム下に差し込む代替ログイン導線 (パスキー等)。
+   * カード外に置くと主フォームと切り離されて見えるため、 利用側の導線も
+   * ここから同じカードの中へ入れる。 mfa / device 確認中は出さない。
+   */
+  alternatives?: React.ReactNode;
+  /** alternatives の上に出す区切り文言 (既定は orContinueWith) */
+  alternativesLabel?: string;
   /** 追加スタイル (カード外側) */
   className?: string;
   style?: React.CSSProperties;
@@ -158,6 +167,7 @@ function anomalyLabel(a: DeviceAnomaly, l: Labels): string {
   }
 }
 
+/** @implements SPEC-COMPOSITE-AUTH-ALTERNATIVES */
 export function CompositeLogin(props: CompositeLoginProps) {
   const l: Labels = { ...DEFAULT_LABELS, ...props.labels };
   const { authApi, onAuthCode, oauth } = props;
@@ -509,20 +519,7 @@ export function CompositeLogin(props: CompositeLoginProps) {
 
       {mode !== "mfa" && mode !== "device" && oauth && (oauth.googleUrl || oauth.githubUrl) && (
         <>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.75rem",
-              margin: "1.25rem 0",
-              color: "var(--text-muted, #888)",
-              fontSize: "0.8rem",
-            }}
-          >
-            <div style={{ flex: 1, height: 1, background: "var(--border, #ccc)" }} />
-            <span>{l.orContinueWith}</span>
-            <div style={{ flex: 1, height: 1, background: "var(--border, #ccc)" }} />
-          </div>
+          <LoginDivider label={l.orContinueWith} />
 
           {oauth.googleUrl && (
             <a href={oauth.googleUrl} style={oauthBtnStyle}>
@@ -534,6 +531,13 @@ export function CompositeLogin(props: CompositeLoginProps) {
               {l.continueWithGithub}
             </a>
           )}
+        </>
+      )}
+
+      {mode !== "mfa" && mode !== "device" && props.alternatives && (
+        <>
+          <LoginDivider label={props.alternativesLabel ?? l.orContinueWith} />
+          {props.alternatives}
         </>
       )}
     </div>
