@@ -953,6 +953,7 @@ registration grant は `Authorization: Cernere-Registration <token>` で送る�
 - `frontend/src/pages/oidc/OidcConsentPage.tsx`, Profile/Organizations表示: email/name nullable対応
 - `packages/composite/src/ui/CompositeLogin.tsx`, `packages/composite/src/types.ts`, `packages/composite/src/composite.ts`: ユーザー操作内での同期popup作成、origin/source/state/timeout/cleanup、popup版/email版versioning、atomic exchange新契約、`CernereUser.email` nullable化
 - `SPEC-COMPOSITE-AUTH-ALTERNATIVES`: emailフォーム版 `CompositeLogin` は、passkey等の代替認証導線を主フォームと同じカード内へ差し込めるようにする。区切り表示はOAuthと共通化し、MFA・デバイス確認中には代替導線を表示しない
+- `SPEC-COMPOSITE-PASSKEY-AUTOSTART`: composite の送信先検証と silent SSO が未認証で完了した後、login mode は識別子なしの passkey ceremony を mount ごとに最大1回だけ自動開始してよい。手動再試行を含め ceremony は single-flight とし、WebAuthn 非対応・credential 不在・利用者の取消時は認証を完了せず、現在の auth mode で許可された明示導線だけを表示する。MFA・デバイス確認中は開始しない
 
 ### 17.3 仕様・運用文書
 

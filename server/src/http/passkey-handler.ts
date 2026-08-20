@@ -6,7 +6,8 @@
  *   - macOS        : Touch ID (Safari) / Chrome ProfileSync
  *   - Windows      : Windows Hello (顔/指紋/PIN)
  *   - Android      : 指紋/顔 (Google Password Manager で同期)
- *   - 物理キー     : YubiKey / Titan / Solokey 等 (USB / NFC / BLE)
+ *
+ * 物理キー (YubiKey 等) や同期パスキーも含む WebAuthn 認証器を利用できる。
  *
  * 外部 API は一切不要 — ブラウザ <-> Cernere サーバの直接やり取り。
  *
@@ -55,6 +56,22 @@ const RP_NAME = config.webauthnRpName;
 const RP_ID = config.webauthnRpId;
 const ORIGINS = config.webauthnOrigins;
 const CHALLENGE_TTL_SEC = 5 * 60;
+
+/**
+ * 登録時の認証器ポリシー (3 経路 = signup / profile 追加 / 新端末登録 で共通)。
+ *
+ *   - residentKey "required"
+ *       usernameless (メール未入力) ログインには discoverable credential が要る。
+ *       "preferred" だと非 discoverable が作られ得て、 認証器が候補を出せない。
+ *   - userVerification "required"
+ *       出席チェックイン (Ostiarius) が assertion を userVerification:'required' で
+ *       検証するため、 登録時点で UV (生体/PIN) を必須化して整合させる。 端末貸し
+ *       対策が設計の核なので、 ここはセキュア方向に寄せる。
+ */
+const REGISTRATION_AUTHENTICATOR_SELECTION = {
+  residentKey: "required",
+  userVerification: "required",
+} as const;
 
 const signupBeginSchema = z.object({
   name: z.string().trim().min(1).max(80),
@@ -185,10 +202,7 @@ async function signupBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise
     userID: new TextEncoder().encode(userId),
     attestationType: "none",
     excludeCredentials: [],
-    authenticatorSelection: {
-      residentKey: "required",
-      userVerification: "required",
-    },
+    authenticatorSelection: REGISTRATION_AUTHENTICATOR_SELECTION,
   });
   const pending: PendingPasskeySignup = {
     challenge: options.challenge,
@@ -319,14 +333,7 @@ async function registerBegin(authHeader: string, actionProof: string): Promise<R
         ? (e.transports as AuthenticatorTransportFuture[])
         : undefined,
     })),
-    authenticatorSelection: {
-      // platform (= Face ID 等内蔵) と cross-platform (= 物理キー) どちらも許可
-      residentKey: "preferred",
-      // 出席チェックイン (Ostiarius) が assertion を userVerification:'required' で
-      // 検証するため、 登録時点で UV (生体/PIN) を必須化して整合させる。 端末貸し
-      // 対策が設計の核なので、 ここはセキュア方向 (preferred → required) に寄せる。
-      userVerification: "required",
-    },
+    authenticatorSelection: REGISTRATION_AUTHENTICATOR_SELECTION,
   });
 
   await redis.set(challengeKey("reg", userId), opts.challenge, "EX", CHALLENGE_TTL_SEC);
@@ -602,11 +609,7 @@ async function deviceRegisterBegin(p: Record<string, unknown>, ctx: RequestCtx):
         ? (e.transports as AuthenticatorTransportFuture[])
         : undefined,
     })),
-    authenticatorSelection: {
-      // 新端末自身の認証器 (Windows Hello / スマホ生体) を discoverable で登録する。
-      residentKey: "required",
-      userVerification: "required",
-    },
+    authenticatorSelection: REGISTRATION_AUTHENTICATOR_SELECTION,
   });
 
   const ceremonyId = crypto.randomUUID();

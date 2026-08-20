@@ -19,15 +19,11 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import {
-  startAuthentication,
-  type PublicKeyCredentialRequestOptionsJSON,
-  type AuthenticationResponseJSON,
-} from "@simplewebauthn/browser";
 import { collectDeviceFingerprint } from "../../lib/device-fingerprint";
 import { fetchAllowedOrigins, isTargetAllowed } from "../../lib/composite-redirect";
 import { auth as authApi, getAccessToken, hasAccessRecord } from "../../lib/api";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePasskeyLogin } from "../../hooks/usePasskeyLogin";
 
 const API_BASE = "";
 
@@ -117,6 +113,10 @@ export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
   const [fingerprintStatus, setFingerprintStatus] =
     useState<"idle" | "collecting" | "sent" | "failed">("idle");
 
+  // パスキー自動起動の可否。 self は即座に、 composite は送信先検証と silent SSO が
+  // 「authCode を取れなかった」と決着してから true にする (ダイアログの空振り防止)。
+  const [passkeyAutoReady, setPasskeyAutoReady] = useState(self && mode === "login");
+
   const wsRef = useRef<WebSocket | null>(null);
   const retryTimerRef = useRef<number | null>(null);
   const allowedOriginsRef = useRef<string[]>([]);
@@ -167,12 +167,22 @@ export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
             /* 対話フローにフォールバック */
           }
         }
+        // silent SSO では入れなかった → 対話ログイン。 ここで初めて認証器を開いてよい。
+        if (!cancelled) setPasskeyAutoReady(true);
       }
     })();
     return () => { cancelled = true; };
     // completeAuth は同一 render の closure で参照 (effect は render 後に走るため定義済み)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin, redirectUri]);
+
+  // self の初期タブが register だった場合は、login への切替時に自動起動を許可する。
+  // composite は上の effect で実 target の検証と silent SSO が完了した場合だけ許可する。
+  useEffect(() => {
+    if (mode === "login" && self) {
+      setPasskeyAutoReady(true);
+    }
+  }, [mode, self]);
 
   /** self モードの戻り先。 open redirect を防ぐためローカルパスのみ許可。 */
   const selfTarget = (): string => {
@@ -185,6 +195,7 @@ export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
   const completeAuth = (authCode: string) => {
     if (self) {
       // Cernere 自身がコンシューマ: authCode を自分のトークンに交換して入る
+      setLoading(true);
       void authApi.exchangeAuthCode(authCode)
         .then(() => { window.location.href = selfTarget(); })
         .catch((err: unknown) => {
@@ -215,6 +226,20 @@ export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
       setError("送信先が指定されていません。");
     }
   };
+
+  // ── ログイン画面を開いた直後に Windows Hello / Face ID を直接開く ──
+  // メールを渡さない usernameless なので、 ユーザは入力もボタンも踏まない。
+  // キャンセル / 未登録なら phase が "fallback" になり通常フォームへ落ちる。
+  // 送信先が拒否された / 2 要素チャレンジ進行中は認証器を開かない (fail-closed)
+  const passkeyBlocked = Boolean(error) || challenge !== null;
+
+  const passkey = usePasskeyLogin({
+    apiBase: API_BASE,
+    autoStartReady: passkeyAutoReady && mode === "login" && !passkeyBlocked,
+    onAuthCode: completeAuth,
+    onError: setError,
+  });
+  const passkeyBusy = passkey.phase === "running";
 
   /** fingerprint を収集して WS に送信。失敗時は setTimeout で再試行。 */
   const collectAndSendFingerprint = (ws: WebSocket) => {
@@ -421,45 +446,6 @@ export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Authentication failed");
-      setLoading(false);
-    }
-  };
-
-  /** Passkey (FaceID / TouchID / Windows Hello / 物理キー) でログイン。
-   *  Cernere の通常 /api/auth/passkey/login-begin で options を取り、 ブラウザの
-   *  生体認証ダイアログを開く。 verify は /api/auth/passkey/composite-login-finish
-   *  で authCode を発行する経路 (= JWT は返さず、 親サービスに postMessage する) */
-  const handlePasskeyLogin = async () => {
-    setError("");
-    setInfo("");
-    setLoading(true);
-    try {
-      const beginRes = await fetch(`${API_BASE}/api/auth/passkey/login-begin`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email || "" }),
-      });
-      const beginData = await beginRes.json() as
-        { options: PublicKeyCredentialRequestOptionsJSON; challengeOwner: string; error?: string };
-      if (!beginRes.ok) throw new Error(beginData.error || "Passkey login start failed");
-
-      const assertion: AuthenticationResponseJSON = await startAuthentication({ optionsJSON: beginData.options });
-
-      const finishRes = await fetch(`${API_BASE}/api/auth/passkey/composite-login-finish`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ response: assertion, challengeOwner: beginData.challengeOwner }),
-      });
-      const finishData = await finishRes.json() as { authCode?: string; error?: string };
-      if (!finishRes.ok || !finishData.authCode) {
-        throw new Error(finishData.error || "Passkey login failed");
-      }
-
-      completeAuth(finishData.authCode);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Passkey login failed";
-      setError(msg);
-    } finally {
       setLoading(false);
     }
   };
@@ -789,11 +775,11 @@ export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
               <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
             </div>}
 
-            {/* Passkey (Face ID / Touch ID / Windows Hello / Android 生体 / 物理キー) */}
+            {/* Passkey — 画面を開いた時点で自動起動済み。 ここは再試行の導線。 */}
             {mode === "login" && <button
               type="button"
-              onClick={handlePasskeyLogin}
-              disabled={loading}
+              onClick={() => { setError(""); setInfo(""); passkey.start(email); }}
+              disabled={loading || passkeyBusy || !passkeyAutoReady}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -808,12 +794,32 @@ export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
                 fontSize: "0.875rem",
                 fontWeight: 500,
                 marginBottom: "0.5rem",
-                cursor: loading ? "not-allowed" : "pointer",
-                opacity: loading ? 0.6 : 1,
+                cursor: loading || passkeyBusy || !passkeyAutoReady ? "not-allowed" : "pointer",
+                opacity: loading || passkeyBusy || !passkeyAutoReady ? 0.6 : 1,
               }}
             >
-              🔐 Passkey でログイン（生体認証 / Windows Hello PIN）
+              {passkeyBusy
+                ? "🔐 認証器の応答を待っています…"
+                : passkey.autoAttempted
+                  ? "🔐 もう一度パスキーで認証する"
+                  : "🔐 Passkey でログイン（生体認証 / Windows Hello PIN / セキュリティキー）"}
             </button>}
+
+            {/* 自動起動が空振りした / 非対応だったときだけ理由を出す。 */}
+            {mode === "login" && passkey.phase === "unsupported" && (
+              <p style={{ margin: "0 0 0.5rem", fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                {passkeyOnly
+                  ? "このブラウザはパスキー (WebAuthn) に対応していません。対応ブラウザで開き直してください。"
+                  : "このブラウザはパスキー (WebAuthn) に対応していません。メールとパスワードでログインしてください。"}
+              </p>
+            )}
+            {mode === "login" && passkey.phase === "fallback" && !error && (
+              <p style={{ margin: "0 0 0.5rem", fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                {passkeyOnly
+                  ? "使えるパスキーが見つからないか、認証をキャンセルしました。もう一度ボタンを押してください。"
+                  : "使えるパスキーが見つからないか、認証をキャンセルしました。下のフォームでログインするか、もう一度ボタンを押してください。"}
+              </p>
+            )}
 
             {/* 新規登録導線: このページの register タブでそのまま登録する
                 (passkey 専用モードでもパスキー登録は可能)。 */}
