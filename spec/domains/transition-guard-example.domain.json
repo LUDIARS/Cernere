@@ -1,7 +1,7 @@
 {
   "name": "transition-guard-example",
-  "role": "policy",
   "description": "組み込みの説明用 transition rule を無効化する。Cernere の dispatch から getUserState への呼び出しは既存のセッション読取であり、禁止状態遷移ではない。",
+  "role": "policy",
   "presetRules": [],
   "templateRules": []
 }

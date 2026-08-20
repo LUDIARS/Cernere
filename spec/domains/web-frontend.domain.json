@@ -1,0 +1,53 @@
+{
+  "name": "web-frontend",
+  "description": "React 19 + React Router 7 client: pages, hooks, and the WebSocket/auth client library that drives all state changes through the session.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "/frontend/src/"
+    },
+    {
+      "pathPattern": "/packages/composite/src/ui/"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/pages/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/lib/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/hooks/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/contexts/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/components/[^/]+$"
+    },
+    {
+      "namePattern": "[Pp][Aa][Gg][Ee]|[Cc][Oo][Mm][Pp][Oo][Nn][Ee][Nn][Tt]"
+    },
+    {
+      "namePattern": "[Hh][Oo][Oo][Kk]|[Uu][Ss][Ee][[Aa]-[Zz]]"
+    },
+    {
+      "namePattern": "[Cc][Ll][Ii][Ee][Nn][Tt]|[Qq][Uu][Ee][Rr][Yy]"
+    },
+    {
+      "pathPattern": "(^|/)site/(?:.*/)?[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/[^/]+$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"web-frontend\" domain: React 19 + React Router 7 client: pages, hooks, and the WebSocket/auth client library that drives all state changes through the session.",
+  "specRefs": [
+    "1.1 Cernere 概要",
+    "フロントエンド"
+  ],
+  "rationale": "The React frontend (pages, hooks, client lib) is a coherent presentation domain consuming the WS/auth backend."
+}

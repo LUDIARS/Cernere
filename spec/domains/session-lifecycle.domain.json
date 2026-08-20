@@ -1,0 +1,42 @@
+{
+  "name": "session-lifecycle",
+  "description": "Always-connected session state machine: Redis user-state (ustate) tracking, TTL (7d), None→LoggedIn→SessionExpired transitions, session store, and reconnection by session ID.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "/server/src/ws/session-registry"
+    },
+    {
+      "pathPattern": "/server/src/ws/auth"
+    },
+    {
+      "pathPattern": "/server/src/redis"
+    },
+    {
+      "pathPattern": "/server/src/auth/auth-session"
+    },
+    {
+      "pathPattern": "/packages/id-cache/src/"
+    },
+    {
+      "namePattern": "[Ss][Ee][Ss][Ss][Ii][Oo][Nn]"
+    },
+    {
+      "namePattern": "[Uu][Ss][Tt][Aa][Tt][Ee]|[Uu][Ss][Ee][Rr]_[Ss][Tt][Aa][Tt][Ee]"
+    },
+    {
+      "namePattern": "[Tt][Tt][Ll]|[Ee][Xx][Pp][Ii][Rr][Ee]"
+    },
+    {
+      "namePattern": "[Rr][Ee][Cc][Oo][Nn][Nn][Ee][Cc][Tt]"
+    }
+  ],
+  "cardTemplate": "Summarise the \"session-lifecycle\" domain: Always-connected session state machine: Redis user-state (ustate) tracking, TTL (7d), None→LoggedIn→SessionExpired transitions, session store, and reconnection by session ID.",
+  "specRefs": [
+    "Step 7: セッション状態管理",
+    "再接続（セッション ID）",
+    "1.3 セキュリティ設計原則"
+  ],
+  "rationale": "The Always-Connected Session and its Redis lifecycle are a distinct concern from credential verification, spanning ws session registry and id-cache."
+}

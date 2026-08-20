@@ -1,0 +1,39 @@
+{
+  "name": "websocket-transport",
+  "description": "WebSocket upgrade, connection handling, ping/pong liveness (30s/10s), and the module_request/module_response/error message protocol dispatch.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "/server/src/ws/"
+    },
+    {
+      "pathPattern": "/server/src/commands"
+    },
+    {
+      "pathPattern": "/server/src/app"
+    },
+    {
+      "namePattern": "[Ww][Ss]|[Ww][Ee][Bb][Ss][Oo][Cc][Kk][Ee][Tt]"
+    },
+    {
+      "namePattern": "[Pp][Ii][Nn][Gg]|[Pp][Oo][Nn][Gg]"
+    },
+    {
+      "namePattern": "[Hh][Aa][Nn][Dd][Ll][Ee][Rr]|[Dd][Ii][Ss][Pp][Aa][Tt][Cc][Hh]|[Pp][Rr][Oo][Tt][Oo][Cc][Oo][Ll]"
+    },
+    {
+      "namePattern": "[Mm][Oo][Dd][Uu][Ll][Ee]_[Rr][Ee][Qq][Uu][Ee][Ss][Tt]|[Mm][Oo][Dd][Uu][Ll][Ee]_[Rr][Ee][Ss][Pp][Oo][Nn][Ss][Ee]"
+    },
+    {
+      "pathPattern": "(^|/)server/tests/ws/(?:.*/)?[^/]+$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"websocket-transport\" domain: WebSocket upgrade, connection handling, ping/pong liveness (30s/10s), and the module_request/module_response/error message protocol dispatch.",
+  "specRefs": [
+    "Step 2: Ping/Pong による常時接続の維持",
+    "Step 3: メッセージプロトコルの実装",
+    "WebSocket モジュール"
+  ],
+  "rationale": "server/src/ws holds the connection/protocol machinery (handler, protocol, events) distinct from what individual modules do with it."
+}

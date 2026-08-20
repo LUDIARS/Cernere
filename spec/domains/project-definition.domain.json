@@ -1,0 +1,36 @@
+{
+  "name": "project-definition",
+  "description": "Project definitions and per-organization enablement: dataSchema/commands/pluginRepository definitions, org_project enable/disable, credentials and launch tokens.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "/server/src/project/"
+    },
+    {
+      "pathPattern": "/server/src/ws/project-"
+    },
+    {
+      "pathPattern": "/server/tests/project/"
+    },
+    {
+      "namePattern": "[Pp][Rr][Oo][Jj][Ee][Cc][Tt].?[Dd][Ee][Ff]"
+    },
+    {
+      "namePattern": "[Oo][Rr][Gg]_[Pp][Rr][Oo][Jj][Ee][Cc][Tt]|[Oo][Rr][Gg][Pp][Rr][Oo][Jj][Ee][Cc][Tt]"
+    },
+    {
+      "namePattern": "[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll]|[Ll][Aa][Uu][Nn][Cc][Hh]"
+    },
+    {
+      "namePattern": "[Ss][Cc][Hh][Ee][Mm][Aa].?[Mm][Ii][Gg][Rr][Aa][Tt]"
+    }
+  ],
+  "cardTemplate": "Summarise the \"project-definition\" domain: Project definitions and per-organization enablement: dataSchema/commands/pluginRepository definitions, org_project enable/disable, credentials and launch tokens.",
+  "specRefs": [
+    "ProjectDefinition (project_definition)",
+    "OrganizationProject (org_project)",
+    "3. マイクロサービスアーキテクチャ"
+  ],
+  "rationale": "The project/ directory centers on defining projects, their data schemas, credentials, and per-org activation — a large distinct concern."
+}

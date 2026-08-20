@@ -18,6 +18,9 @@
     },
     {
       "pathPattern": "(^|/)packages/id-service/src/plugin/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)packages/id-service/(?:.*/)?[^/]+$"
     }
   ],
   "cardTemplate": "Summarise the \"identity-sdk\" domain: 汎用 Identity Service SDK 群。外部サービス向けの認証ルート・トークン生成・キャッシュ・WebSocket 認証アダプタ・プラグイン/プロフィールリポジトリを提供する再利用可能パッケージ。"

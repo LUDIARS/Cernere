@@ -5,6 +5,9 @@
   "templateRules": [],
   "membership": [
     {
+      "pathPattern": "/server/src/oidc/|/server/src/auth/oidc-|/server/tests/oidc/|/server/tests/auth/oidc-|/migrations/039_oidc_signing_keys"
+    },
+    {
       "pathPattern": "(^|/)server/src/oidc/[^/]+$"
     },
     {
@@ -24,6 +27,9 @@
     },
     {
       "pathPattern": "(^|/)migrations/039_oidc_signing_keys\\.sql$"
+    },
+    {
+      "namePattern": "[Oo][Ii][Dd][Cc]|[Jj][Ww][Kk][Ss]|[Ss][Ii][Gg][Nn][Ii][Nn][Gg][Kk][Ee][Yy]"
     }
   ],
   "cardTemplate": "Summarise the \"oidc-provider\" domain: Cernere を IdP とする OpenID Connect プロバイダ。認可コード発行、トークン交換、approve/deny、userinfo、外部 RP 向けエンドポイントと OIDC クライアント管理。"

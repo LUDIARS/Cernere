@@ -1,0 +1,33 @@
+{
+  "name": "organization-management",
+  "description": "Organizations and their membership: create/update/delete organizations, list/add/update-role/remove members with role-gated actions.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "/server/src/project/service"
+    },
+    {
+      "pathPattern": "/frontend/src/pages/"
+    },
+    {
+      "pathPattern": "/server/tests/project/"
+    },
+    {
+      "namePattern": "[Oo][Rr][Gg][Aa][Nn][Ii][Zz][Aa][Tt][Ii][Oo][Nn]|\\[Bb][Oo][Rr][Gg]\\[Bb]"
+    },
+    {
+      "namePattern": "[Mm][Ee][Mm][Bb][Ee][Rr]"
+    },
+    {
+      "namePattern": "[Ii][Nn][Vv][Ii][Tt][Ee]|[Jj][Oo][Ii][Nn]|[Ll][Ee][Aa][Vv][Ee]"
+    }
+  ],
+  "cardTemplate": "Summarise the \"organization-management\" domain: Organizations and their membership: create/update/delete organizations, list/add/update-role/remove members with role-gated actions.",
+  "specRefs": [
+    "Organization (organization)",
+    "Member (member)",
+    "組織レベル"
+  ],
+  "rationale": "Organization + member CRUD forms a coherent tenancy domain surfaced as WS modules and frontend pages."
+}

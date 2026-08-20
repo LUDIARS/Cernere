@@ -1,0 +1,37 @@
+{
+  "name": "persistence-migration",
+  "description": "Drizzle ORM schema, DB connection, and numbered idempotent SQL migrations with the no-DROP / logical-delete rules.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "/server/src/db/"
+    },
+    {
+      "pathPattern": "/migrations/"
+    },
+    {
+      "pathPattern": "/packages/id-service/src/migration/"
+    },
+    {
+      "namePattern": "[Mm][Ii][Gg][Rr][Aa][Tt]"
+    },
+    {
+      "namePattern": "[Ss][Cc][Hh][Ee][Mm][Aa]"
+    },
+    {
+      "namePattern": "[Dd][Rr][Ii][Zz][Zz][Ll][Ee]|[Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn]"
+    },
+    {
+      "namePattern": "[Ii][Dd][Ee][Mm][Pp][Oo][Tt][Ee][Nn][Tt]"
+    }
+  ],
+  "cardTemplate": "Summarise the \"persistence-migration\" domain: Drizzle ORM schema, DB connection, and numbered idempotent SQL migrations with the no-DROP / logical-delete rules.",
+  "specRefs": [
+    "2. DB マイグレーション",
+    "ファイル管理",
+    "冪等性",
+    "禁止事項"
+  ],
+  "rationale": "db/ + migrations/ + migration-scanner form the data-persistence and schema-evolution domain governed by explicit migration rules."
+}

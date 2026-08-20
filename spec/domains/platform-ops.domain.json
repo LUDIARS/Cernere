@@ -21,6 +21,15 @@
     },
     {
       "pathPattern": "(^|/)server/scripts/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)server/(?:[^/]+)\\.ts$"
+    },
+    {
+      "pathPattern": "(^|/)server/tests/(?:[^/]+)\\.ts$"
+    },
+    {
+      "pathPattern": "(^|/)server/tests/lib/(?:.*/)?[^/]+$"
     }
   ],
   "cardTemplate": "Summarise the \"platform-ops\" domain: 運用基盤。Infisical シークレット管理 CLI、環境設定、操作監査ログ (operation_logs)、認証イベント記録など、プラットフォームの設定・秘密・可観測性を担う。"

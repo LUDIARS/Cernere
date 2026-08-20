@@ -1,0 +1,20 @@
+{
+  "name": "repository-bootstrap",
+  "description": "Developer setup of the repository itself: git submodule retrieval, lib/vestigium build ordering, and npm dependency installation for server / frontend / packages. Runtime behaviour is out of scope.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "/scripts/"
+    },
+    {
+      "namePattern": "[Bb][Oo][Oo][Tt][Ss][Tt][Rr][Aa][Pp]|[Ss][Uu][Bb][Mm][Oo][Dd][Uu][Ll][Ee]"
+    }
+  ],
+  "cardTemplate": "Summarise the \"repository-bootstrap\" domain: Developer setup of the repository itself — submodule retrieval, lib/vestigium build ordering, and npm dependency installation.",
+  "specRefs": [
+    "README.md 依存インストール",
+    ".github/workflows/compile-check.yml Build Vestigium submodule"
+  ],
+  "rationale": "server depends on lib/vestigium through file:, and that submodule is empty in a fresh clone or worktree. The ordering that makes the repository buildable is a concern of its own, separate from any runtime domain, so the scripts that encode it get their own domain instead of being attached to configuration-secrets."
+}

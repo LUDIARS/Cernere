@@ -18,6 +18,9 @@
     },
     {
       "pathPattern": "(^|/)packages/composite/src/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)server/tests/http/(?:.*/)?[^/]+$"
     }
   ],
   "cardTemplate": "Summarise the \"session-relay\" domain: 常時接続セッションとリアルタイムメッセージリレー。WebSocket 接続確立・ping/pong 生存検証・SessionExpired 遷移、ゲスト/複合認証ハンドリング、同一ユーザ間リレー、Redis セッション TTL 管理。"

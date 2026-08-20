@@ -1,0 +1,80 @@
+{
+  "name": "authentication",
+  "description": "Credential verification, token issuance, and biometric identity templates: password (bcrypt), GitHub/Google OAuth, MFA, passkeys, JWT/PASETO, OIDC, consent-bound face templates, and sealed profile face photos with pending-template review.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "/server/src/auth/"
+    },
+    {
+      "pathPattern": "/server/src/oidc/"
+    },
+    {
+      "pathPattern": "/server/src/identity/"
+    },
+    {
+      "pathPattern": "/server/src/http/"
+    },
+    {
+      "pathPattern": "/packages/id-service/src/"
+    },
+    {
+      "pathPattern": "(^|/)server/src/http/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)server/src/auth/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)server/tests/auth/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)server/tests/lib/crypto/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)server/src/lib/crypto/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)packages/service-adapter/src/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)packages/service-adapter/tests/[^/]+$"
+    },
+    {
+      "namePattern": "[Aa][Uu][Tt][Hh]"
+    },
+    {
+      "namePattern": "[Ll][Oo][Gg][Ii][Nn]"
+    },
+    {
+      "namePattern": "[Oo][Aa][Uu][Tt][Hh]"
+    },
+    {
+      "namePattern": "[Oo][Ii][Dd][Cc]"
+    },
+    {
+      "namePattern": "[Jj][Ww][Tt]|[Pp][Aa][Ss][Ee][Tt][Oo]"
+    },
+    {
+      "namePattern": "[Mm][Ff][Aa]|[Tt][Oo][Tt][Pp]"
+    },
+    {
+      "namePattern": "[Tt][Oo][Kk][Ee][Nn]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Bb][Cc][Rr][Yy][Pp][Tt]"
+    },
+    {
+      "pathPattern": "(^|/)server/src/identity/(?:.*/)?[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)server/tests/identity/(?:.*/)?[^/]+$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"authentication\" domain: Credential verification, token issuance, consent-bound biometric identity templates, and sealed profile face photos with pending review.",
+  "specRefs": [
+    "1.1 Cernere 概要",
+    "Step 1: WebSocket 接続の確立",
+    "1. cernere (コアサーバー) / 認証機能",
+    "2. @cernere/id-service",
+    "顔テンプレート保存・配布"
+  ],
+  "rationale": "Authentication methods and biometric identity material (templates and sealed face photos) converge in server/src/auth, identity, oidc, and http; the id-service package is the reusable SDK for the same concern."
+}

@@ -1,0 +1,36 @@
+{
+  "name": "authorization",
+  "description": "Permission model and the 4-layer destructive-operation defense: system roles (admin/general), org roles (owner/admin/member), token→TTL→user-state→resource-ownership checks.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "/server/src/auth/action-policy"
+    },
+    {
+      "pathPattern": "/server/src/auth/action-proof"
+    },
+    {
+      "pathPattern": "/packages/id-service/src/core/"
+    },
+    {
+      "namePattern": "[Rr][Oo][Ll][Ee]|[Rr][Ee][Qq][Uu][Ii][Rr][Ee].?[Rr][Oo][Ll][Ee]"
+    },
+    {
+      "namePattern": "[Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn]|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz]"
+    },
+    {
+      "namePattern": "[Pp][Oo][Ll][Ii][Cc][Yy]|[Pp][Rr][Oo][Oo][Ff]|[Gg][Uu][Aa][Rr][Dd]"
+    },
+    {
+      "namePattern": "[Oo][Ww][Nn][Ee][Rr]|[Aa][Dd][Mm][Ii][Nn]|[Mm][Ee][Mm][Bb][Ee][Rr]"
+    }
+  ],
+  "cardTemplate": "Summarise the \"authorization\" domain: Permission model and the 4-layer destructive-operation defense: system roles (admin/general), org roles (owner/admin/member), token→TTL→user-state→resource-ownership checks.",
+  "specRefs": [
+    "Step 5: 認可モデルの適用",
+    "Step 6: 破壊的操作の防御層の実装",
+    "多層防御"
+  ],
+  "rationale": "Role hierarchy plus the layered defense against destructive operations is a cross-cutting concern applied by every module."
+}

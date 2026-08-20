@@ -1,0 +1,32 @@
+{
+  "name": "audit-logging",
+  "description": "Automatic operation logging of every WS command (success and failure) to operation_logs, plus auth/dev loggers.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "/server/src/logging/"
+    },
+    {
+      "pathPattern": "/server/src/.*operation.?log"
+    },
+    {
+      "namePattern": "[Ll][Oo][Gg](?:$|[_-]|[A-Z]|[Ss](?:$|[_-]|[A-Z])|[Gg][Ee][Rr])"
+    },
+    {
+      "namePattern": "[Oo][Pp][Ee][Rr][Aa][Tt][Ii][Oo][Nn]_[Ll][Oo][Gg]|[Aa][Uu][Dd][Ii][Tt]"
+    },
+    {
+      "namePattern": "[Rr][Ee][Cc][Oo][Rr][Dd]"
+    },
+    {
+      "pathPattern": "(^|/)server/tests/logging/(?:.*/)?[^/]+$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"audit-logging\" domain: Automatic operation logging of every WS command (success and failure) to operation_logs, plus auth/dev loggers.",
+  "specRefs": [
+    "Step 8: 監査ログの記録",
+    "操作ログ"
+  ],
+  "rationale": "operation_logs and the logging/ directory provide a full audit trail as an independent cross-cutting concern."
+}

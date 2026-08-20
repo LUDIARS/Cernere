@@ -1,0 +1,43 @@
+{
+  "name": "service-integration-sdk",
+  "description": "SDKs and adapters letting external services authenticate against Cernere: service-adapter WebSocket auth, id-service SDK, id-cache, and compatibility shims.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "/packages/service-adapter/"
+    },
+    {
+      "pathPattern": "/packages/id-service/"
+    },
+    {
+      "pathPattern": "/packages/id-cache/"
+    },
+    {
+      "pathPattern": "/lib/vestigium/"
+    },
+    {
+      "namePattern": "[Aa][Dd][Aa][Pp][Tt][Ee][Rr]|[Ss][Dd][Kk]"
+    },
+    {
+      "namePattern": "[Ss][Ee][Rr][Vv][Ii][Cc][Ee].?[Aa][Dd][Aa][Pp][Tt][Ee][Rr]"
+    },
+    {
+      "namePattern": "[Pp][Ee][Ee][Rr]"
+    },
+    {
+      "namePattern": "[Ii][Dd].?[Ss][Ee][Rr][Vv][Ii][Cc][Ee]|[Ii][Dd].?[Cc][Aa][Cc][Hh][Ee]"
+    },
+    {
+      "pathPattern": "(^|/)packages/service-adapter/(?:.*/)?[^/]+$"
+    }
+  ],
+  "cardTemplate": "Summarise the \"service-integration-sdk\" domain: SDKs and adapters letting external services authenticate against Cernere: service-adapter WebSocket auth, id-service SDK, id-cache, and compatibility shims.",
+  "specRefs": [
+    "サービスインターフェース",
+    "2. @cernere/id-service",
+    "3. @cernere/auth",
+    "別プロジェクトへの実装ガイド"
+  ],
+  "rationale": "The packages/ SDKs exist so other LUDIARS services consume Cernere auth; a distinct integration surface separate from the core server."
+}

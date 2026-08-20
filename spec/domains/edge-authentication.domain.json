@@ -1,0 +1,35 @@
+{
+  "name": "edge-authentication",
+  "description": "Edge/gateway-issued identity assertion path (Cloudflare Access bypass): edge JWKS verification, edge identities, and project edge bindings/offboarding.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "/server/src/auth/edge-"
+    },
+    {
+      "pathPattern": "/server/src/project/edge-"
+    },
+    {
+      "pathPattern": "/server/src/ws/composite-auth"
+    },
+    {
+      "namePattern": "[Ee][Dd][Gg][Ee]"
+    },
+    {
+      "namePattern": "[Aa][Ss][Ss][Ee][Rr][Tt][Ii][Oo][Nn]"
+    },
+    {
+      "namePattern": "[Jj][Ww][Kk][Ss]"
+    },
+    {
+      "namePattern": "[Bb][Ii][Nn][Dd][Ii][Nn][Gg]|[Oo][Ff][Ff][Bb][Oo][Aa][Rr][Dd]"
+    }
+  ],
+  "cardTemplate": "Summarise the \"edge-authentication\" domain: Edge/gateway-issued identity assertion path (Cloudflare Access bypass): edge JWKS verification, edge identities, and project edge bindings/offboarding.",
+  "specRefs": [
+    "1.4 脅威モデルと対策",
+    "Step 1: WebSocket 接続の確立"
+  ],
+  "rationale": "The feat/edge-assertion branch adds a distinct edge-trust auth path (edge-assertion, edge-jwks, edge-identity, edge-bindings) that layers onto core auth."
+}
