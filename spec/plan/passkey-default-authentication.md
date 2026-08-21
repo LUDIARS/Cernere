@@ -960,6 +960,7 @@ registration grant は `Authorization: Cernere-Registration <token>` で送る�
 - `spec/interface/auth-flows.md`: passkey/device/composite/OIDC の正規フローへ更新
 - `spec/interface/security_design.md`: 信頼の根、epoch、端末単位失効を反映
 - `spec/feature/identity-verification.md`: email/hybrid mode 専用であることを明記
+- `spec/feature/corpus-frontend-ui.md` §4.4: Corpus 継承ビュー必須の認証設定パネル (`cernere-auth-settings`)。 復旧は §12.2 の運用者 grant を案内するのみで、 セルフサービス回復導線を置かない
 - `spec/data/schema.md`: `device_credentials` / `email_sessions` / `registration_grants` / 追加列を反映
 - `spec/setup/config-reference.md`, `.env.example`: policy、token key、TTL を追加
 - `spec/test/test-design.md`: passkey と rotation の異常系を追加

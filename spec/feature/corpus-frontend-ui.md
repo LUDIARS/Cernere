@@ -189,7 +189,7 @@ Session + Corpus D5)。 Excubitor は ops plane であり SSO host にしない 
 | ログインUI | `LoginPage` | `login` (未認証 render、 §6.0) | ✓ (WebAuthn/MFA は custom) |
 | ログインUI | composite | **撤廃** (C-4 ambient SSO で per-service ログイン不要) | — |
 | ダッシュボード | `DashboardPage` (Projects) | `projects` パネル | ✓ |
-| ダッシュボード | `ProfilePage` | `account` パネル | ✓ (パスキーのみ custom) |
+| ダッシュボード | `ProfilePage` | `account` パネル | ✓ (認証設定は §4.4 の必須共通 UI を参照) |
 | ダッシュボード | `OrganizationsPage` | `organizations` パネル | ✓ (検索のみ拡張要) |
 | データオプトアウト | `DataOptOutPage` | `data` パネル | ✓ (data 固有) |
 | 管理者画面 | (各ページにインライン) | `requires:"admin"` ＋ 任意 `admin` 集約パネル | ✓ |
@@ -261,6 +261,102 @@ Cernere 側の共通化レイヤ。 括り出す候補:
   Project スキーマ JSON)
 - `dataSource` / `dataId` の id 群
 - オプトアウトのカテゴリ定義とトグル意味論 (§6.4)
+
+### 4.4 必須共通 UI — 「Cernere 設定 (認証設定)」
+
+**Corpus を継承する全てのサービスビューは、`cernere-auth-settings` 共通 UI キーを
+必ず含める。** 例外を設けない。 §11.5 の「共通 UI 定義を一度だけ持ちキー参照で
+使い回す」 の最初の適用対象であり、 かつ唯一の**必須**共通 UI とする。
+
+理由: 認証はサービス横断で単一の正本 (Cernere) が握る。 各サービスが個別に
+パスキー管理 UI を実装すると、 失効漏れ・step-up 要件の緩み・表記揺れが
+サービスごとに発生し、 認証の一貫性が壊れる。
+
+#### 定義の所有と参照
+
+| 項目 | 規約 |
+|---|---|
+| 定義の正本 | Cernere。 UI キー `cernere-auth-settings` として feature list に登録する |
+| 各サービス | キー参照のみ。 descriptor を写経・fork・部分上書きしない |
+| データ経路 | Cernere の自分のトークンで Cernere を叩く (C-3)。 project-token 中継を挟まない |
+| 版管理 | §12.2 の UI キー版 bump に従う。 サービス側で版を固定しない |
+
+#### 含める要素
+
+以下の「同設計書」 は
+[パスキー既定・メール認証併存 設計書](../plan/passkey-default-authentication.md)
+を指す。
+
+- **登録済みパスキー一覧** — 登録日時、 最終使用時刻、 backup state。
+  同設計書 §6.2 の収集禁止項目に従い、 nickname・AAGUID・自由入力の端末名は
+  表示しない
+- **新規パスキー登録** — 現在の端末を追加する導線
+- **個別失効** — 最後の有効パスキーは失効させない (先に別のパスキー登録が要る)
+- **Device Credential (端末セッション) 一覧と失効** — パスキーとは独立に扱う。
+  端末失効でパスキー row を消さない
+- **復旧経路の案内** — 操作 UI ではなく**案内のみ**。 次項を参照
+
+上記はいずれも fresh step-up を要求する (同設計書 §5.2)。 通常の access token
+だけでは実行させない。
+
+#### 復旧経路の扱い
+
+`passkey` mode の回復は**運用者発行の一回限り登録用トークン**による
+(同設計書 §1 決定事項 6 / §12.2)。 したがって本パネルには:
+
+- **置かない**: 「パスキーを忘れた」 相当のボタン、 回復トークンを要求する導線、
+  email/SMS によるセルフサービス回復。 同設計書 §3.2 の非目標であり、
+  magic link / SMS は同設計書 §3.3 で明示的に不採用
+- **置く**: 別窓口へ誘導する静的な案内文と、 運用者が account を特定するために
+  利用者が提示する opaque `user_id` の表示
+
+`email` / `hybrid` mode では email 由来の回復導線を持ち得るが、 それは mode
+capability (同設計書 §14.3) で出し分ける。 `passkey` mode の descriptor へ
+暗黙に混ぜない。
+
+#### 表記規約 — 認証器を名指ししない
+
+Cernere が扱うパスキーは WebAuthn / FIDO2 のみで、 認証器の実装
+(Windows Hello / Touch ID / セキュリティキー / スマートフォン) を区別しない。
+UI 文言で特定の認証器を名指ししない。
+
+| 使う | 使わない |
+|---|---|
+| 「この端末で登録」 | 「Windows Hello で登録」 |
+| 「パスキーで続行」 | 「顔認証でログイン」 |
+
+利用者は端末を跨いで別の認証器を使うため、 名指しは高い確率で実態と食い違う。
+
+#### 実装形態
+
+WebAuthn の登録・認証は browser API が必須なため、 descriptor プリミティブでは
+表現できない。 §7-G2 に従い `custom` コンポーネントとして提供する。
+
+```jsonc
+// 共通 UI 定義 (Cernere が保持、 各サービスはこのキーを参照するだけ)
+{ "key": "cernere-auth-settings",
+  "title": "Cernere 設定 (認証設定)",
+  "ui": { "kind": "descriptor",
+    "sections": [
+      { "title": "パスキー",
+        "components": [
+          { "type": "custom", "tag": "cernere-passkey-manager",
+            "url": "/corpus-ui/passkey.js" } ] },
+      { "title": "端末セッション",
+        "components": [
+          { "type": "custom", "tag": "cernere-device-manager",
+            "url": "/corpus-ui/devices.js" } ] },
+      // `text` は現行 9 component に無い (§7-G16)。 暫定は `detail` の
+      // field ラベル/値で代用する。 `text` 追加後に案内文を移す
+      { "title": "パスキーを失った場合",
+        "components": [
+          { "type": "detail", "dataSource": "me", "recordPath": "user",
+            "fields": [
+              { "label": "アカウント識別子", "value": "{id}" },
+              { "label": "復旧手順",
+                "value": "復旧は別窓口での本人確認が必要です。 上記の識別子を提示してください。" } ] } ] }
+    ] } }
+```
 
 ---
 
@@ -407,13 +503,16 @@ MFA が密結合のため当面スタンドアロン維持 (§7-G12)。
             { "name": "privacy.expertise", "label": "得意分野を公開", "input": "checkbox" },
             { "name": "privacy.hobbies",   "label": "趣味を公開",     "input": "checkbox" } ] } ] },
 
-    { "title": "パスキー (WebAuthn)",
-      "components": [
-        // WebAuthn の register は browser API 必須 → custom (§7-G2)
-        { "type": "custom", "tag": "cernere-passkey-manager", "url": "/corpus-ui/passkey.js" } ] }
+    // 認証設定は §4.4 の必須共通 UI をキー参照する。 ここに写経しない
+    // section 位置の `ref` は descriptor 拡張が要る (§7-G15)
+    { "ref": "cernere-auth-settings" }
   ]
 }
 ```
+
+`account` パネルは Cernere 自身のビューだが、 認証設定を独自に持たず
+**他サービスと同じ `cernere-auth-settings` キーを参照する** (§4.4)。 Cernere が
+定義の正本であることと、 Cernere が自分だけ別物を描くことは両立しない。
 
 データ管理への導線は Corpus シェルの `data` タブが担うため、 現行 Profile
 末尾の「データオプトアウト管理」 リンクカードは不要 (削除)。
@@ -607,6 +706,8 @@ vitest を別 PR で更新する (Corpus 側作業)。
 | G12 | composite ログイン (popup/iframe + postMessage) | **撤廃** | host が active session を握る (C-4 ambient SSO) ので不要。 移行せず削除 |
 | G13 | 未認証 render + auth-submit で identity 確立 | **X** | レンダラに pre-auth モード (form 成功で返るトークンを host が保持 → 再 render) |
 | G14 | `password` 入力種 (マスク) | **X** | FormField `input` に `password` 追加。 暫定 `text` |
+| G15 | section レベルの共通 UI キー参照 (`{"ref":"…"}`) | **X** | §11.3 のキー参照は panel 単位のみ。 §4.4 の必須共通 UI を各サービスの panel 内へ差し込むには section/component 位置での `ref` 解決が要る。 暫定 E (custom 部品として同梱) |
+| G16 | 静的テキストブロック (操作を伴わない案内文) | **X** | 現行 9 component に静的文言の器が無い。 §4.4 の復旧案内で必要。 暫定 `detail` の field ラベル/値で代用 |
 
 §13 で既に解決済み (拡張不要) の Cernere ニーズ: 一覧カード (`list`) /
 フォーム (`form`) / 詳細 (`detail`) / 表 (`table`) / インライン編集
@@ -746,6 +847,9 @@ descriptor を毎回送るのではなく、 「このキーを描け」 と指�
 定義**として Corpus に一度だけ持ち、 各サービスはキー参照で使い回す (§4 共通化の
 最終形)。 「データ以外を共通化」 が UI key レジストリ上で「共通キーを参照」 として
 実現される。
+
+唯一の**必須**共通 UI は `cernere-auth-settings` (§4.4)。 Corpus を継承する
+全サービスビューがこのキーを参照する。 他の共通 UI は任意。
 
 ### 11.6 既存スキーマへの写像
 
