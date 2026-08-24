@@ -230,8 +230,12 @@ export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
   // ── ログイン画面を開いた直後に Windows Hello / Face ID を直接開く ──
   // メールを渡さない usernameless なので、 ユーザは入力もボタンも踏まない。
   // キャンセル / 未登録なら phase が "fallback" になり通常フォームへ落ちる。
-  // 送信先が拒否された / 2 要素チャレンジ進行中は認証器を開かない (fail-closed)
-  const passkeyBlocked = Boolean(error) || challenge !== null;
+  // 送信先が拒否された / 2 要素チャレンジ進行中は認証器を開かない (fail-closed)。
+  //
+  // 送信先の拒否は composite 固有で、 error に文言が入るのが唯一の印。 self では
+  // 送信先検証自体を行わない (上の effect が即 return する) ため、 error を
+  // 自動起動の門にすると「前回の入力ミスが残っていると Hello が開かない」になる。
+  const passkeyBlocked = (!self && Boolean(error)) || challenge !== null;
 
   const passkey = usePasskeyLogin({
     apiBase: API_BASE,
@@ -800,7 +804,7 @@ export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
             >
               {passkeyBusy
                 ? "🔐 認証器の応答を待っています…"
-                : passkey.autoAttempted
+                : passkey.hasAttempted
                   ? "🔐 もう一度パスキーで認証する"
                   : "🔐 Passkey でログイン（生体認証 / Windows Hello PIN / セキュリティキー）"}
             </button>}

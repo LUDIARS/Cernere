@@ -49,8 +49,8 @@ interface UsePasskeyLoginArgs {
 
 interface UsePasskeyLoginResult {
   phase: PasskeyLoginPhase;
-  /** 一度でも自動起動を試したか (ボタン文言の切替に使う) */
-  autoAttempted: boolean;
+  /** 自動・手動を問わず、一度でも認証起動を試したか (ボタン文言の切替に使う) */
+  hasAttempted: boolean;
   /** 手動起動。 email を渡すとそのユーザの credential に絞る (未指定は usernameless) */
   start: (email?: string) => void;
 }
@@ -73,7 +73,7 @@ export function usePasskeyLogin({
   onError,
 }: UsePasskeyLoginArgs): UsePasskeyLoginResult {
   const [phase, setPhase] = useState<PasskeyLoginPhase>("idle");
-  const [autoAttempted, setAutoAttempted] = useState(false);
+  const [hasAttempted, setHasAttempted] = useState(false);
   const autoStartedRef = useRef(false);
   const inFlightRef = useRef(false);
   /** アンマウント後の setState を避ける */
@@ -140,7 +140,7 @@ export function usePasskeyLogin({
   useEffect(() => {
     if (!autoStartReady || autoStartedRef.current) return;
     autoStartedRef.current = true;
-    setAutoAttempted(true);
+    setHasAttempted(true);
     if (!browserSupportsWebAuthn()) {
       setPhase("unsupported");
       return;
@@ -149,8 +149,12 @@ export function usePasskeyLogin({
   }, [autoStartReady, run]);
 
   const start = useCallback((email?: string) => {
-    // 手動起動も 1 回きりの自動起動枠を消費済みにしておく (二重発火防止)
+    // 手動起動も 1 回きりの自動起動枠を消費済みにしておく (二重発火防止)。
+    // hasAttempted も揃えて立てる — これを落とすと、 自動起動が走る前に手動で
+    // 押した場合に autoStartReady が後から true になっても自動起動は抑止され、
+    // ボタン文言だけ初回表記のまま残る。
     autoStartedRef.current = true;
+    setHasAttempted(true);
     if (!browserSupportsWebAuthn()) {
       setPhase("unsupported");
       return;
@@ -158,5 +162,5 @@ export function usePasskeyLogin({
     void run(email?.trim() ?? "");
   }, [run]);
 
-  return { phase, autoAttempted, start };
+  return { phase, hasAttempted, start };
 }
