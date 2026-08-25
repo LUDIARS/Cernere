@@ -1,0 +1,63 @@
+# Excubitor catalog fragment owned by Cernere.
+services:
+  - code: cernere
+    name: Cernere
+    tier: saas
+    project_code: cernere
+    component: backend
+    port: 8080
+    repo: LUDIARS/Cernere
+    runtime: node
+    cwd: ${ARS_ROOT}/Cernere/server
+    build_command: npm run build
+    command: npm start
+    autostart: false
+    restart_policy: on-failure
+    max_restart: 5
+    env:
+      LISTEN_PORT: "8080"
+      CERNERE_COMPOSITE_ALLOWED_ORIGINS: http://localhost:5187
+    health:
+      type: http
+      url: http://localhost:8080/health
+      interval_sec: 30
+    infisical:
+      project_id: 19c9e77d-646c-4a0e-a091-b494234953ea
+      environment: dev
+      inject: true
+    provides:
+      CERNERE_URL: http://${host}:${port}
+      CERNERE_BASE_URL: http://${host}:${port}
+      CERNERE_WS_URL: ws://${host}:${port}
+    auto_fix:
+      enabled: false
+      agent: claude-code
+      max_auto_attempts: 3
+      working_dir: ${ARS_ROOT}/Cernere
+      branch_prefix: excubitor/auto-fix/
+      create_pr: true
+      pr_draft: true
+
+  - code: cernere-frontend
+    name: Cernere login frontend
+    tier: saas
+    project_code: cernere
+    component: frontend
+    port: 5173
+    repo: LUDIARS/Cernere
+    runtime: node
+    cwd: ${ARS_ROOT}/Cernere/frontend
+    build_command: npm run build
+    command: npm run preview -- --host 0.0.0.0 --port 5173 --strictPort
+    depends_on: [cernere]
+    autostart: false
+    restart_policy: on-failure
+    max_restart: 5
+    env:
+      VITE_BACKEND_URL: http://localhost:8080
+    health:
+      type: http
+      url: http://localhost:5173/
+      interval_sec: 30
+    provides:
+      CERNERE_FRONTEND_URL: http://${host}:${port}
