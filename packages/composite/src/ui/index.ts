@@ -1,10 +1,29 @@
 export { CompositeLogin } from "./CompositeLogin.js";
 export type {
+  CompositeLoginMode,
+  CompositeLoginProps,
+} from "./CompositeLogin.js";
+export { passkeyApiOf } from "./auth-api.js";
+export type {
   CompositeAuthApi,
   CompositeAuthResponse,
-  CompositeLoginProps,
+  CompositePasskeyApi,
   DeviceAnomaly,
-} from "./CompositeLogin.js";
+  PasskeyLoginBeginResult,
+  PasskeySignupBeginResult,
+} from "./auth-api.js";
+export { DEFAULT_LABELS } from "./login-labels.js";
+export type { CompositeLoginLabels } from "./login-labels.js";
+export { usePasskeyLogin, isPasskeyUserAbort } from "./usePasskeyLogin.js";
+export type {
+  PasskeyLoginPhase,
+  UsePasskeyLoginArgs,
+  UsePasskeyLoginResult,
+} from "./usePasskeyLogin.js";
+export { runPasskeySignup, PasskeyUnsupportedError } from "./passkey-signup.js";
+export type { PasskeySignupInput } from "./passkey-signup.js";
+export { PasskeyLoginSection } from "./PasskeyLoginSection.js";
+export type { PasskeyLoginSectionProps } from "./PasskeyLoginSection.js";
 export { LoginDivider } from "./LoginDivider.js";
 export type { LoginDividerProps } from "./LoginDivider.js";
 export {

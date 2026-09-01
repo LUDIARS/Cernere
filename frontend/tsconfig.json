@@ -15,7 +15,16 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noUncheckedSideEffectImports": true,
+    // 埋め込み SDK のソースを直接取り込む (vite.config.ts の alias と対)。
+    // react / WebAuthn は frontend 側の 1 コピーに固定し、 packages/composite 配下の
+    // node_modules から別バージョンの型が混ざらないようにする。
+    "paths": {
+      "@ludiars/cernere-composite/ui": ["../packages/composite/src/ui/index.ts"],
+      "react": ["./node_modules/@types/react"],
+      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime"],
+      "@simplewebauthn/browser": ["./node_modules/@simplewebauthn/browser"]
+    }
   },
   "include": ["src"]
 }

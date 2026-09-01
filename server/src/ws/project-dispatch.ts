@@ -85,6 +85,26 @@ export async function dispatchProjectCommand(
         { projectKey },
       );
     }
+    // ─── auth.passkey-* (埋め込み SDK のパスキー ceremony; CORS-free via project WS) ───
+    // begin は WebAuthn options、 finish は authCode を返す。 WebAuthn の origin 検証は
+    // Cernere 側 (composite 許可 origin) で行うので、 サービスは中継するだけでよい。
+    // レート制限は認証済み WS に bind された projectKey を使う。payload の clientIp は
+    // サービスが任意に詐称できるため、security boundary には使わず ceremony からも除く。
+    case "auth.passkey-login-begin":
+    case "auth.passkey-login-finish":
+    case "auth.passkey-signup-begin":
+    case "auth.passkey-signup-finish": {
+      const { executePasskeyCompositeAction, isPasskeyCompositeAction } =
+        await import("../http/passkey-handler.js");
+      if (!isPasskeyCompositeAction(action)) {
+        throw new Error(`Unknown passkey action: ${action}`);
+      }
+      const ceremony = { ...payload };
+      delete ceremony.clientIp;
+      return executePasskeyCompositeAction(action, ceremony, {
+        projectKey,
+      });
+    }
     // ─── managed_project: project_data_{key} へのユーザーデータアクセス ───
     // projectKey は WS セッションで bind される。targetProjectKey を省略した操作は
     // 常に自己 project に限定し、別 project の read/write は data_sharing grant を

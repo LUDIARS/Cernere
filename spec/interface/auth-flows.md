@@ -208,6 +208,33 @@ sequenceDiagram
 - `authCode` 発行 → `/api/auth/exchange` で one-time 交換 → `accessToken`/`refreshToken`
 - 経路A の `projectKey` は [user-project-row.md](user-project-row.md) の自動 row 初期化に使われる
 
+### 5.1 埋め込み SDK のパスキー (WebAuthn) 経路
+
+認証 UI の本流は埋め込み SDK `@ludiars/cernere-composite/ui` の `<CompositeLogin>` で、
+Cernere 自身の `/login`・`/composite/login` も同じカードを描画する。 カードは利用側の
+`authApi` に passkey 4 メソッドがあれば、 login タブで usernameless ceremony を自動起動し、
+register タブで「パスキーでアカウント作成」 (name のみ必須、 email 任意) を第一候補にする。
+WebAuthn の呼び出し (`navigator.credentials`) はカード側で行い、 利用側は begin/finish を
+Cernere へ往復させるだけでよい。
+
+| 段 | 経路A: project WS (`module:"auth"`) | 経路B: REST (Cernere 同一 origin) | 応答 |
+|---|---|---|---|
+| login begin | `action:"passkey-login-begin"` `{ email? }` | `POST /api/auth/passkey/login-begin` | `{ options, challengeOwner }` |
+| login finish | `action:"passkey-login-finish"` `{ challengeOwner, response }` | `POST /api/auth/passkey/composite-login-finish` | `{ authCode }` |
+| signup begin | `action:"passkey-signup-begin"` `{ name, email? }` | `POST /api/auth/passkey/signup-begin` | `{ signupId, options }` |
+| signup finish | `action:"passkey-signup-finish"` `{ signupId, response }` | `POST /api/auth/passkey/composite-signup-finish` | `{ authCode }` |
+
+- finish は JWT を返さず `authCode` を返す (password 経路と同じ契約)。 経路A では
+  `ensureUserProjectRow` で `project_data_<key>` の行も確保する。
+- 経路A の未認証 ceremony は、認証済み project WS に bind された `projectKey` 単位で
+  レート制限する。サービスが payload で申告する接続元 IP は詐称可能なので受け付けない。
+- **origin / RP ID**: ceremony はページを開いている origin で走るため、 埋め込み先サービスの
+  origin を `CERNERE_COMPOSITE_ALLOWED_ORIGINS` に登録する (Cernere はこれを WebAuthn の
+  expectedOrigin に合流させる)。 `WEBAUTHN_RP_ID` はそれら全 origin の registrable suffix
+  でなければならない。 別 eTLD+1 のサービスは埋め込みではなく `<CompositePasskeyPopup>`
+  (Cernere origin で ceremony) を使う。
+- `auth_mode=passkey` (`passkeyOnly`) ではパスワード導線と fingerprint 収集を行わない。
+
 ## 6. edge assertion (エッジ認証のバイパス)
 
 **Status: Proposed** — 詳細は [../feature/edge-assertion-login.md](../feature/edge-assertion-login.md)。

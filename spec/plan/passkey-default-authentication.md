@@ -93,7 +93,7 @@ public passkey registration が必要になった場合は別 mode として再�
 | refresh token の再利用でユーザー全セッションを削除 | `server/src/http/auth-handler.ts` | device/email共通rotationで正常競合と明示replayを分け、session単位に処理する |
 | OS・画面・timezone・language・UA から fingerprint を作る | `frontend/src/lib/device-fingerprint.ts` | 新しいランダム `device_id` と混同せず、passkey mode では呼ばない |
 | machine/browser/IP を `trusted_devices` に保存し email code を送る | `server/src/auth/identity-verification.ts` | passkey経路では呼ばない。email/hybrid の明示設定時だけ使う |
-| 公開 composite SDK が email/password/fingerprint を前提とする | `packages/composite/src/ui/CompositeLogin.tsx`, `packages/composite/src/types.ts` | passkey popup版とemail form版をversioned exportとして分離する |
+| 公開 composite SDK が email/password/fingerprint を前提とする | `packages/composite/src/ui/CompositeLogin.tsx`, `packages/composite/src/types.ts` | **対応済 (2026-09-02)**: `<CompositeLogin>` が authApi の passkey 4 メソッドで WebAuthn 登録/ログイン (email 任意) を持ち、 Cernere フロントは同カードを描画するだけになった。 popup 版 (`CompositePasskeyPopup`) は別 eTLD+1 向けに残置 |
 
 ### 4.1 実現性判定
 
@@ -954,6 +954,9 @@ registration grant は `Authorization: Cernere-Registration <token>` で送る�
 - `packages/composite/src/ui/CompositeLogin.tsx`, `packages/composite/src/types.ts`, `packages/composite/src/composite.ts`: ユーザー操作内での同期popup作成、origin/source/state/timeout/cleanup、popup版/email版versioning、atomic exchange新契約、`CernereUser.email` nullable化
 - `SPEC-COMPOSITE-AUTH-ALTERNATIVES`: emailフォーム版 `CompositeLogin` は、passkey等の代替認証導線を主フォームと同じカード内へ差し込めるようにする。区切り表示はOAuthと共通化し、MFA・デバイス確認中には代替導線を表示しない
 - `SPEC-COMPOSITE-PASSKEY-AUTOSTART`: composite の送信先検証と silent SSO が未認証で完了した後、login mode は識別子なしの passkey ceremony を mount ごとに最大1回だけ自動開始してよい。手動再試行を含め ceremony は single-flight とし、WebAuthn 非対応・credential 不在・利用者の取消時は認証を完了せず、現在の auth mode で許可された明示導線だけを表示する。MFA・デバイス確認中は開始しない
+- `SPEC-COMPOSITE-AUTHCODE-HANDOFF`: composite ページは送信先 (origin / redirect_uri) をサーバ許可リストで検証し終えるまでログイン UI を出さず、silent SSO・パスキー・パスワードのいずれで得た authCode も引き渡しの直前に同じ許可リストで再検証してから postMessage / redirect / self exchange へ渡す。許可外・未指定は fail-closed で停止し、認証 UI と引き渡し判断は分離する (SDK カード / session hook / handoff)
+- `SPEC-COMPOSITE-PASSKEY-RATE-LIMIT`: project WS 経由の未認証 passkey ceremony は、payload 内の email / clientIp ではなく、認証済み WS に bind された projectKey をレート制限 identity にする。直接 REST はサーバが観測した IP、または既存の account-scoped login identity を使う
+- `SPEC-COMPOSITE-PASSKEY-PUBLIC-ERRORS`: project WS の passkey ceremony は、入力不備・期限切れ・明示的な復旧案内だけをクライアントへ返し、DB・Redis・WebAuthn verifier の想定外エラー詳細を公開しない
 
 ### 17.3 仕様・運用文書
 

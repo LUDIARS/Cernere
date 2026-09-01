@@ -1,58 +1,56 @@
 /**
  * <CompositeLogin>
  *
- * サービス (Schedula 等) の SPA に埋め込んで使う Cernere 認証 UI。
+ * サービス (Schedula 等) の SPA に埋め込んで使う Cernere 認証 UI。 Cernere 自身の
+ * /login と /composite/login も同じカードを描画する (認証 UI の本流はこの SDK)。
+ *
  * CORS を避けるため、実通信は利用側が提供する authApi (通常はサービス
  * バックエンドへの REST → project WS 経由) に委譲する。
+ *
+ * authApi に passkey 4 メソッドがあれば:
+ *   - login タブ: 画面を開いた直後に usernameless パスキー ceremony を自動起動
+ *   - register タブ: 「パスキーでアカウント作成」 を第一候補にし、 email は任意
+ * 無ければ従来どおり email / password のみ。
  *
  * Usage (Schedula):
  *   <CompositeLogin authApi={myAuthApi} onAuthCode={(code) => ...} />
  */
 
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type ReactElement,
+  type ReactNode,
+} from "react";
+import {
+  passkeyApiOf,
+  type CompositeAuthApi,
+  type CompositeAuthResponse,
+  type DeviceAnomaly,
+} from "./auth-api.js";
 import { collectDeviceFingerprint, type DeviceFingerprint } from "./device-fingerprint.js";
 import { LoginDivider } from "./LoginDivider.js";
+import { DEFAULT_LABELS, type CompositeLoginLabels } from "./login-labels.js";
+import {
+  hintStyle,
+  inputStyle,
+  labelStyle,
+  linkButtonStyle,
+  oauthBtnStyle,
+  primaryButtonStyle,
+  subtleLinkStyle,
+} from "./login-styles.js";
+import { PasskeyLoginSection } from "./PasskeyLoginSection.js";
+import { runPasskeySignup } from "./passkey-signup.js";
+import { isPasskeyUserAbort, usePasskeyLogin } from "./usePasskeyLogin.js";
 
-export type DeviceAnomaly =
-  | "new_device"
-  | "new_os"
-  | "new_browser"
-  | "new_ip"
-  | "missing_fingerprint";
+// 旧 import 経路 (./CompositeLogin.js からの型 import) を壊さないための再 export。
+export type { CompositeAuthApi, CompositeAuthResponse, DeviceAnomaly } from "./auth-api.js";
 
-export interface CompositeAuthResponse {
-  authCode?: string;
-  mfaRequired?: boolean;
-  mfaMethods?: string[];
-  mfaToken?: string;
-  /** 本人確認 (デバイス検証) が必要 */
-  deviceVerificationRequired?: boolean;
-  deviceToken?: string;
-  /** 確認コード送信先のマスクされたメール (例: u***@example.com) */
-  emailMasked?: string;
-  /** 検出された差分の一覧 */
-  anomalies?: DeviceAnomaly[];
-  /** 確認コードの送信チャネル */
-  codeChannel?: "email" | "console";
-  /** デバイスラベル (例: "macOS · Chrome 124 · Tokyo, JP") */
-  deviceLabel?: string;
-  /** 残り試行回数 (失敗応答時) */
-  remainingAttempts?: number;
-  error?: string;
-}
-
-export interface CompositeAuthApi {
-  /** Email / パスワードでログイン (device は本人確認用フィンガープリント) */
-  login(params: { email: string; password: string; device?: DeviceFingerprint }): Promise<CompositeAuthResponse>;
-  /** 新規ユーザー登録 */
-  register(params: { name: string; email: string; password: string; device?: DeviceFingerprint }): Promise<CompositeAuthResponse>;
-  /** MFA チャレンジ応答 (任意) */
-  mfaVerify?(params: { mfaToken: string; method: string; code: string; device?: DeviceFingerprint }): Promise<CompositeAuthResponse>;
-  /** デバイス本人確認: 確認コードを検証し authCode を取得する */
-  deviceVerify?(params: { deviceToken: string; code: string }): Promise<CompositeAuthResponse>;
-  /** 確認コードを再送する */
-  deviceResend?(params: { deviceToken: string }): Promise<CompositeAuthResponse>;
-}
+export type CompositeLoginMode = "login" | "register";
 
 export interface CompositeLoginProps {
   /** 認証 API 実装 (サービス側が提供) */
@@ -65,88 +63,35 @@ export interface CompositeLoginProps {
     githubUrl?: string;
   };
   /** 表示テキストの上書き (i18n) */
-  labels?: Partial<Labels>;
+  labels?: Partial<CompositeLoginLabels>;
   /**
-   * カード内の主フォーム下に差し込む代替ログイン導線 (パスキー等)。
+   * カード内の主フォーム下に差し込む代替ログイン導線。
    * カード外に置くと主フォームと切り離されて見えるため、 利用側の導線も
    * ここから同じカードの中へ入れる。 mfa / device 確認中は出さない。
    */
-  alternatives?: React.ReactNode;
+  alternatives?: ReactNode;
   /** alternatives の上に出す区切り文言 (既定は orContinueWith) */
   alternativesLabel?: string;
+  /** 初期タブ (既定 login) */
+  initialMode?: CompositeLoginMode;
+  /** タブ切替の通知 (URL 同期等に使う) */
+  onModeChange?: (mode: CompositeLoginMode) => void;
+  /**
+   * パスワード導線を出さず、 パスキーだけで完結させる (auth_mode=passkey)。
+   * authApi にパスキー API が無い構成では設定不備として例外にする。
+   */
+  passkeyOnly?: boolean;
+  /**
+   * login タブ表示時にパスキー ceremony を自動起動してよいか (既定 true)。
+   * 送信先検証や silent SSO が先に決着すべき画面は、 決着後に true へ切り替える。
+   */
+  passkeyAutoStart?: boolean;
   /** 追加スタイル (カード外側) */
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
 }
 
-interface Labels {
-  title: string;
-  subtitle: string;
-  loginTab: string;
-  registerTab: string;
-  name: string;
-  email: string;
-  password: string;
-  submitLogin: string;
-  submitRegister: string;
-  processing: string;
-  orContinueWith: string;
-  continueWithGoogle: string;
-  continueWithGithub: string;
-  mfaTitle: string;
-  mfaCode: string;
-  submitMfa: string;
-  // ── デバイス本人確認 ──────────────
-  deviceTitle: string;
-  deviceSubtitle: string;
-  deviceCode: string;
-  deviceCodePlaceholder: string;
-  deviceSubmit: string;
-  deviceResend: string;
-  deviceResent: string;
-  collectingFingerprint: string;
-  anomalyNewDevice: string;
-  anomalyNewOs: string;
-  anomalyNewBrowser: string;
-  anomalyNewIp: string;
-  anomalyMissing: string;
-  remainingAttempts: string;
-}
-
-const DEFAULT_LABELS: Labels = {
-  title: "Cernere",
-  subtitle: "Sign in to continue",
-  loginTab: "Login",
-  registerTab: "Register",
-  name: "Name",
-  email: "Email",
-  password: "Password",
-  submitLogin: "Login",
-  submitRegister: "Create Account",
-  processing: "Processing...",
-  orContinueWith: "or",
-  continueWithGoogle: "Continue with Google",
-  continueWithGithub: "Continue with GitHub",
-  mfaTitle: "MFA Verification",
-  mfaCode: "Code",
-  submitMfa: "Verify",
-  deviceTitle: "Verify it's you",
-  deviceSubtitle: "We sent a 6-digit verification code to {email}.",
-  deviceCode: "Verification code",
-  deviceCodePlaceholder: "123456",
-  deviceSubmit: "Verify device",
-  deviceResend: "Resend code",
-  deviceResent: "Code re-sent.",
-  collectingFingerprint: "Collecting device information...",
-  anomalyNewDevice: "New device",
-  anomalyNewOs: "New OS",
-  anomalyNewBrowser: "New browser",
-  anomalyNewIp: "Different network",
-  anomalyMissing: "Could not collect device information",
-  remainingAttempts: "{n} attempts remaining",
-};
-
-type Mode = "login" | "register" | "mfa" | "device";
+type Mode = CompositeLoginMode | "mfa" | "device";
 
 interface DeviceChallenge {
   deviceToken: string;
@@ -156,7 +101,7 @@ interface DeviceChallenge {
   deviceLabel?: string;
 }
 
-function anomalyLabel(a: DeviceAnomaly, l: Labels): string {
+function anomalyLabel(a: DeviceAnomaly, l: CompositeLoginLabels): string {
   switch (a) {
     case "new_device": return l.anomalyNewDevice;
     case "new_os": return l.anomalyNewOs;
@@ -167,12 +112,29 @@ function anomalyLabel(a: DeviceAnomaly, l: Labels): string {
   }
 }
 
-/** @implements SPEC-COMPOSITE-AUTH-ALTERNATIVES */
-export function CompositeLogin(props: CompositeLoginProps) {
-  const l: Labels = { ...DEFAULT_LABELS, ...props.labels };
-  const { authApi, onAuthCode, oauth } = props;
+/**
+ * @implements SPEC-COMPOSITE-AUTH-ALTERNATIVES
+ * @implements SPEC-COMPOSITE-PASSKEY-AUTOSTART
+ */
+export function CompositeLogin(props: CompositeLoginProps): ReactElement {
+  const l: CompositeLoginLabels = { ...DEFAULT_LABELS, ...props.labels };
+  const {
+    authApi,
+    onAuthCode,
+    oauth,
+    passkeyOnly = false,
+    passkeyAutoStart = true,
+    onModeChange,
+  } = props;
 
-  const [mode, setMode] = useState<Mode>("login");
+  // 一部だけ実装された passkey API は passkeyApiOf が例外にする (無言故障防止)。
+  const passkeyApi = useMemo(() => passkeyApiOf(authApi), [authApi]);
+  if (passkeyOnly && !passkeyApi) {
+    throw new Error("CompositeLogin: passkeyOnly requires authApi.passkey* methods");
+  }
+  const showPasswordFields = !passkeyOnly;
+
+  const [mode, setModeState] = useState<Mode>(props.initialMode ?? "login");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -185,22 +147,31 @@ export function CompositeLogin(props: CompositeLoginProps) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const switchMode = (next: CompositeLoginMode) => {
+    setModeState(next);
+    setError("");
+    setInfo("");
+    onModeChange?.(next);
+  };
+
   // ── マウント時にフィンガープリント収集 (machine + browser のみ、同期) ──
+  // passkey 専用モードは本人属性を集めない (パスキー既定設計 §6.2)。
   const [fingerprint, setFingerprint] = useState<DeviceFingerprint | null>(null);
   useEffect(() => {
+    if (passkeyOnly) return;
     try {
       setFingerprint(collectDeviceFingerprint());
     } catch {
       setFingerprint(null);
     }
-  }, []);
+  }, [passkeyOnly]);
 
   const handleResponse = (r: CompositeAuthResponse) => {
     setInfo("");
     if (r.mfaRequired) {
       setMfaToken(r.mfaToken ?? "");
       setMfaMethod(r.mfaMethods?.[0] ?? "totp");
-      setMode("mfa");
+      setModeState("mfa");
       return;
     }
     if (r.deviceVerificationRequired && r.deviceToken) {
@@ -212,13 +183,22 @@ export function CompositeLogin(props: CompositeLoginProps) {
         deviceLabel: r.deviceLabel,
       });
       setDeviceCode("");
-      setMode("device");
+      setModeState("device");
       return;
     }
     if (r.authCode) {
       onAuthCode(r.authCode);
     }
   };
+
+  // ── login タブを開いた直後に認証器ダイアログを開く (1 マウント 1 回) ──
+  const passkey = usePasskeyLogin({
+    api: passkeyApi,
+    autoStartReady: passkeyAutoStart && mode === "login",
+    onResponse: handleResponse,
+    onError: setError,
+  });
+  const passkeyBusy = passkey.phase === "running";
 
   const submitDeviceVerify = async () => {
     if (!authApi.deviceVerify || !device) {
@@ -249,10 +229,38 @@ export function CompositeLogin(props: CompositeLoginProps) {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  /** メアド不要のパスキー新規登録 (Windows Hello / Face ID / Android 生体)。 */
+  const handlePasskeySignup = async () => {
+    if (!passkeyApi) return;
+    setError("");
+    setInfo("");
+    if (!name.trim()) {
+      setError(l.nameRequired);
+      return;
+    }
+    setLoading(true);
+    try {
+      handleResponse(await runPasskeySignup(passkeyApi, { name, email }));
+    } catch (err: unknown) {
+      // ダイアログを閉じただけなら「失敗」 と言わない。
+      if (!isPasskeyUserAbort(err)) {
+        setError(err instanceof Error ? err.message : "Passkey registration failed");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError("");
     setInfo("");
+    // パスキー導線がある構成では email/password は任意入力なので、 パスワード登録の
+    // 必須条件はここで検査する (required 属性に頼らない)。
+    if (mode === "register" && passkeyApi && (!email.trim() || !password)) {
+      setError(l.registerPasswordRequires);
+      return;
+    }
     setLoading(true);
     try {
       const fp = fingerprint ?? undefined;
@@ -273,6 +281,20 @@ export function CompositeLogin(props: CompositeLoginProps) {
     }
   };
 
+  const isAuthTab = mode === "login" || mode === "register";
+  const busy = loading || passkeyBusy;
+  // passkey 専用の register / login はパスワード送信ボタンを持たない。
+  const showSubmit = !isAuthTab || showPasswordFields;
+  const submitLabel = loading
+    ? l.processing
+    : mode === "login"
+      ? l.submitLogin
+      : mode === "register"
+        ? (passkeyApi ? l.submitRegisterPassword : l.submitRegister)
+        : mode === "device"
+          ? l.deviceSubmit
+          : l.submitMfa;
+
   return (
     <div
       className={props.className}
@@ -289,10 +311,12 @@ export function CompositeLogin(props: CompositeLoginProps) {
     >
       <div style={{ textAlign: "center", marginBottom: "1.5rem" }}>
         <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginBottom: "0.25rem" }}>{l.title}</h1>
-        <p style={{ color: "var(--text-muted, #888)", fontSize: "0.85rem" }}>{l.subtitle}</p>
+        <p style={{ color: "var(--text-muted, #888)", fontSize: "0.85rem" }}>
+          {mode === "device" ? l.deviceTitle : passkeyOnly ? l.subtitlePasskeyOnly : l.subtitle}
+        </p>
       </div>
 
-      {mode !== "mfa" && mode !== "device" && (
+      {isAuthTab && !passkeyOnly && (
         <div
           style={{
             display: "flex",
@@ -304,7 +328,7 @@ export function CompositeLogin(props: CompositeLoginProps) {
             <button
               key={m}
               type="button"
-              onClick={() => { setMode(m); setError(""); }}
+              onClick={() => switchMode(m)}
               style={{
                 flex: 1,
                 padding: "0.5rem",
@@ -354,6 +378,29 @@ export function CompositeLogin(props: CompositeLoginProps) {
         </div>
       )}
 
+      {/* login: パスキーが主導線。 画面を開いた時点で自動起動済みなので、 ここは再試行。 */}
+      {mode === "login" && passkeyApi && (
+        <>
+          <PasskeyLoginSection
+            phase={passkey.phase}
+            hasAttempted={passkey.hasAttempted}
+            disabled={loading}
+            passkeyOnly={passkeyOnly}
+            hasError={Boolean(error)}
+            onStart={() => { setError(""); setInfo(""); passkey.start(email); }}
+            labels={l}
+          />
+          {passkeyOnly && (
+            <div style={{ textAlign: "center", marginTop: "0.75rem" }}>
+              <button type="button" onClick={() => switchMode("register")} style={subtleLinkStyle}>
+                {l.noAccountYet}
+              </button>
+            </div>
+          )}
+          {showPasswordFields && <LoginDivider label={l.orContinueWith} />}
+        </>
+      )}
+
       <form onSubmit={handleSubmit}>
         {mode === "register" && (
           <div style={{ marginBottom: "0.75rem" }}>
@@ -363,34 +410,66 @@ export function CompositeLogin(props: CompositeLoginProps) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={l.name}
+              autoComplete="name"
               required
               style={inputStyle}
             />
           </div>
         )}
 
-        {(mode === "login" || mode === "register") && (
+        {/* register: メアド不要のパスキー登録を第一候補に置く。 */}
+        {mode === "register" && passkeyApi && (
+          <>
+            <button
+              type="button"
+              onClick={() => { void handlePasskeySignup(); }}
+              disabled={busy}
+              style={{ ...primaryButtonStyle(busy), marginTop: 0 }}
+            >
+              {loading ? l.processing : l.passkeySignup}
+            </button>
+            <p style={{ ...hintStyle, marginTop: "0.5rem", textAlign: "center" }}>{l.passkeySignupHint}</p>
+            {passkeyOnly && (
+              <div style={{ textAlign: "center", marginTop: "0.25rem" }}>
+                <button type="button" onClick={() => switchMode("login")} style={subtleLinkStyle}>
+                  {l.alreadyHaveAccount}
+                </button>
+              </div>
+            )}
+            {showPasswordFields && <LoginDivider label={l.orUsePassword} />}
+          </>
+        )}
+
+        {isAuthTab && showPasswordFields && (
           <>
             <div style={{ marginBottom: "0.75rem" }}>
-              <label style={labelStyle}>{l.email}</label>
+              <label style={labelStyle}>
+                {mode === "register" && passkeyApi ? l.emailOptional : l.email}
+              </label>
               <input
                 type="email"
+                name="email"
+                autoComplete="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="user@example.com"
-                required
+                required={!(mode === "register" && passkeyApi)}
                 style={inputStyle}
               />
             </div>
             <div style={{ marginBottom: "0.75rem" }}>
-              <label style={labelStyle}>{l.password}</label>
+              <label style={labelStyle}>
+                {mode === "register" && passkeyApi ? l.passwordOptional : l.password}
+              </label>
               <input
                 type="password"
+                name="password"
+                autoComplete={mode === "register" ? "new-password" : "current-password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="8+ characters"
                 minLength={8}
-                required
+                required={!(mode === "register" && passkeyApi)}
                 style={inputStyle}
               />
             </div>
@@ -463,61 +542,31 @@ export function CompositeLogin(props: CompositeLoginProps) {
           </div>
         )}
 
-        <button
-          type="submit"
-          disabled={loading}
-          style={{
-            width: "100%",
-            marginTop: "0.5rem",
-            padding: "0.6rem",
-            background: "var(--accent, #4f46e5)",
-            color: "#fff",
-            border: "none",
-            borderRadius: "4px",
-            fontWeight: 600,
-            cursor: loading ? "wait" : "pointer",
-          }}
-        >
-          {loading
-            ? l.processing
-            : mode === "login"
-              ? l.submitLogin
-              : mode === "register"
-                ? l.submitRegister
-                : mode === "device"
-                  ? l.deviceSubmit
-                  : l.submitMfa}
-        </button>
+        {showSubmit && (
+          <button type="submit" disabled={busy} style={primaryButtonStyle(busy)}>
+            {submitLabel}
+          </button>
+        )}
 
         {mode === "device" && authApi.deviceResend && (
           <button
             type="button"
-            onClick={handleResend}
+            onClick={() => { void handleResend(); }}
             disabled={loading}
-            style={{
-              width: "100%",
-              marginTop: "0.5rem",
-              padding: "0.4rem",
-              background: "transparent",
-              color: "var(--accent, #4f46e5)",
-              border: "none",
-              fontSize: "0.85rem",
-              cursor: loading ? "wait" : "pointer",
-              textDecoration: "underline",
-            }}
+            style={linkButtonStyle(loading)}
           >
             {l.deviceResend}
           </button>
         )}
 
-        {(mode === "login" || mode === "register") && !fingerprint && (
+        {isAuthTab && showPasswordFields && !fingerprint && (
           <p style={{ fontSize: "0.7rem", color: "var(--text-muted, #888)", marginTop: "0.5rem", textAlign: "center" }}>
             {l.collectingFingerprint}
           </p>
         )}
       </form>
 
-      {mode !== "mfa" && mode !== "device" && oauth && (oauth.googleUrl || oauth.githubUrl) && (
+      {isAuthTab && !passkeyOnly && oauth && (oauth.googleUrl || oauth.githubUrl) && (
         <>
           <LoginDivider label={l.orContinueWith} />
 
@@ -534,7 +583,7 @@ export function CompositeLogin(props: CompositeLoginProps) {
         </>
       )}
 
-      {mode !== "mfa" && mode !== "device" && props.alternatives && (
+      {isAuthTab && props.alternatives && (
         <>
           <LoginDivider label={props.alternativesLabel ?? l.orContinueWith} />
           {props.alternatives}
@@ -543,37 +592,3 @@ export function CompositeLogin(props: CompositeLoginProps) {
     </div>
   );
 }
-
-const labelStyle: React.CSSProperties = {
-  display: "block",
-  fontSize: "0.8rem",
-  color: "var(--text-muted, #888)",
-  marginBottom: "0.25rem",
-};
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "0.5rem",
-  border: "1px solid var(--border, #ccc)",
-  borderRadius: "4px",
-  background: "var(--bg, #fff)",
-  color: "var(--text, #000)",
-  fontSize: "0.9rem",
-  boxSizing: "border-box",
-};
-
-const oauthBtnStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: "0.5rem",
-  width: "100%",
-  padding: "0.6rem",
-  background: "var(--bg-surface-2, #f3f4f6)",
-  border: "1px solid var(--border, #ccc)",
-  borderRadius: "4px",
-  color: "var(--text, #000)",
-  fontSize: "0.875rem",
-  textDecoration: "none",
-  fontWeight: 500,
-};

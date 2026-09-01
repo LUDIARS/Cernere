@@ -1,83 +1,44 @@
 /**
  * Composite Login Page
  *
- * 他サービスから popup/iframe で開かれるスタンドアロンログインページ。
- * アプリシェル (サイドバー等) なしで、認証成功後に
- * postMessage で auth_code を親ウィンドウに返すか、redirect_uri にリダイレクトする。
- *
- * フロー:
- *   1. POST /api/auth/composite/login (or register) で資格情報検証
- *      → { ticket, wsPath } を取得
- *   2. WS `/auth/composite-ws?ticket=...` に接続
- *   3. ブラウザが fingerprint (machine + browser 情報のみ) を収集 → WS から送信
- *   4. サーバーから state / authenticated / error メッセージを受信
- *   5. authenticated を受け取ったら auth_code を親ウィンドウに返す
+ * 他サービスから popup / 同一窓で開かれるスタンドアロンログインページ。 認証 UI は
+ * 埋め込み SDK の <CompositeLogin> (packages/composite) をそのまま描画する。
+ * 送信先検証・silent SSO・authCode の引き渡しは hooks/useCompositeLoginSession、
+ * 通信は lib/composite-auth-adapter.ts (REST + composite WS) が担う。
  *
  * Query params:
  *   origin       - postMessage 送信先 (popup モード)
  *   redirect_uri - リダイレクト先 (redirect モード)
+ *   auth_mode    - "passkey" でパスワード導線を出さない
+ *   mode         - "login" | "register" の初期タブ
+ *   redirect     - self モードの戻り先 (ローカルパスのみ)
  */
 
-import { useEffect, useRef, useState } from "react";
-import { collectDeviceFingerprint } from "../../lib/device-fingerprint";
-import { fetchAllowedOrigins, isTargetAllowed } from "../../lib/composite-redirect";
-import { auth as authApi, getAccessToken, hasAccessRecord } from "../../lib/api";
+import type { CSSProperties } from "react";
+import { CompositeLogin } from "@ludiars/cernere-composite/ui";
 import { useAuth } from "../../contexts/AuthContext";
-import { usePasskeyLogin } from "../../hooks/usePasskeyLogin";
+import { useCompositeLoginSession } from "../../hooks/useCompositeLoginSession";
+import { CERNERE_LOGIN_LABELS } from "./composite-login-labels";
 
 const API_BASE = "";
 
-type Anomaly =
-  | "new_device"
-  | "new_os"
-  | "new_browser"
-  | "new_ip"
-  | "missing_fingerprint";
-
-type WsState =
-  | "pending_device"
-  | "challenge_pending"
-  | "authenticated"
-  | "expired";
-
-interface ChallengeInfo {
-  deviceToken?: string;
-  emailMasked?: string;
-  anomalies?: Anomaly[];
-  codeChannel?: "email" | "console";
-  deviceLabel?: string;
-  error?: string;
-  remainingAttempts?: number;
-  resent?: boolean;
-}
-
-interface LoginResponseShape {
-  ticket?: string;
-  wsPath?: string;
-  mfaRequired?: boolean;
-  error?: string;
-}
-
-type ServerMessage =
-  | { type: "state"; state: WsState; data?: ChallengeInfo }
-  | { type: "authenticated"; authCode: string }
-  | { type: "error"; retryable: boolean; reason: string }
-  | { type: "ping"; ts: number };
-
-const ANOMALY_LABELS: Record<Anomaly, string> = {
-  new_device: "新しいデバイス",
-  new_os: "新しい OS",
-  new_browser: "新しいブラウザ",
-  new_ip: "普段と異なるネットワーク",
-  missing_fingerprint: "デバイス情報を取得できませんでした",
+const shellStyle: CSSProperties = {
+  minHeight: "100vh",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "var(--bg)",
 };
 
-/** WS の URL を構築する (HTTPS → wss, HTTP → ws) */
-function buildWsUrl(wsPath: string): string {
-  const proto = window.location.protocol === "https:" ? "wss" : "ws";
-  // 開発時 Vite proxy の下で動くため location.host を使用
-  return `${proto}://${window.location.host}${wsPath}`;
-}
+const noticeStyle: CSSProperties = {
+  width: 400,
+  background: "var(--bg-surface)",
+  border: "1px solid var(--red)",
+  borderRadius: "var(--radius)",
+  padding: "1.5rem",
+  color: "var(--red)",
+  fontSize: "0.9rem",
+};
 
 /**
  * self モード: Cernere 単独フロントの /login がこのページをそのまま使う (ダブスタ解消)。
@@ -88,819 +49,52 @@ export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
   const params = new URLSearchParams(window.location.search);
   const origin = self ? null : params.get("origin");
   const redirectUri = self ? null : params.get("redirect_uri");
-  // self ログイン完了後の戻り先 (ローカルパスのみ許可 — open redirect 防止)
-  const redirectParam = params.get("redirect");
   // passkey 指定時は端末種別にかかわらずパスワードへ暗黙フォールバックしない。
   const passkeyOnly = !self && params.get("auth_mode") === "passkey";
   const { googleAuthUrl: selfGoogleUrl, githubAuthUrl: selfGithubUrl } = useAuth();
 
-  // 初期タブ: ?mode= が最優先。 self モードでは「アクセスした形跡」が無い初訪問に
-  // Register を優先表示する (#149 の挙動を引き継ぐ)。
-  const [mode, setMode] = useState<"login" | "register" | "device">(() => {
-    const q = params.get("mode");
-    if (q === "register" || q === "login") return q;
-    if (self && !hasAccessRecord()) return "register";
-    return "login";
-  });
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [challenge, setChallenge] = useState<ChallengeInfo | null>(null);
-  const [deviceCode, setDeviceCode] = useState("");
-  const [info, setInfo] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [fingerprintStatus, setFingerprintStatus] =
-    useState<"idle" | "collecting" | "sent" | "failed">("idle");
-
-  // パスキー自動起動の可否。 self は即座に、 composite は送信先検証と silent SSO が
-  // 「authCode を取れなかった」と決着してから true にする (ダイアログの空振り防止)。
-  const [passkeyAutoReady, setPasskeyAutoReady] = useState(self && mode === "login");
-
-  const wsRef = useRef<WebSocket | null>(null);
-  const retryTimerRef = useRef<number | null>(null);
-  const allowedOriginsRef = useRef<string[]>([]);
-
-  // ── アンマウント時の掃除 ──
-  useEffect(() => {
-    return () => {
-      if (wsRef.current) {
-        try { wsRef.current.close(); } catch { /* ignore */ }
-      }
-      if (retryTimerRef.current) {
-        clearTimeout(retryTimerRef.current);
-      }
-    };
-  }, []);
-
-  // ── 送信先 (origin / redirect_uri) をサーバ許可リストで事前検証 (VULNWEB-001) ──
-  // 不正な送信先ならログイン UI を出す前に停止し、 authCode を発行させない。
-  useEffect(() => {
-    if (self) return; // self モードは送信先検証も silent SSO も不要 (App 側でログイン済みを弾く)
-    let cancelled = false;
-    void (async () => {
-      const allowed = await fetchAllowedOrigins();
-      if (cancelled) return;
-      allowedOriginsRef.current = allowed;
-      const target = origin ?? redirectUri;
-      if (!target) {
-        setError("送信先が指定されていません (origin / redirect_uri が必要です)。");
-      } else if (!isTargetAllowed(target, allowed)) {
-        setError("許可されていない送信先です。この画面は安全に続行できません。");
-      } else {
-        // silent SSO — 既に Cernere ログイン済み (accessToken 保持) なら、 passkey/
-        // パスワードの再入力なしで authCode を発行し、 呼び出し元 (EducationLab 等) へ返す。
-        // 失敗 / 未ログインなら通常の対話ログイン UI にフォールバックする。
-        const token = getAccessToken();
-        if (token) {
-          try {
-            const res = await fetch(`${API_BASE}/api/auth/composite-session-code`, {
-              method: "POST",
-              headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-              body: JSON.stringify({ target }),
-            });
-            if (!cancelled && res.ok) {
-              const body = await res.json().catch(() => null) as { authCode?: string } | null;
-              if (body?.authCode) { completeAuth(body.authCode); return; }
-            }
-          } catch {
-            /* 対話フローにフォールバック */
-          }
-        }
-        // silent SSO では入れなかった → 対話ログイン。 ここで初めて認証器を開いてよい。
-        if (!cancelled) setPasskeyAutoReady(true);
-      }
-    })();
-    return () => { cancelled = true; };
-    // completeAuth は同一 render の closure で参照 (effect は render 後に走るため定義済み)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [origin, redirectUri]);
-
-  // self の初期タブが register だった場合は、login への切替時に自動起動を許可する。
-  // composite は上の effect で実 target の検証と silent SSO が完了した場合だけ許可する。
-  useEffect(() => {
-    if (mode === "login" && self) {
-      setPasskeyAutoReady(true);
-    }
-  }, [mode, self]);
-
-  /** self モードの戻り先。 open redirect を防ぐためローカルパスのみ許可。 */
-  const selfTarget = (): string => {
-    if (redirectParam && redirectParam.startsWith("/") && !redirectParam.startsWith("//")) {
-      return redirectParam;
-    }
-    return "/";
-  };
-
-  const completeAuth = (authCode: string) => {
-    if (self) {
-      // Cernere 自身がコンシューマ: authCode を自分のトークンに交換して入る
-      setLoading(true);
-      void authApi.exchangeAuthCode(authCode)
-        .then(() => { window.location.href = selfTarget(); })
-        .catch((err: unknown) => {
-          setError(err instanceof Error ? err.message : "ログインの完了に失敗しました");
-          setLoading(false);
-        });
-      return;
-    }
-    const allowed = allowedOriginsRef.current;
-    // 権威はサーバ許可リスト。 postMessage/redirect の直前で必ず再検証し、
-    // 許可外の送信先へ authCode を渡さない (fail-closed)。
-    if (origin && window.opener) {
-      if (!isTargetAllowed(origin, allowed)) {
-        setError("許可されていない送信先のため認証を中止しました。");
-        return;
-      }
-      window.opener.postMessage({ type: "cernere:auth", authCode }, new URL(origin).origin);
-      window.close();
-    } else if (redirectUri) {
-      if (!isTargetAllowed(redirectUri, allowed)) {
-        setError("許可されていないリダイレクト先のため認証を中止しました。");
-        return;
-      }
-      const url = new URL(redirectUri);
-      url.searchParams.set("code", authCode);
-      window.location.href = url.toString();
-    } else {
-      setError("送信先が指定されていません。");
-    }
-  };
-
-  // ── ログイン画面を開いた直後に Windows Hello / Face ID を直接開く ──
-  // メールを渡さない usernameless なので、 ユーザは入力もボタンも踏まない。
-  // キャンセル / 未登録なら phase が "fallback" になり通常フォームへ落ちる。
-  // 送信先が拒否された / 2 要素チャレンジ進行中は認証器を開かない (fail-closed)。
-  //
-  // 送信先の拒否は composite 固有で、 error に文言が入るのが唯一の印。 self では
-  // 送信先検証自体を行わない (上の effect が即 return する) ため、 error を
-  // 自動起動の門にすると「前回の入力ミスが残っていると Hello が開かない」になる。
-  const passkeyBlocked = (!self && Boolean(error)) || challenge !== null;
-
-  const passkey = usePasskeyLogin({
+  const session = useCompositeLoginSession({
+    self,
+    origin,
+    redirectUri,
+    redirectParam: params.get("redirect"),
+    modeParam: params.get("mode"),
     apiBase: API_BASE,
-    autoStartReady: passkeyAutoReady && mode === "login" && !passkeyBlocked,
-    onAuthCode: completeAuth,
-    onError: setError,
   });
-  const passkeyBusy = passkey.phase === "running";
 
-  /** fingerprint を収集して WS に送信。失敗時は setTimeout で再試行。 */
-  const collectAndSendFingerprint = (ws: WebSocket) => {
-    setFingerprintStatus("collecting");
-    try {
-      const fp = collectDeviceFingerprint();
-      const hasSomething = !!(fp.machine || fp.browser);
-      if (!hasSomething) {
-        throw new Error("empty fingerprint");
-      }
-      if (ws.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({ type: "device", payload: fp }));
-      setFingerprintStatus("sent");
-    } catch (err: unknown) {
-      setFingerprintStatus("failed");
-      const msg = err instanceof Error ? err.message : "fingerprint collection failed";
-      setError(`デバイス情報の取得に失敗しました: ${msg}。再試行します…`);
-      retryTimerRef.current = window.setTimeout(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          collectAndSendFingerprint(ws);
-        }
-      }, 3000);
-    }
-  };
-
-  /** サーバーメッセージを処理 */
-  const handleServerMessage = (ws: WebSocket, msg: ServerMessage) => {
-    switch (msg.type) {
-      case "state":
-        if (msg.state === "pending_device") {
-          // fingerprint 未送信なら収集して送信
-          if (fingerprintStatus !== "sent") {
-            collectAndSendFingerprint(ws);
-          }
-        } else if (msg.state === "challenge_pending") {
-          setChallenge(msg.data ?? {});
-          if (msg.data?.resent) {
-            setInfo("確認コードを再送しました。");
-            setError("");
-          } else if (msg.data?.error) {
-            setError(
-              msg.data.remainingAttempts !== undefined
-                ? `${msg.data.error}（残り ${msg.data.remainingAttempts} 回）`
-                : msg.data.error,
-            );
-          } else {
-            setError("");
-            setInfo("");
-          }
-          setMode("device");
-          setLoading(false);
-        } else if (msg.state === "authenticated") {
-          // 次の "authenticated" メッセージで authCode が届く
-        } else if (msg.state === "expired") {
-          setError("認証セッションが期限切れです。最初からやり直してください。");
-          setLoading(false);
-          try { ws.close(); } catch { /* ignore */ }
-          wsRef.current = null;
-        }
-        return;
-      case "authenticated":
-        completeAuth(msg.authCode);
-        return;
-      case "error":
-        if (msg.retryable) {
-          // retryable はクライアント側で自動回復できることが多い
-          setError(`通信エラー (再試行中): ${msg.reason}`);
-          if (msg.reason.includes("fingerprint") && fingerprintStatus !== "sent") {
-            // fingerprint 空エラーなら直ちに再収集
-            retryTimerRef.current = window.setTimeout(() => {
-              if (ws.readyState === WebSocket.OPEN) {
-                collectAndSendFingerprint(ws);
-              }
-            }, 500);
-          }
-        } else {
-          setError(msg.reason);
-          setLoading(false);
-          try { ws.close(); } catch { /* ignore */ }
-          wsRef.current = null;
-        }
-        return;
-      case "ping":
-        try {
-          ws.send(JSON.stringify({ type: "pong", ts: msg.ts }));
-        } catch { /* ignore */ }
-        return;
-    }
-  };
-
-  /** WS を開いて fingerprint フローを開始 */
-  const startWsFlow = (wsPath: string) => {
-    const url = buildWsUrl(wsPath);
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
-    setFingerprintStatus("idle");
-
-    ws.onopen = () => {
-      // fingerprint 送信は open 時ではなく "state: pending_device" を待ってから。
-    };
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data as string) as ServerMessage;
-        handleServerMessage(ws, msg);
-      } catch {
-        /* ignore malformed */
-      }
-    };
-    ws.onerror = () => {
-      setError("WebSocket 接続エラーが発生しました。");
-      setLoading(false);
-    };
-    ws.onclose = () => {
-      wsRef.current = null;
-    };
-  };
-
-  const callApi = async (action: string, body: Record<string, unknown>): Promise<LoginResponseShape> => {
-    const res = await fetch(`${API_BASE}/api/auth/composite/${action}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json() as LoginResponseShape;
-    if (!res.ok) throw new Error(data.error ?? "Authentication failed");
-    return data;
-  };
-
-  /** passkey signup 完了後の合流点。 signup-finish は authCode ではなくトークンを
-   *  返すため、 composite モードでは composite-session-code で authCode に変換して
-   *  呼び出し元へ返す。 self モードはそのままアプリへ。 */
-  const completeSignedUp = async (accessToken: string) => {
-    if (self) {
-      window.location.href = selfTarget();
-      return;
-    }
-    const target = origin ?? redirectUri ?? "";
-    const res = await fetch(`${API_BASE}/api/auth/composite-session-code`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({ target }),
-    });
-    const body = await res.json().catch(() => null) as { authCode?: string; error?: string } | null;
-    if (!res.ok || !body?.authCode) {
-      throw new Error(body?.error ?? "登録は完了しましたが、呼び出し元への連携に失敗しました");
-    }
-    completeAuth(body.authCode);
-  };
-
-  /** メアド不要のパスキー新規登録 (Windows Hello / Face ID / Android 生体)。 */
-  const handlePasskeySignup = async () => {
-    setError("");
-    setInfo("");
-    if (!name.trim()) {
-      setError("名前を入力してください");
-      return;
-    }
-    setLoading(true);
-    try {
-      const data = await authApi.passkeySignup(name.trim(), email.trim() || undefined);
-      await completeSignedUp(data.accessToken);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "パスキー登録に失敗しました");
-      setLoading(false);
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    setInfo("");
-
-    if (mode === "register" && (!email.trim() || !password)) {
-      setError("パスワード登録にはメールアドレスとパスワードが必要です (パスキーなら名前だけで登録できます)");
-      return;
-    }
-    setLoading(true);
-
-    try {
-      if (mode === "device") {
-        // 本人確認コードの送信は WS で
-        const ws = wsRef.current;
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          throw new Error("接続が切断されました。最初からやり直してください。");
-        }
-        ws.send(JSON.stringify({ type: "verify_code", code: deviceCode.trim() }));
-        // 結果は onmessage → state で処理
-      } else {
-        const action = mode === "register" ? "register" : "login";
-        const body = mode === "register"
-          ? { name, email, password }
-          : { email, password };
-        const data = await callApi(action, body);
-        if (data.mfaRequired) {
-          setError("MFA is required but not yet supported in composite mode.");
-          setLoading(false);
-          return;
-        }
-        if (!data.wsPath) {
-          throw new Error("Missing wsPath in login response");
-        }
-        startWsFlow(data.wsPath);
-        // fingerprint 送信と以降は WS で。loading は state 受信時に解除。
-      }
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Authentication failed");
-      setLoading(false);
-    }
-  };
-
-  const handleResend = () => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      setError("接続が切断されました。最初からやり直してください。");
-      return;
-    }
-    setError("");
-    setInfo("");
-    ws.send(JSON.stringify({ type: "resend" }));
-  };
-
-  // OAuth URL にcomposite_origin を付与
+  // OAuth URL に composite_origin を付与
   const compositeParam = origin
     ? `composite_origin=${encodeURIComponent(origin)}`
     : redirectUri
       ? `composite_origin=${encodeURIComponent(redirectUri)}`
       : "";
-
   const googleAuthUrl = self ? selfGoogleUrl : `/auth/google/login${compositeParam ? `?${compositeParam}` : ""}`;
   const githubAuthUrl = self ? selfGithubUrl : `/auth/github/login${compositeParam ? `?${compositeParam}` : ""}`;
 
+  if (session.blockedReason) {
+    return (
+      <div style={shellStyle}>
+        <div style={noticeStyle}>{session.blockedReason}</div>
+      </div>
+    );
+  }
+
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "var(--bg)",
-      }}
-    >
-      <div
-        style={{
-          width: 400,
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius)",
-          padding: "2rem",
-        }}
-      >
-        <div style={{ textAlign: "center", marginBottom: "1.5rem" }}>
-          <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginBottom: "0.25rem" }}>
-            Cernere
-          </h1>
-          <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
-            {passkeyOnly
-              ? "Passkey でログイン"
-              : mode === "device"
-                ? "本人確認が必要です"
-                : "Sign in to continue"}
-          </p>
-        </div>
-
-        {/* Tab switcher */}
-        {!passkeyOnly && mode !== "device" && (
-          <div
-            style={{
-              display: "flex",
-              borderBottom: "1px solid var(--border)",
-              marginBottom: "1.5rem",
-            }}
-          >
-            {(["login", "register"] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => { setMode(m); setError(""); setInfo(""); }}
-                style={{
-                  flex: 1,
-                  padding: "0.5rem",
-                  background: "transparent",
-                  border: "none",
-                  borderBottom: mode === m ? "2px solid var(--accent)" : "2px solid transparent",
-                  color: mode === m ? "var(--text)" : "var(--text-muted)",
-                  fontWeight: mode === m ? 600 : 400,
-                  cursor: "pointer",
-                }}
-              >
-                {m === "login" ? "Login" : "Register"}
-              </button>
-            ))}
-          </div>
+    <div style={shellStyle}>
+      <div style={{ width: 400 }}>
+        {session.handoffError && (
+          <div style={{ ...noticeStyle, width: "auto", marginBottom: "1rem" }}>{session.handoffError}</div>
         )}
-
-        {info && (
-          <div
-            style={{
-              background: "rgba(34, 197, 94, 0.1)",
-              border: "1px solid var(--green, #22c55e)",
-              borderRadius: "var(--radius-sm)",
-              padding: "0.5rem 0.75rem",
-              marginBottom: "1rem",
-              fontSize: "0.85rem",
-              color: "var(--green, #16a34a)",
-            }}
-          >
-            {info}
-          </div>
-        )}
-
-        {error && (
-          <div
-            style={{
-              background: "rgba(248, 81, 73, 0.1)",
-              border: "1px solid var(--red)",
-              borderRadius: "var(--radius-sm)",
-              padding: "0.5rem 0.75rem",
-              marginBottom: "1rem",
-              fontSize: "0.85rem",
-              color: "var(--red)",
-            }}
-          >
-            {error}
-          </div>
-        )}
-
-        {(!passkeyOnly || mode === "register") && <form onSubmit={handleSubmit}>
-          {mode === "register" && (
-            <div className="form-group">
-              <label>Name</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Your name"
-                required
-              />
-            </div>
-          )}
-
-          {mode === "register" && (
-            <>
-              {/* メアド不要のパスキー登録が第一候補。 この端末の Windows Hello /
-                  生体認証だけでアカウントを作る。 他端末はログイン後の
-                  「他のデバイスを登録」 リンク (one-time URL) で追加する。 */}
-              <button
-                type="button"
-                className="primary"
-                disabled={loading}
-                onClick={() => { void handlePasskeySignup(); }}
-                style={{ width: "100%", marginBottom: "0.5rem", padding: "0.6rem" }}
-              >
-                🔐 パスキーでアカウント作成（生体認証 / Windows Hello PIN）
-              </button>
-              <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "1rem" }}>
-                メールアドレス不要で登録できます。他の端末（スマホ等）は、ログイン後に
-                「他のデバイスを登録」リンクから追加します。
-              </p>
-            </>
-          )}
-
-          {(mode === "login" || mode === "register") && (
-            <>
-              <div className="form-group">
-                <label>{mode === "register" ? "Email（任意 — パスワード登録では必須）" : "Email"}</label>
-                <input
-                  type="email"
-                  name="email"
-                  autoComplete="username"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="user@example.com"
-                  required={mode === "login"}
-                />
-              </div>
-
-              {(mode === "login" || !passkeyOnly) && (
-                <div className="form-group">
-                  <label>{mode === "register" ? "Password（パスワード登録を使う場合のみ）" : "Password"}</label>
-                  <input
-                    type="password"
-                    name="password"
-                    autoComplete={mode === "register" ? "new-password" : "current-password"}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="8+ characters"
-                    minLength={8}
-                    required={mode === "login"}
-                  />
-                </div>
-              )}
-            </>
-          )}
-
-          {mode === "device" && challenge && (
-            <div style={{ marginBottom: "0.75rem" }}>
-              <p style={{ fontSize: "0.9rem", marginBottom: "0.25rem" }}>
-                普段と異なる環境からのアクセスを検知しました。
-              </p>
-              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "0.75rem" }}>
-                {challenge.emailMasked
-                  ? `${challenge.emailMasked} に確認コードを送信しました。`
-                  : "確認コードを送信しました。"}
-              </p>
-
-              {challenge.deviceLabel && (
-                <p style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginBottom: "0.5rem" }}>
-                  <strong>デバイス:</strong> {challenge.deviceLabel}
-                </p>
-              )}
-
-              {challenge.anomalies && challenge.anomalies.length > 0 && (
-                <div style={{ marginBottom: "0.75rem", display: "flex", flexWrap: "wrap", gap: "0.25rem" }}>
-                  {challenge.anomalies.map((a) => (
-                    <span
-                      key={a}
-                      style={{
-                        fontSize: "0.7rem",
-                        padding: "0.15rem 0.5rem",
-                        borderRadius: "999px",
-                        background: "rgba(245, 158, 11, 0.15)",
-                        border: "1px solid var(--amber, #f59e0b)",
-                        color: "var(--amber, #b45309)",
-                      }}
-                    >
-                      {ANOMALY_LABELS[a] ?? a}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              <div className="form-group">
-                <label>確認コード (6 桁)</label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  autoComplete="one-time-code"
-                  maxLength={6}
-                  value={deviceCode}
-                  onChange={(e) => setDeviceCode(e.target.value.replace(/\D/g, ""))}
-                  placeholder="123456"
-                  required
-                  autoFocus
-                  style={{
-                    fontFamily: "monospace",
-                    letterSpacing: "0.25em",
-                    textAlign: "center",
-                    fontSize: "1.1rem",
-                  }}
-                />
-              </div>
-            </div>
-          )}
-
-          {(mode !== "register" || !passkeyOnly) && (
-            <button
-              type="submit"
-              className="primary"
-              disabled={loading}
-              style={{ width: "100%", marginTop: "0.5rem", padding: "0.6rem" }}
-            >
-              {loading
-                ? "Processing..."
-                : mode === "device"
-                  ? "確認コードを検証"
-                  : mode === "login"
-                    ? "Login"
-                    : "パスワードでアカウント作成"}
-            </button>
-          )}
-
-          {mode === "register" && passkeyOnly && (
-            <div style={{ textAlign: "center", marginTop: "0.75rem" }}>
-              <button
-                type="button"
-                onClick={() => { setMode("login"); setError(""); setInfo(""); }}
-                style={{
-                  fontSize: "0.8rem",
-                  color: "var(--text-muted)",
-                  textDecoration: "underline",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                }}
-              >
-                既にアカウントをお持ちの方はログイン
-              </button>
-            </div>
-          )}
-
-          {mode === "device" && (
-            <button
-              type="button"
-              onClick={handleResend}
-              disabled={loading}
-              style={{
-                width: "100%",
-                marginTop: "0.5rem",
-                padding: "0.4rem",
-                background: "transparent",
-                color: "var(--accent)",
-                border: "none",
-                fontSize: "0.85rem",
-                cursor: loading ? "wait" : "pointer",
-                textDecoration: "underline",
-              }}
-            >
-              確認コードを再送
-            </button>
-          )}
-
-          {mode !== "device" && fingerprintStatus === "collecting" && (
-            <p style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "0.5rem", textAlign: "center" }}>
-              デバイス情報を収集中...
-            </p>
-          )}
-        </form>}
-
-        {mode !== "device" && (
-          <>
-            {!passkeyOnly && <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0.75rem",
-                margin: "1.25rem 0",
-                color: "var(--text-muted)",
-                fontSize: "0.8rem",
-              }}
-            >
-              <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-              <span>or</span>
-              <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-            </div>}
-
-            {/* Passkey — 画面を開いた時点で自動起動済み。 ここは再試行の導線。 */}
-            {mode === "login" && <button
-              type="button"
-              onClick={() => { setError(""); setInfo(""); passkey.start(email); }}
-              disabled={loading || passkeyBusy || !passkeyAutoReady}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "0.5rem",
-                width: "100%",
-                padding: "0.6rem",
-                background: "var(--bg-surface-2)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm)",
-                color: "var(--text)",
-                fontSize: "0.875rem",
-                fontWeight: 500,
-                marginBottom: "0.5rem",
-                cursor: loading || passkeyBusy || !passkeyAutoReady ? "not-allowed" : "pointer",
-                opacity: loading || passkeyBusy || !passkeyAutoReady ? 0.6 : 1,
-              }}
-            >
-              {passkeyBusy
-                ? "🔐 認証器の応答を待っています…"
-                : passkey.hasAttempted
-                  ? "🔐 もう一度パスキーで認証する"
-                  : "🔐 Passkey でログイン（生体認証 / Windows Hello PIN / セキュリティキー）"}
-            </button>}
-
-            {/* 自動起動が空振りした / 非対応だったときだけ理由を出す。 */}
-            {mode === "login" && passkey.phase === "unsupported" && (
-              <p style={{ margin: "0 0 0.5rem", fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                {passkeyOnly
-                  ? "このブラウザはパスキー (WebAuthn) に対応していません。対応ブラウザで開き直してください。"
-                  : "このブラウザはパスキー (WebAuthn) に対応していません。メールとパスワードでログインしてください。"}
-              </p>
-            )}
-            {mode === "login" && passkey.phase === "fallback" && !error && (
-              <p style={{ margin: "0 0 0.5rem", fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                {passkeyOnly
-                  ? "使えるパスキーが見つからないか、認証をキャンセルしました。もう一度ボタンを押してください。"
-                  : "使えるパスキーが見つからないか、認証をキャンセルしました。下のフォームでログインするか、もう一度ボタンを押してください。"}
-              </p>
-            )}
-
-            {/* 新規登録導線: このページの register タブでそのまま登録する
-                (passkey 専用モードでもパスキー登録は可能)。 */}
-            {mode === "login" && (
-              <div style={{ textAlign: "center", marginTop: "0.25rem", marginBottom: "0.5rem" }}>
-                <button
-                  type="button"
-                  onClick={() => { setMode("register"); setError(""); setInfo(""); }}
-                  style={{
-                    fontSize: "0.8rem",
-                    color: "var(--text-muted)",
-                    textDecoration: "underline",
-                    background: "transparent",
-                    border: "none",
-                    cursor: "pointer",
-                  }}
-                >
-                  アカウントをお持ちでない方は新規登録
-                </button>
-              </div>
-            )}
-
-            {/* Google */}
-            {!passkeyOnly && <a
-              href={googleAuthUrl}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "0.5rem",
-                width: "100%",
-                padding: "0.6rem",
-                background: "var(--bg-surface-2)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm)",
-                color: "var(--text)",
-                fontSize: "0.875rem",
-                textDecoration: "none",
-                fontWeight: 500,
-                marginBottom: "0.5rem",
-              }}
-            >
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4" />
-                <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853" />
-                <path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.997 8.997 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05" />
-                <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335" />
-              </svg>
-              Continue with Google
-            </a>}
-
-            {/* GitHub */}
-            {!passkeyOnly && <a
-              href={githubAuthUrl}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "0.5rem",
-                width: "100%",
-                padding: "0.6rem",
-                background: "var(--bg-surface-2)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm)",
-                color: "var(--text)",
-                fontSize: "0.875rem",
-                textDecoration: "none",
-                fontWeight: 500,
-              }}
-            >
-              <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-              </svg>
-              Continue with GitHub
-            </a>}
-          </>
-        )}
+        <CompositeLogin
+          authApi={session.adapter}
+          onAuthCode={session.deliver}
+          oauth={passkeyOnly ? undefined : { googleUrl: googleAuthUrl, githubUrl: githubAuthUrl }}
+          labels={CERNERE_LOGIN_LABELS}
+          initialMode={session.initialMode}
+          passkeyOnly={passkeyOnly}
+          passkeyAutoStart={session.passkeyAutoReady}
+          style={{ maxWidth: 400 }}
+        />
       </div>
     </div>
   );

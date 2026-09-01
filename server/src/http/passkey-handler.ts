@@ -11,11 +11,17 @@
  *
  * 外部 API は一切不要 — ブラウザ <-> Cernere サーバの直接やり取り。
  *
- * 4 つのエンドポイント (= 登録 / ログインの begin/finish のペア):
+ * 主なエンドポイント (= 登録 / ログインの begin/finish のペア):
  *   POST /api/auth/passkey/register-begin   (要 認証, 任意の nickname を受ける)
  *   POST /api/auth/passkey/register-finish  (要 認証, ブラウザ署名を verify)
  *   POST /api/auth/passkey/login-begin      (未認証, optional email)
  *   POST /api/auth/passkey/login-finish     (未認証, ブラウザ署名を verify → JWT 発行)
+ *   POST /api/auth/passkey/signup-begin     (未認証, name 必須 / email 任意 → 新規登録 options)
+ *   POST /api/auth/passkey/signup-finish    (未認証, verify → users+passkeys 作成 → JWT 発行)
+ *   POST /api/auth/passkey/composite-login-finish  (未認証, verify → authCode 発行)
+ *   POST /api/auth/passkey/composite-signup-finish (未認証, verify → 作成 → authCode 発行)
+ * composite-* は埋め込み SDK / popup 用。 同じ 4 ceremony は project WS の
+ * `auth.passkey-*` (executePasskeyCompositeAction) からも呼べる。
  *
  * challenge は Redis に保存して TTL 5 分。 同一ユーザは concurrent な
  * register/login を 1 件しか持てない (= 後勝ち)。
@@ -44,17 +50,34 @@ import { generateTokenPair, verifyToken, extractBearerToken, REFRESH_TOKEN_DAYS 
 import { hashRefreshToken } from "../auth/token-hash.js";
 import { issueAuthCode } from "../auth/auth-code.js";
 import { logUserLogin, logUserLoginFailed, logUserRegister } from "../logging/auth-logger.js";
-import { devLog } from "../logging/dev-logger.js";
+import { devError, devLog } from "../logging/dev-logger.js";
 import { requireExportAuth } from "./export-auth.js";
 import { actionProofStore, httpActionBinding } from "../auth/action-proof.js";
+import { mergeWebauthnOrigins } from "../auth/webauthn-origins.js";
+import {
+  passkeyAnonymousRateLimitScope,
+  passkeyLoginRateLimitScope,
+} from "../auth/passkey-rate-limit.js";
+import { publicPasskeyCompositeError } from "../auth/passkey-public-error.js";
 import { AppError } from "../error.js";
 
 interface RouteResult { status: string; data: unknown }
-export interface RequestCtx { ip?: string; userAgent?: string }
+export interface RequestCtx {
+  ip?: string;
+  userAgent?: string;
+  /**
+   * project WS (埋め込み SDK → サービス backend → Cernere) 経由の呼び出しでは、
+   * 認証成立時に project_data_<key> の行を確保するために projectKey を載せる。
+   * REST 直叩きでは undefined。
+   */
+  projectKey?: string;
+}
 
 const RP_NAME = config.webauthnRpName;
 const RP_ID = config.webauthnRpId;
-const ORIGINS = config.webauthnOrigins;
+// 埋め込み SDK を描画する first-party サービスの origin でも ceremony が走るため、
+// composite の許可 origin を expectedOrigin に合流させる (auth/webauthn-origins.ts)。
+const ORIGINS = mergeWebauthnOrigins(config.webauthnOrigins, config.compositeAllowedOrigins);
 const CHALLENGE_TTL_SEC = 5 * 60;
 
 /**
@@ -113,6 +136,9 @@ export async function handlePasskeyRoute(
      * postMessage で受け取り、 自分の backend 経由で /api/auth/exchange して
      * service_token を得る。 */
     case "composite-login-finish": return compositeLoginFinish(parseBody(body), ctx);
+    /* 埋め込み SDK からのパスキー新規登録。 signup-finish と同じ検証・作成を行うが
+     * JWT ではなく authCode を返し、 呼び出し元サービスが exchange で受け取る。 */
+    case "composite-signup-finish": return compositeSignupFinish(parseBody(body), ctx);
     /* 他デバイス登録リンク: ログイン済み端末で one-time URL を発行し、 新しい端末が
      * その URL から自分の passkey (Windows Hello / スマホ生体認証) を同じアカウントへ
      * 追加する。 email 無しアカウントでも新端末を追加できる唯一の経路。 */
@@ -133,6 +159,61 @@ export async function handlePasskeyRoute(
 function parseBody(body: string): Record<string, unknown> {
   if (!body) return {};
   try { return JSON.parse(body); } catch { return {}; }
+}
+
+/**
+ * project WS 経由で認証が成立したとき、 composite login と同じく project_data_<key>
+ * の行を確保する。 REST (projectKey 無し) では何もしない。
+ * project/service は http 層を import しているため、 循環を避けて動的 import する。
+ */
+async function ensureProjectRowForComposite(userId: string, ctx: RequestCtx): Promise<void> {
+  if (!ctx.projectKey) return;
+  const { ensureUserProjectRow } = await import("../project/service.js");
+  await ensureUserProjectRow(userId, ctx.projectKey);
+}
+
+/** project WS (`auth.passkey-*`) から呼べる passkey ceremony の集合。 */
+export type PasskeyCompositeAction =
+  | "passkey-login-begin"
+  | "passkey-login-finish"
+  | "passkey-signup-begin"
+  | "passkey-signup-finish";
+
+export const PASSKEY_COMPOSITE_ACTIONS: readonly PasskeyCompositeAction[] = [
+  "passkey-login-begin",
+  "passkey-login-finish",
+  "passkey-signup-begin",
+  "passkey-signup-finish",
+];
+
+export function isPasskeyCompositeAction(action: string): action is PasskeyCompositeAction {
+  return (PASSKEY_COMPOSITE_ACTIONS as readonly string[]).includes(action);
+}
+
+/**
+ * 埋め込み SDK (<CompositeLogin>) がサービス backend → project WS 経由で passkey
+ * ceremony を回すためのエントリポイント。 finish 系は JWT ではなく authCode を返す
+ * (REST の composite-*-finish と同じ契約)。
+ */
+export async function executePasskeyCompositeAction(
+  action: PasskeyCompositeAction,
+  payload: Record<string, unknown>,
+  ctx: RequestCtx,
+): Promise<unknown> {
+  try {
+    switch (action) {
+      case "passkey-login-begin":   return (await loginBegin(payload, ctx)).data;
+      case "passkey-login-finish":  return (await compositeLoginFinish(payload, ctx)).data;
+      case "passkey-signup-begin":  return (await signupBegin(payload, ctx)).data;
+      case "passkey-signup-finish": return (await compositeSignupFinish(payload, ctx)).data;
+    }
+  } catch (error) {
+    const publicError = publicPasskeyCompositeError(error);
+    if (publicError !== error) {
+      devError("passkey.composite.internalFailure", error, { action, projectKey: ctx.projectKey });
+    }
+    throw publicError;
+  }
 }
 
 async function requireUserId(authHeader: string): Promise<{ id: string; role: string; token: string }> {
@@ -182,7 +263,7 @@ async function signupBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise
   const parsed = signupBeginSchema.safeParse(p);
   if (!parsed.success) throw new Error("A valid name (and optional email) is required");
   const { name, email } = parsed.data;
-  await checkRateLimit(`passkey-signup:${ctx.ip ?? "anon"}`, 5, 600);
+  await checkRateLimit(`passkey-signup:${passkeyAnonymousRateLimitScope(ctx)}`, 5, 600);
 
   if (email) {
     const existing = await db.select({ id: schema.users.id })
@@ -214,7 +295,29 @@ async function signupBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise
   return { status: "200 OK", data: { signupId, options } };
 }
 
-async function signupFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
+/** WebAuthn 検証を通ってアカウントが作成された結果。 発行物 (JWT / authCode) は呼び出し側が決める。 */
+interface SignedUpAccount {
+  userId: string;
+  name: string;
+  email: string | null;
+  role: string;
+}
+
+/** ユーザ作成トランザクション内で追加処理 (refresh session の挿入等) を差し込む口。 */
+type SignupTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * パスワードを作らず、最初の passkey をそのアカウントの認証資格情報として登録する。
+ * ユーザー行は WebAuthn 検証が成功するまで作成しないため、途中離脱したアカウントを残さない。
+ *
+ * REST (JWT 返却) と composite (authCode 返却) の両 finish が共有する本体。
+ * `withinTx` はユーザ・passkey 挿入と同じトランザクションで走る (原子性を保つため)。
+ */
+async function finalizePasskeySignup(
+  p: Record<string, unknown>,
+  ctx: RequestCtx,
+  withinTx?: (tx: SignupTx, account: SignedUpAccount) => Promise<void>,
+): Promise<SignedUpAccount> {
   const parsed = signupFinishSchema.safeParse(p);
   if (!parsed.success) throw new Error("signupId and response are required");
   const response = parsed.data.response as RegistrationResponseJSON;
@@ -240,8 +343,12 @@ async function signupFinish(p: Record<string, unknown>, ctx: RequestCtx): Promis
   const now = new Date();
   const countResult = await db.select({ count: sql<number>`count(*)` }).from(schema.users);
   const role = Number(countResult[0]?.count ?? 0) === 0 ? "admin" : "general";
-  const { accessToken, refreshToken } = generateTokenPair(pending.userId, role);
-  const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
+  const account: SignedUpAccount = {
+    userId: pending.userId,
+    name: pending.name,
+    email: pending.email,
+    role,
+  };
 
   await db.transaction(async (tx) => {
     if (pending.email) {
@@ -274,28 +381,66 @@ async function signupFinish(p: Record<string, unknown>, ctx: RequestCtx): Promis
       aaguid: info.aaguid,
       createdAt: now,
     });
-    await tx.insert(schema.refreshSessions).values({
-      id: crypto.randomUUID(),
-      userId: pending.userId,
-      refreshToken: hashRefreshToken(refreshToken),
-      expiresAt,
-    });
+    if (withinTx) await withinTx(tx, account);
   });
 
   logUserRegister(pending.userId, pending.email ?? `(passkey-only) ${pending.name}`, "passkey", { ip: ctx.ip });
+  return account;
+}
+
+/** REST: 作成したアカウントの JWT ペアを返す (Cernere 自身の /login や device 登録が使う)。 */
+async function signupFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
+  let tokens: { accessToken: string; refreshToken: string } | null = null;
+  const account = await finalizePasskeySignup(p, ctx, async (tx, created) => {
+    tokens = generateTokenPair(created.userId, created.role);
+    await tx.insert(schema.refreshSessions).values({
+      id: crypto.randomUUID(),
+      userId: created.userId,
+      refreshToken: hashRefreshToken(tokens.refreshToken),
+      expiresAt: new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000),
+    });
+  });
+  // withinTx は transaction 成功時に必ず走るため、 ここで null なら実装上の不整合。
+  if (!tokens) throw new Error("Passkey signup did not issue a session");
+  const issued: { accessToken: string; refreshToken: string } = tokens;
   return {
     status: "201 Created",
     data: {
       user: {
-        id: pending.userId,
-        displayName: pending.name,
-        email: pending.email,
-        role,
+        id: account.userId,
+        displayName: account.name,
+        email: account.email,
+        role: account.role,
       },
-      accessToken,
-      refreshToken,
+      accessToken: issued.accessToken,
+      refreshToken: issued.refreshToken,
     },
   };
+}
+
+/**
+ * composite (埋め込み SDK / popup) 用 passkey signup finish: JWT は返さず authCode を発行する。
+ * 呼び出し元サービスは自分の backend 経由で /api/auth/exchange して service_token を得る。
+ */
+async function compositeSignupFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
+  const account = await finalizePasskeySignup(p, ctx);
+  try {
+    await ensureProjectRowForComposite(account.userId, ctx);
+    const authCode = await issueAuthCode({
+      userId: account.userId,
+      displayName: account.name,
+      email: account.email,
+      role: account.role,
+    });
+    return { status: "201 Created", data: { authCode } };
+  } catch {
+    // WebAuthn 検証と user/passkey 作成は既に commit 済み。一般的な「登録失敗」に
+    // すると同じ signupId を再送しても回復できないため、作成済みであることと
+    // 新しい passkey で login できる復旧手順を明示する。内部障害の詳細は返さない。
+    throw new Error(
+      "Account creation completed, but sign-in completion failed. Return to login and use your new passkey.",
+    );
+  }
 }
 
 async function registerBegin(authHeader: string, actionProof: string): Promise<RouteResult> {
@@ -393,7 +538,10 @@ async function loginBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise<
   // email が来れば「そのユーザ専用」 のクレデンシャルだけを allow に詰める。
   // 来なければ "usernameless" (= 認証器が自分の登録済 credential を提示) を許す。
   const email = typeof p.email === "string" ? p.email.trim() : "";
-  await checkRateLimit(`passkey-login:${email || ctx.ip || "anon"}`, 30, 900);
+  // project WS では email もサービスが自由に変えられるため、常に authenticated
+  // projectKey を使う。REST は従来どおり対象 email、usernameless は接続元 IP。
+  const loginLimitScope = passkeyLoginRateLimitScope(email, ctx);
+  await checkRateLimit(`passkey-login:${loginLimitScope}`, 30, 900);
 
   let allowCredentials: { id: string; transports?: AuthenticatorTransportFuture[] }[] | undefined;
   let challengeOwner = "anon:" + crypto.randomUUID();
@@ -520,6 +668,7 @@ async function loginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise
  *  経由で実トークンに交換する。 */
 async function compositeLoginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
   const { user } = await verifyPasskeyAssertion(p, ctx);
+  await ensureProjectRowForComposite(user.id, ctx);
   const authCode = await issueAuthCode({
     userId: user.id,
     displayName: user.displayName,

@@ -4,16 +4,17 @@
 
 Cernere Composite は、他サービスの **バックエンド** とログイン UI に組み込むための認証パッケージである。
 
-Passkey UI は PC では呼び出し元と同じウィンドウで Cernere に遷移し、
-`redirect_uri` に one-time code を返す。呼び出し元は sessionStorage に保持した
-state を照合してから code をバックエンドで交換する。モバイルでは popup も利用できる。
-いずれも WebAuthn ceremony は Cernere origin 上で実行する。
+ログイン UI の本流は埋め込み SDK の `<CompositeLogin>` (`@ludiars/cernere-composite/ui`)
+である。 パスキー (WebAuthn) の登録 / ログインと、 メールアドレス不要の新規登録
+(name のみ / email 任意) はこのカードが持ち、 サービス SPA は自分の backend 経由で
+Cernere と往復する `authApi` を渡すだけでよい (後述「埋め込みログイン UI とパスキー」)。
 
-ログイン UI は Cernere ホストの `/composite/login` に一本化されている。
-Cernere 単独フロントの `/login` も同ページの self モード (authCode を
-`POST /api/auth/exchange` で自分のトークンに交換) を描画するだけで、
-独自のログインフォームは持たない。新規登録 (パスキー: name のみ /
-email 任意) も同ページの register タブで行う。
+Cernere ホストの `/composite/login` と Cernere 単独フロントの `/login` も同じカードを
+描画するだけで、 独自のログインフォームは持たない (`/login` は self モード = authCode を
+`POST /api/auth/exchange` で自分のトークンに交換)。 別 eTLD+1 のサービス向けには、
+PC では呼び出し元と同じウィンドウで Cernere に遷移し `redirect_uri` に one-time code を
+返す / モバイルでは popup を使う `<CompositePasskeyPopup>` も残しており、 その場合の
+WebAuthn ceremony は Cernere origin 上で実行する。
 サービス起動時に Cernere にプロジェクト認証 (WebSocket) を行い、
 ユーザー認証をバックエンド経由で仲介する。
 
@@ -28,16 +29,33 @@ email 任意) も同ページの register タブで行う。
 ## パッケージ構成
 
 ```
-@ludiars/cernere-composite    ← バックエンド用 npm パッケージ
+@ludiars/cernere-composite    ← バックエンド SDK + 埋め込み React ログイン UI
   packages/composite/
     src/
-      index.ts                 ← 公開 API
+      index.ts                 ← 公開 API (backend)
       types.ts                 ← 型定義 (CompositeConfig, ExchangeResult)
       composite.ts             ← CernereComposite クラス
+      ui/
+        index.ts               ← 公開 API (`@ludiars/cernere-composite/ui`)
+        CompositeLogin.tsx     ← 埋め込みログインカード (認証 UI の本流)
+        auth-api.ts            ← authApi 契約 (password + passkey 4 メソッド)
+        usePasskeyLogin.ts     ← パスキー ログイン ceremony (自動起動・single-flight)
+        passkey-signup.ts      ← パスキー 新規登録 ceremony (email 任意)
+        PasskeyLoginSection.tsx← login タブのパスキー再試行導線
+        login-labels.ts        ← 文言 (i18n 上書き可)
+        login-styles.ts        ← 共有スタイル
+        CompositePasskeyPopup.tsx ← Cernere origin で ceremony する popup 版 (別 eTLD+1 向け)
+        device-fingerprint.ts  ← password 経路の本人確認用 fingerprint
 
 依存:
   @ludiars/cernere-service-adapter  ← WebSocket 接続・プロジェクト認証
+  @simplewebauthn/browser           ← WebAuthn (navigator.credentials) ラッパ
 ```
+
+Cernere 自身のフロント (`frontend/`) は publish 済みパッケージではなく、 vite alias +
+tsconfig paths で `packages/composite/src/ui` を直接取り込む。 `/login` と
+`/composite/login` はこのカードを描画するだけで、 通信は
+`frontend/src/lib/composite-auth-adapter.ts` (REST + composite WS) が担う。
 
 ## 認証フロー
 
@@ -220,3 +238,57 @@ window.addEventListener("message", (e) => {
   }
 });
 ```
+
+## 埋め込みログイン UI (`<CompositeLogin>`) とパスキー
+
+`@ludiars/cernere-composite/ui` の `<CompositeLogin>` はサービス SPA に埋め込むログイン
+カード。 実通信は持たず、 利用側が渡す `authApi` に委譲する (CORS を避けるため通常は
+サービス backend → project WS → Cernere)。
+
+### authApi 契約
+
+```typescript
+interface CompositeAuthApi {
+  login(params: { email; password; device? }): Promise<CompositeAuthResponse>;
+  register(params: { name; email?; password?; device? }): Promise<CompositeAuthResponse>;
+  mfaVerify?(...); deviceVerify?(...); deviceResend?(...);
+
+  // ── パスキー (4 つ揃えて渡す。 一部だけだと起動時に例外 = 設定不備を無言にしない) ──
+  passkeyLoginBegin(params: { email? }): Promise<{ options; challengeOwner }>;
+  passkeyLoginFinish(params: { challengeOwner; response }): Promise<CompositeAuthResponse>;
+  passkeySignupBegin(params: { name; email? }): Promise<{ signupId; options }>;
+  passkeySignupFinish(params: { signupId; response }): Promise<CompositeAuthResponse>;
+}
+```
+
+- passkey 4 メソッドがあると: login タブで usernameless ceremony を自動起動 (1 マウント 1 回、
+  single-flight)、 register タブは「パスキーでアカウント作成」 (name のみ必須) が第一候補、
+  email / password は任意 (パスワード登録を選ぶときだけ両方必須)。
+- 無いと: 従来どおり email / password のみ。 既存の利用側 (Schedula / Actio) は変更なしで動く。
+- props: `passkeyOnly` (パスワード導線と fingerprint 収集を出さない)、 `passkeyAutoStart`
+  (送信先検証などが決着してから true にする)、 `initialMode`、 `onModeChange`、 `labels`。
+
+### サービス backend の中継 (project WS)
+
+既存の `auth.login` / `auth.register` プロキシ (Actio の `/api/auth/cernere/*`) と同じ経路で、
+project WS の `module_request` を中継する。
+
+```json
+{ "type": "module_request", "module": "auth",
+  "action": "passkey-login-begin",          // | passkey-login-finish | passkey-signup-begin | passkey-signup-finish
+  "payload": { "...ブラウザから受けた body..." } }
+```
+
+`module_response.payload` をそのままブラウザへ返す (begin → `{ options, ... }`、 finish → `{ authCode }`)。
+
+未認証 ceremony (signup / usernameless login) のレート制限は、認証済み project WS に
+bind された projectKey 単位で行う。サービス申告の接続元 IP は信頼境界に使わない。
+
+### origin / RP ID の前提
+
+WebAuthn の ceremony は「ページを開いている origin」 で実行される。 埋め込み先サービスの
+origin を `CERNERE_COMPOSITE_ALLOWED_ORIGINS` に登録すると、 Cernere はそれを WebAuthn の
+expectedOrigin に合流させる (`server/src/auth/webauthn-origins.ts`)。 `WEBAUTHN_RP_ID` は
+それら全 origin の registrable suffix である必要がある (例: RP ID `example.com`、 サービス
+`app.example.com`)。 別 eTLD+1 のサービスは埋め込みではなく `<CompositePasskeyPopup>`
+(Cernere origin で ceremony) を使う。 開発時は全て `localhost` なのでポートが違っても動く。

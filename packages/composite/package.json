@@ -1,6 +1,6 @@
 {
   "name": "@ludiars/cernere-composite",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Cernere composite auth — backend SDK + embeddable React login UI",
   "type": "module",
   "main": "dist/index.js",
@@ -15,19 +15,25 @@
       "types": "./dist/ui/index.d.ts"
     }
   },
-  "files": ["dist", "src"],
+  "files": [
+    "dist",
+    "src"
+  ],
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@ludiars/cernere-service-adapter": "^0.1.0"
+    "@ludiars/cernere-service-adapter": "^0.1.0",
+    "@simplewebauthn/browser": "^13.3.0"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0"
   },
   "peerDependenciesMeta": {
-    "react": { "optional": true }
+    "react": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

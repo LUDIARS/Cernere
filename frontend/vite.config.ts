@@ -1,5 +1,11 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+
+// 認証 UI の本流は埋め込み SDK (packages/composite)。 Cernere フロントは publish 済み
+// パッケージではなく同一リポのソースを直接取り込む (file: 依存だと install 前に dist を
+// 作る必要があり、 worktree で事故りやすい)。 tsconfig.json の paths と対で保つ。
+const compositeUiSrc = fileURLToPath(new URL("../packages/composite/src/ui/index.ts", import.meta.url));
 
 const backendUrl = process.env.VITE_BACKEND_URL ?? "http://localhost:8080";
 const extraHosts = [
@@ -18,6 +24,14 @@ const hmr = publicHost
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      "@ludiars/cernere-composite/ui": compositeUiSrc,
+    },
+    // SDK ソースは frontend/ の外にあるため、 react / WebAuthn を packages/composite 側の
+    // node_modules から二重に解決させない (React が 2 つあると hooks が壊れる)。
+    dedupe: ["react", "react-dom", "@simplewebauthn/browser"],
+  },
   server: {
     port: 5173,
     host: "0.0.0.0",
