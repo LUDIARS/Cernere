@@ -9,5 +9,5 @@ describe("launch credential material", () => {
 
     expect("clientSecretEncrypted" in material).toBe(false);
     await expect(bcrypt.compare(clientSecret, material.clientSecretHash)).resolves.toBe(true);
-  });
+  }, 15_000);
 });

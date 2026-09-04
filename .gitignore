@@ -13,6 +13,8 @@ logs/
 # (解析キャッシュは上の行のまま無視)。
 !.anatomia/domains/
 !.anatomia/domains/**
+# 層宣言も解析キャッシュではなくリポジトリが持つ成果物なので追跡する。
+!.anatomia/layers.json
 .claude/
 *.stackdump
 **/.pnpm-store/

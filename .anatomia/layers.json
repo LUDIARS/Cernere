@@ -1,0 +1,206 @@
+{
+  "$comment": "Anatomia のプログラムドメイン (二層判定) 用の層宣言。 glob は repo 相対のファイルパスへ完全一致で当たる (`*` = 1 階層、 `**` = 任意階層)。 Anatomia の module 単位はディレクトリなので、 モジュール 1 つにつき `<dir>/*` を 1 本だけ置き、 glob 同士を重ねない (ローダーが glob 文字列でソートしてから先勝ちで評価するため、 包括 glob を混ぜると個別宣言が効かなくなる)。 server/src/http・ws は外部境界、 auth・identity・oidc・project は認証ドメインの本体、 db・logging・lib は基盤、 frontend と demo と埋め込み SDK の UI は presentation、 テストは横断で shared。 確認は `anatomia domains program --repo .` で unclassified 0 を保つこと。",
+  "layers": [
+    {
+      "glob": "demo/src/*",
+      "layer": "presentation"
+    },
+    {
+      "glob": "demo/src/models/*",
+      "layer": "presentation"
+    },
+    {
+      "glob": "demo/src/routes/*",
+      "layer": "presentation"
+    },
+    {
+      "glob": "demo/src/store/*",
+      "layer": "presentation"
+    },
+    {
+      "glob": "frontend/src/*",
+      "layer": "presentation"
+    },
+    {
+      "glob": "frontend/src/components/*",
+      "layer": "presentation"
+    },
+    {
+      "glob": "frontend/src/contexts/*",
+      "layer": "presentation"
+    },
+    {
+      "glob": "frontend/src/hooks/*",
+      "layer": "presentation"
+    },
+    {
+      "glob": "frontend/src/lib/*",
+      "layer": "presentation"
+    },
+    {
+      "glob": "frontend/src/pages/*",
+      "layer": "presentation"
+    },
+    {
+      "glob": "frontend/src/pages/admin/*",
+      "layer": "presentation"
+    },
+    {
+      "glob": "frontend/src/pages/composite/*",
+      "layer": "presentation"
+    },
+    {
+      "glob": "frontend/src/pages/oidc/*",
+      "layer": "presentation"
+    },
+    {
+      "glob": "packages/composite/src/*",
+      "layer": "application"
+    },
+    {
+      "glob": "packages/composite/src/ui/*",
+      "layer": "presentation"
+    },
+    {
+      "glob": "packages/env-cli/src/*",
+      "layer": "application"
+    },
+    {
+      "glob": "packages/id-cache/src/*",
+      "layer": "infrastructure"
+    },
+    {
+      "glob": "packages/id-service/src/*",
+      "layer": "domain-logic"
+    },
+    {
+      "glob": "packages/id-service/src/core/*",
+      "layer": "domain-logic"
+    },
+    {
+      "glob": "packages/id-service/src/migration/*",
+      "layer": "infrastructure"
+    },
+    {
+      "glob": "packages/id-service/src/plugin/*",
+      "layer": "infrastructure"
+    },
+    {
+      "glob": "packages/service-adapter/src/*",
+      "layer": "infrastructure"
+    },
+    {
+      "glob": "packages/service-adapter/src/peer/*",
+      "layer": "infrastructure"
+    },
+    {
+      "glob": "packages/service-adapter/src/testing/*",
+      "layer": "shared"
+    },
+    {
+      "glob": "packages/service-adapter/tests/*",
+      "layer": "shared"
+    },
+    {
+      "glob": "scripts/*",
+      "layer": "application"
+    },
+    {
+      "glob": "server/scripts/*",
+      "layer": "application"
+    },
+    {
+      "glob": "server/src/*",
+      "layer": "application"
+    },
+    {
+      "glob": "server/src/auth/*",
+      "layer": "domain-logic"
+    },
+    {
+      "glob": "server/src/db/*",
+      "layer": "infrastructure"
+    },
+    {
+      "glob": "server/src/http/*",
+      "layer": "presentation"
+    },
+    {
+      "glob": "server/src/identity/*",
+      "layer": "domain-logic"
+    },
+    {
+      "glob": "server/src/lib/*",
+      "layer": "infrastructure"
+    },
+    {
+      "glob": "server/src/lib/crypto/*",
+      "layer": "infrastructure"
+    },
+    {
+      "glob": "server/src/logging/*",
+      "layer": "infrastructure"
+    },
+    {
+      "glob": "server/src/oidc/*",
+      "layer": "domain-logic"
+    },
+    {
+      "glob": "server/src/project/*",
+      "layer": "domain-logic"
+    },
+    {
+      "glob": "server/src/ws/*",
+      "layer": "presentation"
+    },
+    {
+      "glob": "server/tests/*",
+      "layer": "shared"
+    },
+    {
+      "glob": "server/tests/auth/*",
+      "layer": "shared"
+    },
+    {
+      "glob": "server/tests/db/*",
+      "layer": "shared"
+    },
+    {
+      "glob": "server/tests/http/*",
+      "layer": "shared"
+    },
+    {
+      "glob": "server/tests/identity/*",
+      "layer": "shared"
+    },
+    {
+      "glob": "server/tests/lib/*",
+      "layer": "shared"
+    },
+    {
+      "glob": "server/tests/lib/crypto/*",
+      "layer": "shared"
+    },
+    {
+      "glob": "server/tests/logging/*",
+      "layer": "shared"
+    },
+    {
+      "glob": "server/tests/oidc/*",
+      "layer": "shared"
+    },
+    {
+      "glob": "server/tests/project/*",
+      "layer": "shared"
+    },
+    {
+      "glob": "server/tests/ws/*",
+      "layer": "shared"
+    },
+    {
+      "glob": "site/assets/*",
+      "layer": "presentation"
+    }
+  ],
+  "mergeCouplingThreshold": 1
+}

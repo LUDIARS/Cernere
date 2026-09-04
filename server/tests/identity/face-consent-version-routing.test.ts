@@ -14,6 +14,7 @@ const fake = createFakeDb();
 vi.mock("../../src/db/connection.js", () => ({ db: fake.db }));
 
 const guard = await import("../../src/identity/face-consent-guard.js");
+const store = await import("../../src/identity/face-template-store.js");
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const FACILITY_ID = "22222222-2222-4222-8222-222222222222";
@@ -54,12 +55,11 @@ describe("face consent policy version routing", () => {
 });
 
 describe("face consent policy payload", () => {
-  it("policy API は全版を版名・文面付きで返し、写真版は保存・表示範囲・削除を明記する", async () => {
-    const { faceConsentPolicy } = await import("../../src/identity/face-template-store.js");
-    expect(faceConsentPolicy.version).toBe("face-photo-v1");
-    expect(faceConsentPolicy.policies.map((policy) => policy.version))
+  it("policy API は全版を版名・文面付きで返し、写真版は保存・表示範囲・削除を明記する", () => {
+    expect(store.faceConsentPolicy.version).toBe("face-photo-v1");
+    expect(store.faceConsentPolicy.policies.map((policy) => policy.version))
       .toEqual(["face-template-v1", "face-photo-v1"]);
-    const photo = faceConsentPolicy.policies.find((policy) => policy.version === "face-photo-v1");
+    const photo = store.faceConsentPolicy.policies.find((policy) => policy.version === "face-photo-v1");
     expect(photo?.text).toContain("暗号化して保存");
     expect(photo?.text).toContain("kiosk");
     expect(photo?.text).toContain("同時に削除");
@@ -67,20 +67,18 @@ describe("face consent policy payload", () => {
   });
 
   it("未知の版を指定した同意は拒否する", async () => {
-    const { createFaceConsent } = await import("../../src/identity/face-template-store.js");
-    await expect(createFaceConsent(USER_ID, "unknown-policy", FACILITY_ID))
+    await expect(store.createFaceConsent(USER_ID, "unknown-policy", FACILITY_ID))
       .rejects.toMatchObject({ statusCode: 409, message: "current_policy_consent_required" });
   });
 
   it("写真版から template-only 版へ切り替えると旧同意の写真を削除する", async () => {
-    const { createFaceConsent } = await import("../../src/identity/face-template-store.js");
     const schema = await import("../../src/db/schema.js");
     fake.deletes.length = 0;
     fake.queueSelect([{ userId: USER_ID }]);
     fake.queueSelect([{ userId: USER_ID }]);
     fake.queueSelect([{ id: "photo-consent", policyVersion: "face-photo-v1" }]);
 
-    await createFaceConsent(USER_ID, "face-template-v1", FACILITY_ID);
+    await store.createFaceConsent(USER_ID, "face-template-v1", FACILITY_ID);
 
     expect(fake.deletes.map((entry) => entry.table)).toContain(schema.facePhotos);
   });

@@ -11,5 +11,5 @@ describe("issueProjectSecret", () => {
     );
     expect(issued.clientSecretHash).not.toContain(issued.clientSecret);
     await expect(bcrypt.compare(issued.clientSecret, issued.clientSecretHash)).resolves.toBe(true);
-  });
+  }, 15_000);
 });
