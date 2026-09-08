@@ -13,6 +13,7 @@ import type { ProjectDefinition } from "./schema.js";
 import { COLUMN_TYPE_MAP } from "./schema.js";
 import { assertSafeIdentifier } from "./identifier.js";
 import { resolveStorageTable } from "./storage-resolver.js";
+import { serializeColumnDefault } from "./column-default.js";
 
 // 表名は project key ではなく managed_projects.storage_slug から解決する (migration 043)。
 // key は DDL に補間しない。slug の検証は storage-slug.ts が補間手前で行う。
@@ -25,16 +26,22 @@ export async function migrateProjectSchema(
   projectKey: string,
   definition: ProjectDefinition,
 ): Promise<{ created: boolean; columnsAdded: string[] }> {
-  const tableName = await resolveStorageTable(projectKey);
-  const sql = postgres(config.databaseUrl, { max: 1 });
   const columns = definition.user_data?.columns ?? {};
+  const defaults = new Map<string, string>();
 
   // 列名は DDL に `"${colName}"` で補間される。 `"` 等を含む不正な識別子は
   // クォートを抜けて DDL injection になりうるため、 補間前にまとめて検証する。
   // 論理削除カラムも将来再有効化されうるので含めて検証する。
   for (const colName of Object.keys(columns)) {
     assertSafeIdentifier(colName, "column");
+    const column = columns[colName];
+    if (column.default_value !== undefined) {
+      defaults.set(colName, serializeColumnDefault(column.default_value, column.type));
+    }
   }
+  // Validate every default before resolving storage or executing any DDL.
+  const tableName = await resolveStorageTable(projectKey);
+  const sql = postgres(config.databaseUrl, { max: 1 });
 
   try {
     // CREATE TABLE IF NOT EXISTS — 冪等
@@ -45,7 +52,7 @@ export async function migrateProjectSchema(
       if (colDef._deleted) continue; // 論理削除カラムは CREATE 時に含めない
       const pgType = COLUMN_TYPE_MAP[colDef.type] ?? "TEXT";
       const nullable = colDef.nullable !== false ? "" : " NOT NULL";
-      const defaultVal = colDef.default_value ? ` DEFAULT ${escapeDefault(colDef.default_value, colDef.type)}` : "";
+      const defaultVal = defaults.has(colName) ? ` DEFAULT ${defaults.get(colName)}` : "";
       createSql += `  "${colName}" ${pgType}${nullable}${defaultVal},\n`;
     }
 
@@ -71,7 +78,7 @@ export async function migrateProjectSchema(
       if (colDef._deleted) continue; // 論理削除カラムは追加しない
 
       const pgType = COLUMN_TYPE_MAP[colDef.type] ?? "TEXT";
-      const defaultVal = colDef.default_value ? ` DEFAULT ${escapeDefault(colDef.default_value, colDef.type)}` : "";
+      const defaultVal = defaults.has(colName) ? ` DEFAULT ${defaults.get(colName)}` : "";
 
       // IF NOT EXISTS で冪等化
       await sql.unsafe(`ALTER TABLE "${tableName}" ADD COLUMN IF NOT EXISTS "${colName}" ${pgType}${defaultVal}`);
@@ -104,12 +111,5 @@ export async function getExistingColumns(projectKey: string): Promise<string[]> 
   } finally {
     await sql.end();
   }
-}
-
-function escapeDefault(value: string, type: string): string {
-  if (type === "boolean") return value;
-  if (type === "integer" || type === "bigint") return value;
-  if (type === "json") return `'${value}'::jsonb`;
-  return `'${value.replace(/'/g, "''")}'`;
 }
 

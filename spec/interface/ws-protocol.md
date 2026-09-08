@@ -105,7 +105,7 @@ sequenceDiagram
 
 | `module.action` | 説明 |
 |---|---|
-| `profile.get` / `profile.update` | ユーザープロファイル (個人データ単一情報源) |
+| `profile.get` / `profile.update` | 管理者所有の `profile_access` で対象 user・項目・操作を制限 ([契約](auth-schema-profile-boundaries.md)) |
 | `auth.login` / `auth.register` / `auth.mfa-verify` | composite 認証の relay (ブラウザ → サービス → Cernere) |
 | `managed_project.get_user_data` / `set_user_data` / `delete_user_data` | 動的テーブルの user データ操作 |
 | `managed_project.update_schema` | プロジェクト自身のスキーマ更新 |

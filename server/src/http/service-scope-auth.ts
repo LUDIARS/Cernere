@@ -16,7 +16,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
-import { extractBearerToken, verifyToken } from "../auth/jwt.js";
+import { extractBearerToken, verifyToken, verifyToolToken, verifyProjectToken, type ToolJwtClaims } from "../auth/jwt.js";
 import { AppError } from "../error.js";
 
 export interface ServiceScopePrincipal {
@@ -31,19 +31,16 @@ export async function requireServiceScope(authHeader: string, scope: string): Pr
   const token = extractBearerToken(authHeader);
   if (!token) throw AppError.unauthorized("Missing bearer token");
 
-  const claims = verifyToken(token) as unknown as {
-    sub?: string;
-    owner?: string;
-    scopes?: unknown;
-    tokenType?: unknown;
-  };
-  if (typeof claims.sub !== "string") throw AppError.unauthorized("Invalid bearer token");
-  if (claims.tokenType === "project") {
-    throw AppError.forbidden(`Scope ${scope} is required`);
-  }
+  let toolClaims: ToolJwtClaims | null = null;
+  try { toolClaims = verifyToolToken(token); }
+  catch { /* This endpoint also permits an explicitly typed admin user token. */ }
+  // A project token is a valid credential elsewhere, but it carries no tool owner
+  // and no scope list, so it can never satisfy this endpoint: 403, not 401.
+  if (!toolClaims && isProjectToken(token)) throw AppError.forbidden(`Scope ${scope} is required`);
+  const claims = toolClaims ?? verifyToken(token);
   if (!UUID_PATTERN.test(claims.sub)) throw AppError.unauthorized("Invalid bearer token subject");
 
-  if (typeof claims.owner === "string" && claims.tokenType !== "project") {
+  if (claims.tokenType === "tool") {
     const rows = await db.select({
       ownerUserId: schema.toolClients.ownerUserId,
       scopes: schema.toolClients.scopes,
@@ -66,4 +63,9 @@ export async function requireServiceScope(authHeader: string, scope: string): Pr
   }
 
   throw AppError.forbidden(`Scope ${scope} is required`);
+}
+
+function isProjectToken(token: string): boolean {
+  try { verifyProjectToken(token); return true; }
+  catch { return false; }
 }

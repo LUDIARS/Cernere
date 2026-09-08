@@ -25,50 +25,71 @@ function selectChain(): Record<string, unknown> {
   const chain: Record<string, unknown> = {
     from: () => chain,
     innerJoin: () => chain,
+    leftJoin: () => chain,
     where: () => chain,
     orderBy: () => chain,
-    limit: async () => rows,
+    limit: () => chain,
+    // `.for("share" | "update")` は行ロック指定。 フェイクでは無視して chain を返す。
+    for: () => chain,
     then: (resolve: (v: unknown) => unknown) => Promise.resolve(rows).then(resolve),
   };
   return chain;
 }
 
-vi.mock("../../src/db/connection.js", () => ({
-  db: {
-    select: () => selectChain(),
-    update: (table: unknown) => ({
-      set: (values: Record<string, unknown>) => ({
-        where: async () => {
-          updateCalls.push({ table, values });
-        },
-      }),
-    }),
-    insert: (table: unknown) => ({
-      values: async (values: unknown) => {
-        insertCalls.push({ table, values });
+const fakeDb: Record<string, unknown> = {
+  select: () => selectChain(),
+  update: (table: unknown) => ({
+    set: (values: Record<string, unknown>) => ({
+      where: async () => {
+        updateCalls.push({ table, values });
       },
     }),
-  },
-}));
+  }),
+  insert: (table: unknown) => ({
+    values: (values: unknown) => {
+      insertCalls.push({ table, values });
+      const inserted = {
+        onConflictDoUpdate: async () => undefined,
+        then: (resolve: (v: unknown) => unknown) => Promise.resolve(undefined).then(resolve),
+      };
+      return inserted;
+    },
+  }),
+};
+// updateServiceProfile は 1 トランザクションで通す。 フェイクでは同じ db を tx として渡す。
+fakeDb.transaction = async (callback: (tx: unknown) => Promise<unknown>) => callback(fakeDb);
+
+vi.mock("../../src/db/connection.js", () => ({ db: fakeDb }));
 
 const { dispatchProjectCommand } = await import("../../src/ws/project-dispatch.js");
 const schema = await import("../../src/db/schema.js");
 
 const USER_ID = "6f1d0b9b-179a-4fc7-a643-d3228fe350b2";
 
+/** 管理者が付与する profile_access grant。 対象テストが書き込む項目を許可する。 */
+const GRANT_ROW = {
+  definition: {
+    profile_access: {
+      users: "all",
+      read: ["displayName", "avatarUrl", "bio"],
+      write: ["displayName", "avatarUrl", "bio"],
+    },
+  },
+};
+
 /**
  * `profile.update` が投げる select の順序ぶんだけ結果を積む。
- *   1. user_data_optouts (オプトアウト判定)
- *   2. user_profiles (既存判定)
- *   3. users        (戻り値組み立て)
- *   4. user_profiles (戻り値組み立て)
+ *   1. managed_projects   (profile_access grant の解決)
+ *   2. user_data_optouts  (personality 項目を含む更新のときだけ)
+ *   3. users              (行ロック + 存在確認)
+ *
+ * @param personality bio 等の personality 項目を書くかどうか。
  */
-function queueSelects(): void {
+function queueSelects(personality = false): void {
   selectResults = [
-    [],
-    [{ userId: USER_ID }],
-    [{ id: USER_ID, login: "taro", displayName: "山田 太郎", email: "taro@example.co.jp", role: "general" }],
-    [],
+    [GRANT_ROW],
+    ...(personality ? [[]] : []),
+    [{ id: USER_ID }],
   ];
 }
 
@@ -109,6 +130,8 @@ describe("profile.update — display_name_source", () => {
   });
 
   it("does not touch users at all when neither display name nor avatar is given", async () => {
+    // bio は personality 項目なので、 opt-out 判定の select が 1 つ増える。
+    queueSelects(true);
     await dispatchProjectCommand("corp-hub", "profile", "update", {
       userId: USER_ID,
       bio: "hello",

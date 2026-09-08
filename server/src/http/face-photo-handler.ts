@@ -79,10 +79,13 @@ function currentUser(authHeader: string): string {
     tokenType?: unknown;
   };
   // user/tool/project が同じ HS256 鍵を使うため、署名だけで本人 token と判断しない。
+  // token type の実体判定は verifyToken が行う。ここは多層防御として、本人経路に
+  // 混ざってはいけない service 系の claim が残っていないかだけを見る。
   if (typeof claims.sub !== "string"
     || typeof claims.role !== "string"
     || claims.owner !== undefined
-    || claims.tokenType !== undefined
+    || claims.tokenType === "project"
+    || claims.tokenType === "tool"
     || !uuidSchema.safeParse(claims.sub).success) {
     throw AppError.unauthorized("Invalid user access token");
   }

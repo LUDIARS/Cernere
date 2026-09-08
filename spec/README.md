@@ -26,6 +26,7 @@ LUDIARS 認証プラットフォーム Cernere の仕様書。AIFormat
 | [peer-relay.md](interface/peer-relay.md) | サービス間直接 WS 通信 (managed_relay + verify_token) |
 | [oauth-token-storage.md](interface/oauth-token-storage.md) | OAuth トークンを Cernere で集中管理 (個人データ単一情報源) |
 | [security_design.md](interface/security_design.md) | セキュリティ設計思想・脅威モデル・常時接続検証 |
+| [auth-schema-profile-boundaries.md](interface/auth-schema-profile-boundaries.md) | JWT 用途・DDL 既定値・サービス別プロフィール grant と移行条件 |
 
 ### `setup/` — セットアップ
 | ドキュメント | 範囲 |
@@ -47,6 +48,7 @@ LUDIARS 認証プラットフォーム Cernere の仕様書。AIFormat
 | [oidc-key-persistence.md](plan/oidc-key-persistence.md) | OIDC 署名鍵の DB 永続化・`CERNERE_OIDC_MODE=off` 対応の作業状況 |
 | [commit-plan.md](plan/commit-plan.md) | Issue #49/#63/#64 のコミット計画 |
 | [migration-to-typescript.md](plan/migration-to-typescript.md) | Rust → Node.js 移行履歴 |
+| [enterprise-sso-cloudflare-cernere-20260908.md](plan/enterprise-sso-cloudflare-cernere-20260908.md) | **提案**: Cloudflare Access と Cr の企業ログイン統合 |
 
 ### `data/` — データスキーマ
 | ドキュメント | 範囲 |

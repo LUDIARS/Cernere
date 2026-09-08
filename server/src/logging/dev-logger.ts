@@ -21,7 +21,7 @@ function shouldLog(): boolean {
 
 const ENABLED = shouldLog();
 const SENSITIVE_QUERY_RELATION =
-  /\bvolputas_survey_(?:responses|answers)\b/i;
+  /\b(?:volputas_survey_(?:responses|answers)|users|user_profiles|user_data_optouts|managed_projects|project_definition_history)\b/i;
 
 function safeStringify(value: unknown): string {
   if (value === undefined) return "";
@@ -34,7 +34,7 @@ function safeStringify(value: unknown): string {
 }
 
 /**
- * Survey answers are user-owned and can be sensitive. Keep query shape
+ * Survey answers, common profiles and user grants can be sensitive. Keep query shape
  * observable in development without placing identifiers or answer values in
  * either Drizzle's logger or postgres.js's lower-level debug callback.
  */

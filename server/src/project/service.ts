@@ -351,7 +351,7 @@ export function withExistingProjectMeta(
 
 /**
  * partial update で省略された既存フィールドを保持する。
- * data_sharing / identity_claims は管理者所有なので、project auto-sync で消さない。
+ * data_sharing / identity_claims / profile_access は管理者所有なので、project auto-sync で消さない。
  */
 export function preserveExistingDefinitionFields(
   definition: ProjectDefinition,
@@ -375,6 +375,9 @@ export function preserveExistingDefinitionFields(
       : {}),
     ...(definition.identity_claims === undefined && existing.identity_claims !== undefined
       ? { identity_claims: existing.identity_claims }
+      : {}),
+    ...(definition.profile_access === undefined && existing.profile_access !== undefined
+      ? { profile_access: existing.profile_access }
       : {}),
   };
 }
@@ -417,15 +420,21 @@ export async function updateProjectSchema(key: string, payload: unknown, userId?
 
   // payload に top-level field が無ければ旧値を保持 (partial-update セマンティクス).
   // サービスの起動時 auto-sync は user_data のみ送ってくるが、その際に
-  // 既存の endpoint / data_sharing / identity_claims を消してしまわないようにする。
+  // 既存の endpoint と管理者所有の grant を消してしまわないようにする。
   definition = preserveExistingDefinitionFields(definition, oldDef);
 
-  await db.update(dbSchema.managedProjects).set({
+  const updated = await db.update(dbSchema.managedProjects).set({
     name: definition.project.name,
     description: definition.project.description,
     schemaDefinition: definition,
     updatedAt: new Date(),
-  }).where(eq(dbSchema.managedProjects.key, key));
+  }).where(and(
+    eq(dbSchema.managedProjects.key, key),
+    eq(dbSchema.managedProjects.schemaDefinition, rows[0].schemaDefinition),
+  )).returning({ key: dbSchema.managedProjects.key });
+  // An auto-sync that started before an administrator revoked a grant must not restore it.
+  // DDL is additive/idempotent; a caller can retry against the latest definition.
+  if (updated.length === 0) throw AppError.conflict("Project definition changed; reload and retry");
 
   await saveDefinitionHistory(key, definition, userId);
   await cache.invalidateProject(key);

@@ -70,6 +70,10 @@ project client自身は変更できない。
 
 ### カラム型
 
+`default_value` は SQL 式を受け付けず、型付きの値として検証する。
+共通プロフィールの利用許可は管理者所有の `profile_access` で指定する。
+詳細は [既定値・プロフィール認可](../interface/auth-schema-profile-boundaries.md) を参照。
+
 | YAML 型 | PostgreSQL 型 |
 |---------|---------------|
 | `text` | TEXT |

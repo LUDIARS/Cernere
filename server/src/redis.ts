@@ -30,13 +30,15 @@ export interface RedisSession {
 
 export async function putSession(session: RedisSession): Promise<void> {
   const key = `session:${session.id}`;
-  await redis.set(key, JSON.stringify(session), "EX", SESSION_TTL_SECS);
+  await redis.set(key, JSON.stringify({ ...session, authenticationVersion: 2 }), "EX", SESSION_TTL_SECS);
 }
 
 export async function getSession(sessionId: string): Promise<RedisSession | null> {
   const raw = await redis.get(`session:${sessionId}`);
   if (!raw) return null;
-  return JSON.parse(raw) as RedisSession;
+  const session = JSON.parse(raw) as RedisSession & { authenticationVersion?: number };
+  // Legacy sessions may originate from an MFA challenge. Never promote them on reconnect.
+  return session?.authenticationVersion === 2 ? session : null;
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {

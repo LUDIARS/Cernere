@@ -5,6 +5,9 @@
   "templateRules": [],
   "membership": [
     {
+      "pathPattern": "/server/src/project/profile-"
+    },
+    {
       "pathPattern": "/server/src/auth/action-policy"
     },
     {
@@ -30,7 +33,8 @@
   "specRefs": [
     "Step 5: 認可モデルの適用",
     "Step 6: 破壊的操作の防御層の実装",
-    "多層防御"
+    "多層防御",
+    "共通プロフィールのサービス認可"
   ],
   "rationale": "Role hierarchy plus the layered defense against destructive operations is a cross-cutting concern applied by every module."
 }

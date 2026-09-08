@@ -30,7 +30,9 @@
   "specRefs": [
     "ProjectDefinition (project_definition)",
     "OrganizationProject (org_project)",
-    "3. マイクロサービスアーキテクチャ"
+    "3. マイクロサービスアーキテクチャ",
+    "スキーマ既定値は SQL 式ではなく値",
+    "共通プロフィールのサービス認可"
   ],
   "rationale": "The project/ directory centers on defining projects, their data schemas, credentials, and per-org activation — a large distinct concern."
 }

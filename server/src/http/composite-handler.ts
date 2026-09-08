@@ -12,7 +12,8 @@ import bcrypt from "bcryptjs";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
-import { checkRateLimit, redis } from "../redis.js";
+import { checkRateLimit } from "../redis.js";
+import { AppError } from "../error.js";
 import {
   logUserLogin,
   logUserLoginFailed,
@@ -190,30 +191,7 @@ async function compositeRegister(p: Record<string, unknown>, ctx: CompositeCtx):
   );
 }
 
-async function compositeMfaVerify(p: Record<string, unknown>, ctx: CompositeCtx): Promise<RouteResult> {
-  const mfaToken = p.mfaToken as string | undefined;
-  const method = p.method as string | undefined;
-  const code = p.code as string | undefined;
-
-  if (!mfaToken || !method || !code) throw new Error("mfaToken, method, and code are required");
-
-  const raw = await redis.get(`mfa:${mfaToken}`);
-  if (!raw) throw new Error("Unauthorized: Invalid or expired MFA token");
-
-  const mfaData = JSON.parse(raw) as { userId: string; expectedCode?: string };
-
-  const userRows = await db.select().from(schema.users)
-    .where(eq(schema.users.id, mfaData.userId)).limit(1);
-  const user = userRows[0];
-  if (!user) throw new Error("Unauthorized: User not found");
-
-  await redis.del(`mfa:${mfaToken}`);
-
-  logAuthEvent({ event: "user.mfa.verified", userId: user.id, email: user.email ?? undefined, provider: "composite", ip: ctx.ip, userAgent: ctx.userAgent });
-  logUserLogin(user.id, user.email, "composite_mfa", ctx);
-
-  return openAuthSession(
-    { id: user.id, displayName: user.displayName ?? "", email: user.email, role: user.role },
-    ctx,
-  );
+async function compositeMfaVerify(_p: Record<string, unknown>, _ctx: CompositeCtx): Promise<RouteResult> {
+  // There is no configured factor issuer/verifier yet. A Redis ticket alone is not MFA proof.
+  throw AppError.serviceUnavailable("MFA verification is not configured");
 }

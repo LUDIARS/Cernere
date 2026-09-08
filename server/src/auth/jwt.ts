@@ -16,6 +16,7 @@ const SERVICE_TOKEN_MINUTES = 60;
 const REFRESH_TOKEN_DAYS = 30;
 
 export interface JwtClaims {
+  tokenType: "user_access";
   sub: string;   // user ID
   role: string;
   iat: number;
@@ -23,6 +24,7 @@ export interface JwtClaims {
 }
 
 export interface ToolJwtClaims {
+  tokenType: "tool";
   sub: string;   // tool_client.id
   owner: string; // owner_user_id
   scopes: string[];
@@ -42,7 +44,7 @@ export interface ProjectJwtClaims {
 
 export function generateAccessToken(userId: string, role: string): string {
   return jwt.sign(
-    { sub: userId, role },
+    { sub: userId, role, tokenType: "user_access" },
     config.jwtSecret,
     { expiresIn: ACCESS_TOKEN_SECONDS },
   );
@@ -56,7 +58,7 @@ export function generateTokenPair(userId: string, role: string): { accessToken: 
 
 export function generateToolToken(toolClientId: string, ownerUserId: string, scopes: string[]): string {
   return jwt.sign(
-    { sub: toolClientId, owner: ownerUserId, scopes },
+    { sub: toolClientId, owner: ownerUserId, scopes, tokenType: "tool" },
     config.jwtSecret,
     { expiresIn: `${SERVICE_TOKEN_MINUTES}m` },
   );
@@ -103,7 +105,7 @@ export function verifyProjectToken(token: string): ProjectJwtClaims {
 
 export function generateMfaToken(userId: string, role: string): string {
   return jwt.sign(
-    { sub: userId, role },
+    { sub: userId, role, tokenType: "mfa_challenge" },
     config.jwtSecret,
     { expiresIn: "5m" },
   );
@@ -111,13 +113,43 @@ export function generateMfaToken(userId: string, role: string): string {
 
 export function verifyToken(token: string): JwtClaims {
   try {
-    // algorithm を HS256 に固定する。 pin しないと将来 verify 側が別 alg を受理する
-    // 余地を残し、 algorithm-confusion の温床になるため明示する
-    // (verifyProjectToken と同じ扱いに揃える)。
-    return jwt.verify(token, config.jwtSecret, { algorithms: ["HS256"] }) as JwtClaims;
+    const claims = verifyTypedClaims(token, "user_access");
+    if (typeof claims.role !== "string" || !claims.role.trim()
+      || claims.owner !== undefined || claims.scopes !== undefined || claims.projectKey !== undefined) {
+      throw AppError.unauthorized("Invalid user access token");
+    }
+    return claims as unknown as JwtClaims;
   } catch {
     throw AppError.unauthorized("Invalid or expired token");
   }
+}
+
+/** Tool credentials are accepted only by callers that explicitly request tool authorization. */
+export function verifyToolToken(token: string): ToolJwtClaims {
+  try {
+    const claims = verifyTypedClaims(token, "tool");
+    if (typeof claims.owner !== "string" || !claims.owner.trim()
+      || !Array.isArray(claims.scopes) || !claims.scopes.every((scope) => typeof scope === "string")
+      || claims.role !== undefined || claims.projectKey !== undefined) {
+      throw AppError.unauthorized("Invalid tool token");
+    }
+    return claims as unknown as ToolJwtClaims;
+  } catch {
+    throw AppError.unauthorized("Invalid or expired tool token");
+  }
+}
+
+/** Old untyped tokens cannot prove MFA completion and intentionally require reauthentication. */
+function verifyTypedClaims(token: string, tokenType: "user_access" | "tool"): jwt.JwtPayload {
+  const claims = jwt.verify(token, config.jwtSecret, { algorithms: ["HS256"] });
+  if (typeof claims === "string" || claims.tokenType !== tokenType
+    || typeof claims.sub !== "string" || !claims.sub.trim()
+    || typeof claims.iat !== "number" || !Number.isInteger(claims.iat)
+    || typeof claims.exp !== "number" || !Number.isInteger(claims.exp)
+    || claims.exp <= claims.iat) {
+    throw AppError.unauthorized("Invalid token purpose or claims");
+  }
+  return claims;
 }
 
 export function extractBearerToken(authHeader: string | undefined): string | null {

@@ -3,6 +3,8 @@
  */
 
 import { z } from "zod";
+import { serializeColumnDefault } from "./column-default.js";
+import { profileAccessSchema } from "./profile-access.js";
 
 // ── カラム型 ─────────────────────────────────────────────────
 
@@ -28,9 +30,16 @@ export const columnDefinitionSchema = z.object({
   module: z.string().min(1, "module is required"),
   nullable: z.boolean().optional().default(true),
   description: z.string().optional(),
-  default_value: z.string().optional(),
+  default_value: z.string().max(16384).optional(),
   /** 論理削除フラグ: true の場合、DB カラムは残すがスキーマ上は削除扱い */
   _deleted: z.boolean().optional(),
+}).superRefine((column, context) => {
+  if (column.default_value === undefined) return;
+  try { serializeColumnDefault(column.default_value, column.type); }
+  catch (error) {
+    context.addIssue({ code: "custom", path: ["default_value"],
+      message: error instanceof Error ? error.message : "Invalid default value" });
+  }
 });
 export type ColumnDefinition = z.infer<typeof columnDefinitionSchema>;
 
@@ -108,6 +117,8 @@ export const projectDefinitionSchema = z.object({
   data_sharing: z.array(dataShareDefinitionSchema).optional(),
   /** 開示を許可された users 側 identity 列 (管理者所有、未宣言なら開示しない) */
   identity_claims: z.array(identityClaimSchema).optional(),
+  /** Administrator-owned service/user/field grants for common profiles. Missing means deny. */
+  profile_access: profileAccessSchema.optional(),
   /** ユーザーデータのカラム定義 (各カラムの module フィールドでモジュール帰属を管理) */
   user_data: z.object({
     columns: z.record(z.string(), columnDefinitionSchema),
