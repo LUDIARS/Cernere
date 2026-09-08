@@ -18,7 +18,7 @@ export async function resolveWsAuth(
 
   if (token) {
     try {
-      const claims = verifyToken(token);
+      const claims = await verifyToken(token);
       const newSessionId = crypto.randomUUID();
       await putSession({
         id: newSessionId,

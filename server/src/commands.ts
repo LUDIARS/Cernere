@@ -17,9 +17,11 @@ import { db } from "./db/connection.js";
 import * as schema from "./db/schema.js";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { AppError } from "./error.js";
-import { getUserState } from "./redis.js";
+import { getUserState, getSession } from "./redis.js";
 import { redactSensitive } from "./lib/redact.js";
 import { revokeFaceTemplates, revokeFacilityFaceTemplates } from "./identity/face-template-store.js";
+import { deviceSessionCommand } from "./auth/device-command.js";
+import { recoveryCommand } from "./auth/recovery-command.js";
 
 /**
  * Layer 2-3 を要求しないコマンド (主に「現在ログイン中であることを必須としない」もの).
@@ -47,6 +49,8 @@ export async function dispatch(
     // Layer 2 + 3: Redis 上のユーザー状態が "logged_in" であることを要求.
     // userId が空 (ゲスト) の場合は Layer 4 の呼び出し先で都度判定.
     if (userId && !PUBLIC_COMMANDS.has(method)) {
+      const session = await getSession(sessionId);
+      if (session?.userId !== userId) throw AppError.unauthorized("Session revoked. Please re-authenticate.");
       const state = await getUserState(userId);
       if (!state) {
         throw AppError.unauthorized("Session expired. Please re-authenticate.");
@@ -56,7 +60,7 @@ export async function dispatch(
       }
     }
 
-    result = await execute(userId, module, action, payload as Record<string, unknown> | undefined);
+    result = await execute(userId, sessionId, module, action, payload as Record<string, unknown> | undefined);
   } catch (err) {
     status = "error";
     error = (err as Error).message;
@@ -85,11 +89,14 @@ export async function dispatch(
 
 async function execute(
   userId: string,
+  sessionId: string,
   module: string,
   action: string,
   payload?: Record<string, unknown>,
 ): Promise<unknown> {
   switch (module) {
+    case "device_session": return deviceSessionCommand(userId, sessionId, action, payload);
+    case "account_recovery": return recoveryCommand(userId, action, payload);
     case "organization": return organizationCmd(userId, action, payload);
     case "member": return memberCmd(userId, action, payload);
     case "project_definition": return projectDefCmd(userId, action, payload);

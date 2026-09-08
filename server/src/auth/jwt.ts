@@ -6,16 +6,18 @@ import jwt from "jsonwebtoken";
 import { config } from "../config.js";
 import { AppError } from "../error.js";
 import { devLog } from "../logging/dev-logger.js";
+import { readAuthenticationEvidence, type AuthenticationEvidence } from "../lib/authentication-evidence.js";
+import { assertUserSessionCurrent, currentUserSessionState, type UserSessionState, type SessionReader } from "./user-session-state.js";
 
-// user access token はステートレスで即時 revoke できないため、 露出時間を短く保つ。
-// 長期の継続ログインは refresh token (30日) 経由に寄せる。
+// User JWTs have a short lifetime and also check current user/device revocation state.
+// Device refresh retains the original authentication time and absolute expiry.
 export const ACCESS_TOKEN_SECONDS = 15 * 60;
 // service-to-service token (tool / project HS256) は別枠で 60 分。
 // user のセッション UX とは切り離す。
 const SERVICE_TOKEN_MINUTES = 60;
 const REFRESH_TOKEN_DAYS = 30;
 
-export interface JwtClaims {
+export interface JwtClaims extends UserSessionState {
   tokenType: "user_access";
   sub: string;   // user ID
   role: string;
@@ -42,18 +44,28 @@ export interface ProjectJwtClaims {
   exp: number;
 }
 
-export function generateAccessToken(userId: string, role: string): string {
+export async function generateAccessToken(userId: string, role: string, authentication?: AuthenticationEvidence,
+  context: { deviceId?: string; authEpoch?: number; database?: SessionReader } = {}): Promise<string> {
+  const current = await currentUserSessionState(userId, context.database);
+  if (role !== current.role || (context.authEpoch !== undefined && context.authEpoch !== current.authEpoch)) {
+    throw AppError.unauthorized("Authentication changed before session issuance");
+  }
+  const claims = { ...current, deviceId: context.deviceId, authentication: readAuthenticationEvidence(authentication), tokenType: "user_access" };
+  await assertUserSessionCurrent(claims, context.database);
   return jwt.sign(
-    { sub: userId, role, tokenType: "user_access" },
+    claims,
     config.jwtSecret,
     { expiresIn: ACCESS_TOKEN_SECONDS },
   );
 }
 
-export function generateTokenPair(userId: string, role: string): { accessToken: string; refreshToken: string } {
-  const accessToken = generateAccessToken(userId, role);
+export async function generateTokenPair(userId: string, role: string, authentication?: AuthenticationEvidence,
+  context: { authEpoch?: number; deviceId?: string; database?: SessionReader } = {}): Promise<{ accessToken: string; refreshToken: string; authEpoch: number }> {
+  const current = await currentUserSessionState(userId, context.database);
+  const authEpoch = context.authEpoch ?? current.authEpoch;
+  const accessToken = await generateAccessToken(userId, role, authentication, { authEpoch, deviceId: context.deviceId, database: context.database });
   const refreshToken = crypto.randomUUID();
-  return { accessToken, refreshToken };
+  return { accessToken, refreshToken, authEpoch };
 }
 
 export function generateToolToken(toolClientId: string, ownerUserId: string, scopes: string[]): string {
@@ -111,17 +123,29 @@ export function generateMfaToken(userId: string, role: string): string {
   );
 }
 
-export function verifyToken(token: string): JwtClaims {
+export async function verifyToken(token: string): Promise<JwtClaims> {
+  let typed: JwtClaims;
   try {
     const claims = verifyTypedClaims(token, "user_access");
     if (typeof claims.role !== "string" || !claims.role.trim()
       || claims.owner !== undefined || claims.scopes !== undefined || claims.projectKey !== undefined) {
       throw AppError.unauthorized("Invalid user access token");
     }
-    return claims as unknown as JwtClaims;
+    for (const key of ["authEpoch", "mfaRevision"] as const) {
+      if (claims[key] !== undefined && (!Number.isSafeInteger(claims[key]) || Number(claims[key]) < 0)) throw AppError.unauthorized("Invalid session revision");
+    }
+    if (claims.deviceId !== undefined && typeof claims.deviceId !== "string") throw AppError.unauthorized("Invalid device session");
+    typed = claims as unknown as JwtClaims;
   } catch {
+    // 署名・形式の検証はここで完結する (DB へ触れない)。
     throw AppError.unauthorized("Invalid or expired token");
   }
+  // 失効確認は DB 参照を伴う。 AppError (= 失効・改竄と判定できたもの) だけを
+  // 401 に落とし、 接続断などの基盤障害は 503 のまま伝播させる。
+  // ここで全部 401 に潰すと、 一過性の DB 障害が「全ユーザーのトークン失効」 と
+  // 区別できなくなり、 クライアントが資格情報を捨てて恒久ログアウトになる。
+  await assertUserSessionCurrent(typed);
+  return typed;
 }
 
 /** Tool credentials are accepted only by callers that explicitly request tool authorization. */

@@ -8,7 +8,7 @@ import type uWS from "uWebSockets.js";
 import type { WsUserData } from "../app.js";
 import {
   setUserState, updateLastPing, updateUserStateField,
-  putSession, SESSION_TTL_SECS, type UserFullState,
+  putSession, getSession, deleteSession, SESSION_TTL_SECS, type UserFullState,
 } from "../redis.js";
 import { sessionRegistry } from "./session-registry.js";
 import { dispatch } from "../commands.js";
@@ -22,6 +22,24 @@ import { actionProofStore, wsActionBinding } from "../auth/action-proof.js";
 const PING_INTERVAL_MS = 30_000;
 
 const pingTimers = new Map<string, ReturnType<typeof setInterval>>();
+
+async function sessionIsActive(ws: uWS.WebSocket<WsUserData>): Promise<boolean> {
+  const data = ws.getUserData();
+  const session = await getSession(data.sessionId);
+  if (data.closed) return false;
+  if (session?.userId === data.userId) return true;
+  await deleteSession(data.sessionId);
+  if (!data.closed) ws.end(1008, "Session revoked");
+  return false;
+}
+
+function startSessionPing(ws: uWS.WebSocket<WsUserData>): ReturnType<typeof setInterval> {
+  return setInterval(() => {
+    void sessionIsActive(ws).then((active) => {
+      if (active) send(ws, { type: "ping", ts: Math.floor(Date.now() / 1000) });
+    }).catch(() => { /* Failed authorization/state access cannot produce a ping or authenticated response. */ });
+  }, PING_INTERVAL_MS);
+}
 
 /**
  * Safe send — close 後のソケットに触ると uWS は throw するので、
@@ -86,9 +104,7 @@ export async function handleWsOpen(ws: uWS.WebSocket<WsUserData>): Promise<void>
   logUserWsConnect(data.userId, data.sessionId);
   notifyPresenceChange(data.userId, "online").catch(() => {});
 
-  const timer = setInterval(() => {
-    send(ws, { type: "ping", ts: Math.floor(Date.now() / 1000) });
-  }, PING_INTERVAL_MS);
+  const timer = startSessionPing(ws);
   pingTimers.set(data.sessionId, timer);
 }
 
@@ -141,7 +157,7 @@ export async function handleWsMessage(
           };
           await setUserState(userState);
           send(ws, { type: "authenticated", session_id: newSessionId, user_state: userState, access_token: result.accessToken, refresh_token: result.refreshToken });
-          const timer = setInterval(() => { send(ws, { type: "ping", ts: Math.floor(Date.now() / 1000) }); }, PING_INTERVAL_MS);
+          const timer = startSessionPing(ws);
           pingTimers.set(newSessionId, timer);
         } else {
           send(ws, { type: "module_response", module: "auth", action: msg.action, payload: result });
@@ -154,6 +170,7 @@ export async function handleWsMessage(
   }
 
   // ── 認証済み ──
+  if (!await sessionIsActive(ws)) return;
   if (msg.type === "pong") {
     await updateLastPing(data.userId, msg.ts);
     return;

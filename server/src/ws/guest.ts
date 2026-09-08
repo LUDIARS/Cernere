@@ -75,10 +75,10 @@ async function guestRegister(p: Record<string, unknown>): Promise<GuestAuthResul
     createdAt: now, updatedAt: now,
   });
 
-  const { accessToken, refreshToken } = generateTokenPair(userId, role);
+  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(userId, role);
   const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
-    id: crypto.randomUUID(), userId, refreshToken: hashRefreshToken(refreshToken), expiresAt,
+    authEpoch, id: crypto.randomUUID(), userId, refreshToken: hashRefreshToken(refreshToken), expiresAt,
   });
 
   return {
@@ -118,10 +118,10 @@ async function guestLogin(p: Record<string, unknown>, ip?: string): Promise<Gues
   await db.update(schema.users).set({ lastLoginAt: now, updatedAt: now })
     .where(eq(schema.users.id, user.id));
 
-  const { accessToken, refreshToken } = generateTokenPair(user.id, user.role);
+  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(user.id, user.role);
   const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
-    id: crypto.randomUUID(), userId: user.id, refreshToken: hashRefreshToken(refreshToken), expiresAt,
+    authEpoch, id: crypto.randomUUID(), userId: user.id, refreshToken: hashRefreshToken(refreshToken), expiresAt,
   });
 
   return {

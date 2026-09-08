@@ -49,10 +49,10 @@ class CernereWsClient {
 
     this.connectPromise = new Promise((resolve, reject) => {
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const url = `${protocol}//${window.location.host}/auth?token=${encodeURIComponent(token)}`;
-      console.log("[ws] Connecting to:", url);
+      const url = `${protocol}//${window.location.host}/auth`;
+      console.log("[ws] Connecting to /auth");
 
-      this.ws = new WebSocket(url);
+      this.ws = new WebSocket(url, ["bearer", token]);
 
       const timeout = setTimeout(() => {
         console.error("[ws] Connection timeout (10s)");

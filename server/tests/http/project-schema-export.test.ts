@@ -1,4 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+vi.mock("../../src/auth/user-session-state.js", () => ({
+  currentUserSessionState: async (sub: string) => ({ sub, role: sub === "admin-1" ? "admin" : "general", authEpoch: 0, mfaRevision: 0 }),
+  assertUserSessionCurrent: async () => {},
+}));
 import type { ProjectDefinition } from "../../src/project/schema.js";
 
 // db.select(...).from(table)... の戻り値をテストごとに差し替えられる最小の
@@ -89,13 +93,13 @@ describe("GET /api/admin/projects/schema-export handler (db mocked)", () => {
   });
 
   it("403s for a valid user token whose role is not admin (classifyError maps /Forbidden/i -> 403)", async () => {
-    const token = generateAccessToken("user-1", "general");
+    const token = await generateAccessToken("user-1", "general");
     mockUsersRows.mockReturnValue([{ role: "general" }]);
     await expect(exportProjectSchemas(`Bearer ${token}`, "")).rejects.toThrow(/Forbidden/);
   });
 
   it("200s for a valid admin user token and returns only active projects, exact {key,name,description,schemaDefinition} shape", async () => {
-    const token = generateAccessToken("admin-1", "admin");
+    const token = await generateAccessToken("admin-1", "admin");
     mockUsersRows.mockReturnValue([{ role: "admin" }]);
     mockProjectsRows.mockReturnValue([
       activeProject("vantan_user", true),

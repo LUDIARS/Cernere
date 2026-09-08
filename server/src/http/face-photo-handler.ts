@@ -71,10 +71,10 @@ function parseJson(body: Buffer): unknown {
   catch { throw AppError.badRequest("Invalid JSON"); }
 }
 
-function currentUser(authHeader: string): string {
+async function currentUser(authHeader: string): Promise<string> {
   const token = extractBearerToken(authHeader);
   if (!token) throw AppError.unauthorized("Missing bearer token");
-  const claims = verifyToken(token) as ReturnType<typeof verifyToken> & {
+  const claims = await verifyToken(token) as Awaited<ReturnType<typeof verifyToken>> & {
     owner?: unknown;
     tokenType?: unknown;
   };
@@ -118,7 +118,7 @@ function managementActor(
 }
 
 async function handleSelfDelete(authHeader: string): Promise<FacePhotoRouteResult> {
-  const userId = currentUser(authHeader);
+  const userId = await currentUser(authHeader);
   const removed = await deleteFacePhoto(userId, "user_deleted_photo");
   await recordFaceAudit({
     action: "identity.face_photo.delete",
@@ -130,7 +130,7 @@ async function handleSelfDelete(authHeader: string): Promise<FacePhotoRouteResul
 }
 
 async function handleUpload(req: FacePhotoRequest): Promise<FacePhotoRouteResult> {
-  const userId = currentUser(req.authHeader);
+  const userId = await currentUser(req.authHeader);
   const facilityId = requireFacilityId(req.query);
   const file = requireSingleFile(parseMultipart(req.body, req.contentType), "image");
   try {
@@ -162,7 +162,7 @@ export async function handleFacePhotoRoute(req: FacePhotoRequest): Promise<FaceP
   if (req.method === "POST" && req.path === "photo") return handleUpload(req);
 
   if (req.method === "GET" && req.path === "photo/me") {
-    const userId = currentUser(req.authHeader);
+    const userId = await currentUser(req.authHeader);
     return handleRead(userId, { actorUserId: userId });
   }
 

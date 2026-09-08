@@ -47,7 +47,7 @@ export async function requireExportAuth(authHeader: string): Promise<ExportPrinc
   }
 
   // (1) user: accessToken を検証し、 DB の role が admin かを確認
-  const payload = verifyToken(token);
+  const payload = await verifyToken(token);
   if (typeof payload.sub !== "string") throw AppError.unauthorized("Unauthorized: invalid bearer token");
   const rows = await db.select({ role: schema.users.role })
     .from(schema.users).where(eq(schema.users.id, payload.sub)).limit(1);

@@ -1,3 +1,5 @@
+import { getAccessToken } from "./browser-token-store";
+import { refreshBrowserAccessToken } from "./browser-refresh";
 import { startAuthentication } from "@simplewebauthn/browser";
 import type {
   AuthenticationResponseJSON,
@@ -7,6 +9,10 @@ import type {
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 export type ProtectedAction =
+  | "device_session.revoke"
+  | "device_session.revoke_all"
+  | "account_recovery.issue"
+  | "account_recovery.revoke"
   | "mfa.manage"
   | "passkey.register"
   | "passkey.delete"
@@ -60,6 +66,10 @@ export function resolveBrowserActionTarget(
   const name = `${module}.${action}` as ProtectedAction;
   const p = asObject(payload);
   switch (name) {
+    case "device_session.revoke": return { action: name, resource: requiredString(p, "deviceId") };
+    case "device_session.revoke_all": return { action: name, resource: requireCurrentUser(currentUserId) };
+    case "account_recovery.issue": return { action: name, resource: requiredString(p, "userId") };
+    case "account_recovery.revoke": return { action: name, resource: requiredString(p, "grantId") };
     case "organization.delete":
       return { action: name, resource: requiredString(p, "organizationId") };
     case "member.remove":
@@ -85,7 +95,8 @@ export function resolveBrowserActionTarget(
 }
 
 async function actionRequest<T>(phase: "begin" | "finish", body: unknown): Promise<T> {
-  let token = localStorage.getItem("accessToken");
+  let token = getAccessToken();
+  if (!token && await refreshBrowserAccessToken()) token = getAccessToken();
   if (!token) throw new Error("ログインセッションがありません。再度ログインしてください。");
   const makeRequest = (accessToken: string) => fetch(`${API_BASE}/api/auth/action/${phase}`, {
     method: "POST",
@@ -97,27 +108,12 @@ async function actionRequest<T>(phase: "begin" | "finish", body: unknown): Promi
   });
   let response = await makeRequest(token);
   if (response.status === 401) {
-    token = await refreshAccessToken();
+    token = await refreshBrowserAccessToken() ? getAccessToken() : null;
     if (token) response = await makeRequest(token);
   }
   const data = await response.json().catch(() => ({})) as T & { error?: string };
   if (!response.ok) throw new Error(data.error ?? "Action authentication failed");
   return data;
-}
-
-async function refreshAccessToken(): Promise<string | null> {
-  const refreshToken = localStorage.getItem("refreshToken");
-  if (!refreshToken) return null;
-  const response = await fetch(`${API_BASE}/api/auth/refresh`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refreshToken }),
-  });
-  if (!response.ok) return null;
-  const tokens = await response.json() as { accessToken: string; refreshToken: string };
-  localStorage.setItem("accessToken", tokens.accessToken);
-  localStorage.setItem("refreshToken", tokens.refreshToken);
-  return tokens.accessToken;
 }
 
 function asObject(value: unknown): Record<string, unknown> {

@@ -7,13 +7,14 @@
 
 import bcrypt from "bcryptjs";
 import { beginMfaChallenge } from "../auth/mfa-challenge.js";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import {
   generateTokenPair, generateToolToken, generateProjectToken, verifyToken, verifyProjectToken, extractBearerToken, REFRESH_TOKEN_DAYS,
 } from "../auth/jwt.js";
 import { hashRefreshToken } from "../auth/token-hash.js";
+import { readAuthenticationEvidence } from "../lib/authentication-evidence.js";
 import { isPasetoEnabled, signProjectToken } from "../auth/paseto.js";
 import { checkRateLimit, redis } from "../redis.js";
 import {
@@ -105,10 +106,10 @@ async function register(p: Record<string, unknown>, ctx: RequestCtx): Promise<Ro
     createdAt: now, updatedAt: now,
   });
 
-  const { accessToken, refreshToken } = generateTokenPair(userId, role);
+  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(userId, role);
   const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
-    id: crypto.randomUUID(), userId, refreshToken: hashRefreshToken(refreshToken), expiresAt,
+    authEpoch, id: crypto.randomUUID(), userId, refreshToken: hashRefreshToken(refreshToken), expiresAt,
   });
 
   logUserRegister(userId, email, "email", { ip: ctx.ip });
@@ -175,10 +176,10 @@ async function login(p: Record<string, unknown>, ctx: RequestCtx): Promise<Route
   await db.update(schema.users).set({ lastLoginAt: now, updatedAt: now })
     .where(eq(schema.users.id, user.id));
 
-  const { accessToken, refreshToken } = generateTokenPair(user.id, user.role);
+  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(user.id, user.role);
   const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
-    id: crypto.randomUUID(), userId: user.id, refreshToken: hashRefreshToken(refreshToken), expiresAt,
+    authEpoch, id: crypto.randomUUID(), userId: user.id, refreshToken: hashRefreshToken(refreshToken), expiresAt,
   });
 
   logUserLogin(user.id, user.email, "email", ctx);
@@ -216,8 +217,10 @@ async function refresh(p: Record<string, unknown>): Promise<RouteResult> {
   const userRows = await db.select().from(schema.users)
     .where(eq(schema.users.id, session.userId)).limit(1);
   if (!userRows[0]) throw new Error("Unauthorized: User not found");
+  if (session.authEpoch !== userRows[0].authEpoch) throw AppError.unauthorized("Refresh session was revoked");
+  const authentication = readAuthenticationEvidence(session.authentication);
 
-  const { accessToken, refreshToken } = generateTokenPair(userRows[0].id, userRows[0].role);
+  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(userRows[0].id, userRows[0].role, authentication, { authEpoch: session.authEpoch, deviceId: session.deviceId ?? undefined });
   // 旧 session は削除せず rotated_at を刻んで残す (再提示 = reuse を検出するため)。
   // expires_at を過ぎれば掃除対象。 新 session は別行として sliding expiry で発行。
   const now = new Date();
@@ -225,8 +228,8 @@ async function refresh(p: Record<string, unknown>): Promise<RouteResult> {
   await db.update(schema.refreshSessions)
     .set({ rotatedAt: now }).where(eq(schema.refreshSessions.id, session.id));
   await db.insert(schema.refreshSessions).values({
-    id: crypto.randomUUID(), userId: session.userId,
-    refreshToken: hashRefreshToken(refreshToken), expiresAt: newExpiresAt,
+    authEpoch, id: crypto.randomUUID(), userId: session.userId,
+    refreshToken: hashRefreshToken(refreshToken), expiresAt: newExpiresAt, authentication, deviceId: session.deviceId,
   });
 
   return { status: "200 OK", data: { accessToken, refreshToken } };
@@ -264,7 +267,7 @@ async function verify(p: Record<string, unknown>, ctx: RequestCtx): Promise<Rout
   } catch { /* fall through to user token */ }
   // ユーザートークンとして検証
   try {
-    const claims = verifyToken(token);
+    const claims = await verifyToken(token);
     const rows = await db.select().from(schema.users)
       .where(eq(schema.users.id, claims.sub)).limit(1);
     if (!rows[0]) return { status: "200 OK", data: { valid: false } };
@@ -296,6 +299,7 @@ async function exchange(p: Record<string, unknown>): Promise<RouteResult> {
   devLog("auth.exchange.lookup", { found: raw !== null });
   if (!raw) throw new Error("Unauthorized: Invalid or expired auth code");
   const parsed = JSON.parse(raw);
+  await verifyToken(parsed.accessToken);
   devLog("auth.exchange.done", {
     userId: parsed.user?.id ?? "(none)",
     hasAccessToken: !!parsed.accessToken,
@@ -320,13 +324,14 @@ async function compositeSessionCode(
   const token = extractBearerToken(authHeader);
   if (!token) return { status: "401 Unauthorized", data: { error: "no_session" } };
 
-  let userId: string;
+  let source: Awaited<ReturnType<typeof verifyToken>>;
   try {
-    userId = verifyToken(token).sub;
+    source = await verifyToken(token);
   } catch {
     return { status: "401 Unauthorized", data: { error: "invalid_session" } };
   }
 
+  const userId = source.sub;
   // 発行のたびに refresh_sessions 行が増えるため、 有効セッション保持者による
   // スパム発行を rate limit で抑止する (login/register と同じ流儀)。
   await checkRateLimit(`session-code:${userId}`, 10, 60);
@@ -337,7 +342,7 @@ async function compositeSessionCode(
     return { status: "403 Forbidden", data: { error: "target_not_allowed" } };
   }
 
-  const authCode = await issueAuthCodeForUserId(userId);
+  const authCode = await issueAuthCodeForUserId(userId, source);
   if (!authCode) return { status: "401 Unauthorized", data: { error: "user_not_found" } };
 
   devLog("auth.compositeSessionCode.issued", { userId });
@@ -347,7 +352,7 @@ async function compositeSessionCode(
 async function me(authHeader: string): Promise<RouteResult> {
   const token = extractBearerToken(authHeader);
   if (!token) throw new Error("Unauthorized: No token provided");
-  const claims = verifyToken(token);
+  const claims = await verifyToken(token);
   const rows = await db.select().from(schema.users)
     .where(eq(schema.users.id, claims.sub)).limit(1);
   if (!rows[0]) throw new Error("Unauthorized: User not found");
@@ -355,7 +360,7 @@ async function me(authHeader: string): Promise<RouteResult> {
   // passkey も独立したログイン手段なので、 連携解除 UI が「最後の1本」を
   // 正しく判定できるよう有無を返す (server 側 unlink の判定と同じ集合)。
   const passkeyRows = await db.select({ count: sql<number>`count(*)` }).from(schema.passkeys)
-    .where(eq(schema.passkeys.userId, u.id));
+    .where(and(eq(schema.passkeys.userId, u.id), isNull(schema.passkeys.revokedAt)));
   return {
     status: "200 OK",
     data: {
@@ -381,7 +386,7 @@ async function linkProvider(
     throw AppError.badRequest("Unsupported OAuth provider");
   }
 
-  const claims = verifyToken(token);
+  const claims = await verifyToken(token);
   const users = await db.select({ id: schema.users.id }).from(schema.users)
     .where(eq(schema.users.id, claims.sub)).limit(1);
   if (!users[0]) throw new Error("Unauthorized: User not found");
@@ -409,7 +414,7 @@ async function unlink(p: Record<string, unknown>, authHeader: string, ctx: Reque
   if (provider !== "github" && provider !== "google" && provider !== "discord") {
     throw new AppError(400, "Unsupported OAuth provider");
   }
-  const claims = verifyToken(token);
+  const claims = await verifyToken(token);
   const rows = await db.select().from(schema.users).where(eq(schema.users.id, claims.sub)).limit(1);
   const user = rows[0];
   if (!user) throw new Error("Unauthorized: User not found");
@@ -463,7 +468,7 @@ async function requireCredentialChangeProofIfAvailable(
   provider: OAuthLinkProvider,
 ): Promise<boolean> {
   const passkeys = await db.select({ id: schema.passkeys.id }).from(schema.passkeys)
-    .where(eq(schema.passkeys.userId, userId)).limit(1);
+    .where(and(eq(schema.passkeys.userId, userId), isNull(schema.passkeys.revokedAt))).limit(1);
   if (passkeys.length === 0) return false;
   await actionProofStore.consume(proof, {
     userId,
@@ -500,7 +505,7 @@ async function projectUserToken(
 ): Promise<RouteResult> {
   const token = extractBearerToken(authHeader);
   if (!token) throw new Error("Unauthorized: No token provided");
-  const claims = verifyToken(token);
+  const claims = await verifyToken(token);
 
   const projectKey = (p.project_key as string | undefined) ?? (p.project_id as string | undefined);
   if (!projectKey || typeof projectKey !== "string") {

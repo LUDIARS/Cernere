@@ -1,5 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
 import { auth as authApi, getStoredUser, getAccessToken, setTokens, setStoredUser } from "../lib/api";
+import { usesDeviceSession } from "../lib/browser-token-store";
+import { refreshBrowserAccessToken } from "../lib/browser-refresh";
 import { wsClient } from "../lib/ws-client";
 
 interface User {
@@ -43,10 +45,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return !!(stored || (params.get("accessToken") && params.get("refreshToken")));
   });
 
+  // A login/logout in another tab must not retain this tab's previous account or socket.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "user" || event.key === null) {
+        const stored = getStoredUser();
+        if (stored?.id !== user?.id) { wsClient.disconnect(); window.location.reload(); }
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [user?.id]);
+
   // WS 接続
   const connectWs = useCallback(async () => {
-    const token = getAccessToken();
-    if (!token || wsClient.connected) return;
+    if (wsClient.connected) return;
+    // device session の access token はメモリ上のみに持つため、 リロード直後は必ず空。
+    // ここで refresh しないと WS が永久に張られず、 端末管理 UI が操作不能になる。
+    let token = getAccessToken();
+    if (!token && usesDeviceSession() && await refreshBrowserAccessToken()) token = getAccessToken();
+    if (!token) return;
 
     try {
       await wsClient.connect(token);
@@ -134,9 +152,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    await authApi.logout();
     wsClient.disconnect();
     setWsConnected(false);
-    await authApi.logout();
     setUser(null);
     setMfaChallenge(null);
   }, []);

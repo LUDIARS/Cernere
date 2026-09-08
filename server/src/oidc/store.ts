@@ -9,6 +9,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import type { UserSessionState } from "../auth/user-session-state.js";
 import { redis } from "../redis.js";
 import { ACCESS_TOKEN_TTL_SEC, AUTH_CODE_TTL_SEC, AUTH_REQUEST_TTL_SEC } from "./scopes.js";
 
@@ -23,16 +24,18 @@ export interface AuthRequestRecord {
 }
 
 export interface AuthCodeRecord {
+  authorization?: UserSessionState;
   clientId: string;
   redirectUri: string;
   scope: string[];
   nonce?: string;
   codeChallenge?: string;
   userId: string;
-  authTime: number; // unix sec
+  authTime?: number; // Actual verification time; omitted when unavailable.
 }
 
 export interface AccessTokenRecord {
+  authorization?: UserSessionState;
   userId: string;
   clientId: string;
   scope: string[];

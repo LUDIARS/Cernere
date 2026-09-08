@@ -14,28 +14,9 @@ import { authorizeAction } from "./action-auth";
 
 // ── Token Management ──────────────────────────────
 
-export function getAccessToken(): string | null {
-  return localStorage.getItem("accessToken");
-}
-
-function getRefreshToken(): string | null {
-  return localStorage.getItem("refreshToken");
-}
-
-export function setTokens(access: string, refresh: string) {
-  localStorage.setItem("accessToken", access);
-  localStorage.setItem("refreshToken", refresh);
-  // 「このブラウザは一度アクセス済み」の永続印。 ログアウト (clearTokens) では
-  // 消さないので、 再訪時にログイン画面を既定表示する判定に使う。
-  localStorage.setItem("cernere_returning", "1");
-}
-
-export function clearTokens() {
-  localStorage.removeItem("accessToken");
-  localStorage.removeItem("refreshToken");
-  localStorage.removeItem("user");
-  // cernere_returning は残す (アクセス形跡は保持し、 次回もログインを優先表示)。
-}
+import { getAccessToken, getRefreshToken, setTokens, clearTokens, usesDeviceSession } from "./browser-token-store";
+import { refreshBrowserAccessToken as refreshAccessToken, logoutDeviceSession } from "./browser-refresh";
+export { getAccessToken, setTokens, clearTokens };
 
 /**
  * インフラ (Cloudflare Tunnel 等) が全訪問者に付ける cookie。
@@ -111,6 +92,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     ...((options.headers as Record<string, string>) || {}),
   };
 
+  if (!getAccessToken() && usesDeviceSession()) await refreshAccessToken();
   const token = getAccessToken();
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
@@ -119,7 +101,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   let res = await fetch(url, { ...options, headers });
 
   // Auto-refresh on 401
-  if (res.status === 401 && getRefreshToken()) {
+  if (res.status === 401 && (getRefreshToken() || usesDeviceSession())) {
     const refreshed = await refreshAccessToken();
     if (refreshed) {
       headers["Authorization"] = `Bearer ${getAccessToken()}`;
@@ -132,28 +114,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     throw new Error((body as Record<string, string>).error || `HTTP ${res.status}`);
   }
   return res.json();
-}
-
-async function refreshAccessToken(): Promise<boolean> {
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) return false;
-  try {
-    const res = await fetch(`${API_BASE}/api/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken }),
-    });
-    if (!res.ok) {
-      clearTokens();
-      return false;
-    }
-    const data = await res.json() as { accessToken: string; refreshToken: string };
-    setTokens(data.accessToken, data.refreshToken);
-    return true;
-  } catch {
-    clearTokens();
-    return false;
-  }
 }
 
 // ── Auth API ──────────────────────────────────────
@@ -215,6 +175,14 @@ export const auth = {
   },
 
   async logout() {
+    // 端末側の資格情報は必ず捨てる。 サーバ応答が 5xx / offline でも
+    // clearTokens を飛ばすと、 ログアウトしたはずの端末に有効な access token が
+    // 残り続ける (legacy 経路と同じく best-effort に揃える)。
+    if (usesDeviceSession()) {
+      try { await logoutDeviceSession(); }
+      finally { clearTokens(); }
+      return;
+    }
     const refreshToken = getRefreshToken();
     try {
       await fetch(`${API_BASE}/api/auth/logout`, {
@@ -302,7 +270,7 @@ export const auth = {
   /** passkey でログイン。 email を渡すとそのユーザの credentials を allow に詰める */
   async passkeyLogin(email?: string): Promise<AuthResponse> {
     const begin = await fetch(`${API_BASE}/api/auth/passkey/login-begin`, {
-      method: "POST",
+      method: "POST", credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: email ?? "" }),
     });
@@ -311,9 +279,9 @@ export const auth = {
     if (!begin.ok) throw new Error(beginData.error || "Passkey login failed");
     const response: AuthenticationResponseJSON = await startAuthentication({ optionsJSON: beginData.options });
     const finish = await fetch(`${API_BASE}/api/auth/passkey/login-finish`, {
-      method: "POST",
+      method: "POST", credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ response, challengeOwner: beginData.challengeOwner }),
+      body: JSON.stringify({ response, challengeOwner: beginData.challengeOwner, deviceSession: true }),
     });
     const data = await finish.json() as AuthResponse & { error?: string };
     if (!finish.ok) throw new Error(data.error || "Passkey login failed");

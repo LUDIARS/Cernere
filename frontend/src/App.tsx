@@ -14,6 +14,9 @@ import { OidcConsentPage } from "./pages/oidc/OidcConsentPage";
 import { CheckinPage } from "./pages/CheckinPage";
 import { GoogleSignInPage } from "./pages/GoogleSignInPage";
 import { OAuthCallbackPage } from "./pages/OAuthCallbackPage";
+import { DeviceSessionsPage } from "./pages/DeviceSessionsPage";
+import { PasskeyRecoveryPage } from "./pages/PasskeyRecoveryPage";
+import { AccountRecoveryPage } from "./pages/admin/AccountRecoveryPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -41,6 +44,7 @@ function AppRoutes() {
 
   return (
     <Routes>
+      <Route path="/recover" element={<PasskeyRecoveryPage />} />
       <Route path="/login/google/start" element={<GoogleSignInPage />} />
       <Route path="/login/google/callback" element={<OAuthCallbackPage />} />
       {/* Composite: 他サービス組み込み用 (アプリシェルなし) */}
@@ -61,6 +65,8 @@ function AppRoutes() {
       <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/devices" element={<DeviceSessionsPage />} />
+        <Route path="/account-recovery" element={<AccountRecoveryPage />} />
         <Route path="/data-optout" element={<DataOptOutPage />} />
         <Route path="/organizations" element={<OrganizationsPage />} />
         <Route path="/oidc-clients" element={<OidcClientsPage />} />

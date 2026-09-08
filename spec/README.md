@@ -46,7 +46,7 @@ LUDIARS 認証プラットフォーム Cernere の仕様書。AIFormat
 ### `plan/` — 実装計画書（作業ドキュメント）
 | ドキュメント | 範囲 |
 |---|---|
-| [passkey-default-authentication.md](plan/passkey-default-authentication.md) | **Proposed**: passkey/email/hybrid モード・Device Credential・ローテーション・手動回復設計 |
+| [passkey-default-authentication.md](plan/passkey-default-authentication.md) | **#886 再仕様化**: 現行認証と併用する端末セッション・失効・運用者回復 |
 | [project-authentication.md](plan/project-authentication.md) | **Proposed**: Project公開鍵認証・短命session・ユーザー委譲・peer assertion設計 |
 | [oidc-key-persistence.md](plan/oidc-key-persistence.md) | OIDC 署名鍵の DB 永続化・`CERNERE_OIDC_MODE=off` 対応の作業状況 |
 | [commit-plan.md](plan/commit-plan.md) | Issue #49/#63/#64 のコミット計画 |

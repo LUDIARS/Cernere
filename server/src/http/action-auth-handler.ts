@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import {
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
@@ -58,14 +58,17 @@ export async function handleActionAuthRoute(
 async function begin(payload: unknown, authHeader: string): Promise<RouteResult> {
   const parsed = beginSchema.safeParse(payload);
   if (!parsed.success) throw AppError.badRequest("A supported action and resource are required");
-  const { userId } = requireUser(authHeader);
+  const { userId } = await requireUser(authHeader);
   await checkRateLimit(`action-auth:${userId}`, 30, 5 * 60);
 
   const credentials = await db.select({
     id: schema.passkeys.id,
     credentialId: schema.passkeys.credentialId,
     transports: schema.passkeys.transports,
-  }).from(schema.passkeys).where(eq(schema.passkeys.userId, userId));
+  }).from(schema.passkeys).where(and(
+    eq(schema.passkeys.userId, userId),
+    isNull(schema.passkeys.revokedAt),
+  ));
   if (credentials.length === 0) {
     throw AppError.forbidden("A passkey must be registered before this action can be authorized");
   }
@@ -95,7 +98,7 @@ async function begin(payload: unknown, authHeader: string): Promise<RouteResult>
 async function finish(payload: unknown, authHeader: string): Promise<RouteResult> {
   const parsed = finishSchema.safeParse(payload);
   if (!parsed.success) throw AppError.badRequest("ceremonyId and response are required");
-  const { userId, token } = requireUser(authHeader);
+  const { userId, token } = await requireUser(authHeader);
 
   const raw = await redis.getdel(pendingKey(parsed.data.ceremonyId));
   if (!raw) throw AppError.forbidden("Action authentication challenge expired or already used");
@@ -110,8 +113,14 @@ async function finish(payload: unknown, authHeader: string): Promise<RouteResult
   }
 
   const response = parsed.data.response as unknown as AuthenticationResponseJSON;
+  // 論理失効済み passkey では step-up を通さない
+  // (spec/plan/passkey-default-authentication.md §7.1)。 hard delete をやめた分、
+  // ここで弾かないと失効済みの資格情報が高リスク操作の action proof を取れてしまう。
   const credential = (await db.select().from(schema.passkeys)
-    .where(eq(schema.passkeys.credentialId, response.id)).limit(1))[0];
+    .where(and(
+      eq(schema.passkeys.credentialId, response.id),
+      isNull(schema.passkeys.revokedAt),
+    )).limit(1))[0];
   if (!credential || credential.userId !== userId) {
     throw AppError.forbidden("Passkey does not belong to this user");
   }
@@ -154,10 +163,10 @@ async function finish(payload: unknown, authHeader: string): Promise<RouteResult
   return { status: "200 OK", data: issued };
 }
 
-function requireUser(authHeader: string): { userId: string; token: string } {
+async function requireUser(authHeader: string): Promise<{ userId: string; token: string }> {
   const token = extractBearerToken(authHeader);
   if (!token) throw AppError.unauthorized("Missing bearer token");
-  const claims = verifyToken(token);
+  const claims = await verifyToken(token);
   return { userId: claims.sub, token };
 }
 

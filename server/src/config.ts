@@ -2,6 +2,8 @@
  * 環境変数設定
  */
 
+import { loadSessionKeyMaterial } from "./auth/session-keys.js";
+
 function env(key: string, fallback?: string): string {
   const val = process.env[key];
   if (val !== undefined) return val;
@@ -28,6 +30,7 @@ function isDevelopment(): boolean {
 }
 
 export const config = {
+  deviceSessionsEnabled: envBool("CERNERE_DEVICE_SESSIONS_ENABLED"),
   databaseUrl: env("DATABASE_URL", "postgres://cernere:cernere@localhost:5432/cernere"),
   redisUrl: env("REDIS_URL", "redis://127.0.0.1:6379"),
   listenPort: parseInt(env("LISTEN_PORT", "8080"), 10),
@@ -175,4 +178,5 @@ export const config = {
 export function assertRuntimeSecrets(): void {
   // アクセスすることが検査そのもの (未設定なら getter が throw する)。
   void config.jwtSecret;
+  if (config.deviceSessionsEnabled) loadSessionKeyMaterial();
 }

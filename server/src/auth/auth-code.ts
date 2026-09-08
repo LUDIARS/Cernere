@@ -16,9 +16,15 @@ import { generateTokenPair, REFRESH_TOKEN_DAYS } from "./jwt.js";
 import { hashRefreshToken } from "./token-hash.js";
 import { redis } from "../redis.js";
 
+import type { AuthenticationEvidence } from "../lib/authentication-evidence.js";
+import type { UserSessionState } from "./user-session-state.js";
+
 const AUTH_CODE_TTL = 60;
 
 export interface AuthCodeUser {
+  authentication?: AuthenticationEvidence;
+  authEpoch?: number;
+  deviceId?: string;
   userId: string;
   displayName: string;
   email: string | null;
@@ -26,10 +32,10 @@ export interface AuthCodeUser {
 }
 
 export async function issueAuthCode(user: AuthCodeUser): Promise<string> {
-  const { accessToken, refreshToken } = generateTokenPair(user.userId, user.role);
+  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(user.userId, user.role, user.authentication, { authEpoch: user.authEpoch, deviceId: user.deviceId });
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
-    id: crypto.randomUUID(),
+    authentication: user.authentication, deviceId: user.deviceId, authEpoch, id: crypto.randomUUID(),
     userId: user.userId,
     refreshToken: hashRefreshToken(refreshToken),
     expiresAt,
@@ -49,7 +55,8 @@ export async function issueAuthCode(user: AuthCodeUser): Promise<string> {
 }
 
 /** userId から users テーブルを引いて authCode を発行する */
-export async function issueAuthCodeForUserId(userId: string): Promise<string | null> {
+export async function issueAuthCodeForUserId(userId: string, source?: UserSessionState): Promise<string | null> {
+  if (source && source.sub !== userId) throw new Error("Auth code source mismatch");
   const rows = await db.select({
     id: schema.users.id,
     displayName: schema.users.displayName,
@@ -59,6 +66,7 @@ export async function issueAuthCodeForUserId(userId: string): Promise<string | n
   if (rows.length === 0) return null;
   const u = rows[0];
   return issueAuthCode({
+    authentication: source?.authentication, authEpoch: source?.authEpoch, deviceId: source?.deviceId,
     userId: u.id,
     displayName: u.displayName ?? "",
     email: u.email,

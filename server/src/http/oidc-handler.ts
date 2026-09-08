@@ -257,14 +257,14 @@ export function handleOidcApprove(res: uWS.HttpResponse, req: uWS.HttpRequest): 
     try {
       const token = extractBearerToken(authHeader);
       if (!token) throw AppError.unauthorized("No token provided");
-      const claims = verifyToken(token);
+      const claims = await verifyToken(token);
 
       const body = await readBody(res);
       if (aborted) return;
       const requestId = (parseJson(body).request_id as string | undefined) ?? "";
       if (!requestId) throw AppError.badRequest("request_id is required");
 
-      const result = await approveAuthorization(requestId, claims.sub);
+      const result = await approveAuthorization(requestId, claims.sub, claims.authentication, claims);
       json(res, "200 OK", result, config.frontendUrl, true);
     } catch (err) {
       if (aborted) return;

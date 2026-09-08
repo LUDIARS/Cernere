@@ -10,6 +10,7 @@ import { config } from "./config.js";
 import { handleAuthRoute } from "./http/auth-handler.js";
 import { registerMfaRoutes } from "./http/mfa-routes.js";
 import { handlePasskeyRoute } from "./http/passkey-handler.js";
+import { handleDeviceRoute } from "./http/device-handler.js";
 import { handleFaceTemplateRoute } from "./http/face-template-handler.js";
 import { handleFacePhotoRoute } from "./http/face-photo-handler.js";
 import { handleActionAuthRoute } from "./http/action-auth-handler.js";
@@ -215,14 +216,15 @@ const STATUS_TEXT: Record<number, string> = {
   503: "503 Service Unavailable",
 };
 
-function classifyError(err: unknown): { status: string; message: string } {
+function classifyError(err: unknown): { status: string; message: string; code?: string } {
   // AppError は statusCode を明示的に持つため、メッセージ文言の正規表現マッチに
   // 依存せずそのまま使う。 メッセージがどんな文言でも (例: "Invalid or expired
   // token" のように "Unauthorized" を含まない) 正しい 4xx にマップされる。
   if (err instanceof AppError) {
     const status = STATUS_TEXT[err.statusCode] ?? "500 Internal Server Error";
     const message = err.statusCode >= 500 && !config.isDevelopment ? "Internal server error" : err.message;
-    return { status, message };
+    // code は機械可読な分岐用 (§11.4)。 持たない AppError では undefined のまま。
+    return err.code ? { status, message, code: err.code } : { status, message };
   }
 
   const msg = err instanceof Error ? err.message : String(err ?? "Internal error");
@@ -264,7 +266,7 @@ export function createApp() {
         .writeHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         .writeHeader(
           "Access-Control-Allow-Headers",
-          "Content-Type, Authorization, X-Cernere-Action-Proof",
+          "Content-Type, Authorization, X-Cernere-Action-Proof, X-Cernere-Rotation-Id, X-Cernere-Step-Up",
         )
         .writeHeader("Access-Control-Allow-Credentials", "true")
         .end();
@@ -293,7 +295,10 @@ export function createApp() {
         devLog("ws.auth.credentialInQuery.deprecated", { path: "/auth", ip });
       }
       // header 認証時は echo したスキーム名のみ返す (値を含む生ヘッダは返さない)。
-      const echoProtocol = echo ?? secWsProtocol;
+      // 認識できないときは何も選ばない。 生ヘッダ ("foo, bar" 等) をそのまま返すと
+      // クライアントが提示した集合の要素にならず、 RFC 6455 違反でハンドシェイクが
+      // 落ちる (query fallback の利用者は subprotocol を提示していない)。
+      const echoProtocol = echo ?? "";
 
       let aborted = false;
       res.onAborted(() => { aborted = true; });
@@ -334,7 +339,8 @@ export function createApp() {
       if (!creds.size && params.get("token")) {
         devLog("ws.auth.credentialInQuery.deprecated", { path: "/ws/project", ip });
       }
-      const echoProtocol = echo ?? secWsProtocol;
+      // 提示された集合に無い値は選ばない (RFC 6455)。
+      const echoProtocol = echo ?? "";
 
       let aborted = false;
       res.onAborted(() => { aborted = true; });
@@ -390,7 +396,8 @@ export function createApp() {
       if (!creds.size && params.get("ticket")) {
         devLog("ws.auth.credentialInQuery.deprecated", { path: "/auth/composite-ws", ip });
       }
-      const echoProtocol = echo ?? secWsProtocol;
+      // 提示された集合に無い値は選ばない (RFC 6455)。
+      const echoProtocol = echo ?? "";
 
       let aborted = false;
       res.onAborted(() => { aborted = true; });
@@ -435,8 +442,8 @@ export function createApp() {
       jsonResponse(res, result.status, result.data);
     } catch (err) {
       if (aborted) return;
-      const { status, message } = classifyError(err);
-      jsonResponse(res, status, { error: message });
+      const { status, message, code } = classifyError(err);
+      jsonResponse(res, status, code ? { error: message, code } : { error: message });
     }
   });
 
@@ -455,8 +462,8 @@ export function createApp() {
       jsonResponse(res, result.status, result.data, [], result.headers);
     } catch (err) {
       if (aborted) return;
-      const { status, message } = classifyError(err);
-      jsonResponse(res, status, { error: message });
+      const { status, message, code } = classifyError(err);
+      jsonResponse(res, status, code ? { error: message, code } : { error: message });
     }
   });
 
@@ -480,14 +487,55 @@ export function createApp() {
       jsonResponse(res, result.status, result.data, result.cookies);
     } catch (err) {
       if (aborted) return;
-      const { status, message } = classifyError(err);
+      const { status, message, code } = classifyError(err);
       if (status === "500 Internal Server Error") {
         devError("http.auth.500", err, { action, ip });
         console.error(`[http] auth/${action} 500:`, err);
       } else {
         devLog("http.auth.error", { action, status, message });
       }
-      jsonResponse(res, status, { error: message });
+      jsonResponse(res, status, code ? { error: message, code } : { error: message });
+    }
+  });
+
+  // ── Device Credential: POST /api/auth/device/:action ────
+  // 無操作ログイン / ローテーション / 端末失効
+  // (spec/plan/passkey-default-authentication.md §10 / §11)。
+  // GET を用意しないのは、 silent login を副作用の無いメソッドに見せないため。
+  app.post("/api/auth/device/:action", async (res, req) => {
+    const action = req.getParameter(0) ?? "";
+    const authHeader = req.getHeader("authorization") ?? "";
+    const cookieHeader = req.getHeader("cookie") ?? "";
+    const origin = req.getHeader("origin") ?? "";
+    const host = req.getHeader("host") ?? "";
+    const rotationId = req.getHeader("x-cernere-rotation-id") ?? "";
+    const ip = getRemoteIp(res);
+    let aborted = false;
+    res.onAborted(() => { aborted = true; });
+
+    devLog("http.device.begin", { action, ip });
+    try {
+      const body = await readBody(res, 4096, () => { aborted = true; });
+      if (aborted) return;
+      const result = await handleDeviceRoute(action, body, authHeader, {
+        cookieHeader,
+        origin,
+        hostname: new URL("https://" + host).hostname,
+        rotationId,
+        ip,
+      });
+      devLog("http.device.ok", { action, status: result.status });
+      jsonResponse(res, result.status, result.data, result.cookies);
+    } catch (err) {
+      if (aborted) return;
+      const { status, message, code } = classifyError(err);
+      if (status === "500 Internal Server Error") {
+        devError("http.device.500", err, { action, ip });
+        console.error(`[http] device/${action} 500:`, err);
+      } else {
+        devLog("http.device.error", { action, status, message });
+      }
+      jsonResponse(res, status, code ? { error: message, code } : { error: message });
     }
   });
 
@@ -497,6 +545,9 @@ export function createApp() {
     const authHeader = req.getHeader("authorization") ?? "";
     const actionProof = req.getHeader("x-cernere-action-proof") ?? "";
     const userAgent = req.getHeader("user-agent") ?? undefined;
+    // Device Credential Cookie の属性判定に要求ホストが要る (§10.1)。
+    const origin = req.getHeader("origin") ?? "";
+    const hostname = new URL("https://" + (req.getHeader("host") ?? "")).hostname;
     const ip = getRemoteIp(res);
     let aborted = false;
     res.onAborted(() => { aborted = true; });
@@ -505,19 +556,19 @@ export function createApp() {
     try {
       const body = await readBody(res);
       if (aborted) return;
-      const result = await handlePasskeyRoute(action, body, authHeader, { ip, userAgent }, "", actionProof);
+      const result = await handlePasskeyRoute(action, body, authHeader, { ip, userAgent, hostname, origin }, "", actionProof);
       devLog("http.passkey.ok", { action, status: result.status });
-      jsonResponse(res, result.status, result.data);
+      jsonResponse(res, result.status, result.data, result.cookies);
     } catch (err) {
       if (aborted) return;
-      const { status, message } = classifyError(err);
+      const { status, message, code } = classifyError(err);
       if (status === "500 Internal Server Error") {
         devError("http.passkey.500", err, { action, ip });
         console.error(`[http] passkey/${action} 500:`, err);
       } else {
         devLog("http.passkey.error", { action, status, message });
       }
-      jsonResponse(res, status, { error: message });
+      jsonResponse(res, status, code ? { error: message, code } : { error: message });
     }
   });
 
@@ -540,14 +591,14 @@ export function createApp() {
       jsonResponse(res, result.status, result.data);
     } catch (err) {
       if (aborted) return;
-      const { status, message } = classifyError(err);
+      const { status, message, code } = classifyError(err);
       if (status === "500 Internal Server Error") {
         devError("http.passkey.export.500", err, { ip });
         console.error("[http] passkey/export 500:", err);
       } else {
         devLog("http.passkey.export.error", { status, message });
       }
-      jsonResponse(res, status, { error: message });
+      jsonResponse(res, status, code ? { error: message, code } : { error: message });
     }
   });
 
@@ -572,8 +623,8 @@ export function createApp() {
         jsonResponse(res, result.status, result.data);
       } catch (err) {
         if (aborted) return;
-        const { status, message } = classifyError(err);
-        jsonResponse(res, status, { error: message });
+        const { status, message, code } = classifyError(err);
+        jsonResponse(res, status, code ? { error: message, code } : { error: message });
       }
     };
     switch (method) {
@@ -619,8 +670,8 @@ export function createApp() {
         else jsonResponse(res, result.status, result.data);
       } catch (err) {
         if (aborted) return;
-        const { status, message } = classifyError(err);
-        jsonResponse(res, status, { error: message });
+        const { status, message, code } = classifyError(err);
+        jsonResponse(res, status, code ? { error: message, code } : { error: message });
       }
     };
     switch (method) {
@@ -665,14 +716,14 @@ export function createApp() {
       jsonResponse(res, result.status, result.data);
     } catch (err) {
       if (aborted) return;
-      const { status, message } = classifyError(err);
+      const { status, message, code } = classifyError(err);
       if (status === "500 Internal Server Error") {
         devError("http.project.schema-export.500", err, { ip });
         console.error("[http] admin/projects/schema-export 500:", err);
       } else {
         devLog("http.project.schema-export.error", { status, message });
       }
-      jsonResponse(res, status, { error: message });
+      jsonResponse(res, status, code ? { error: message, code } : { error: message });
     }
   });
 
@@ -694,14 +745,14 @@ export function createApp() {
       jsonResponse(res, result.status, result.data);
     } catch (err) {
       if (aborted) return;
-      const { status, message } = classifyError(err);
+      const { status, message, code } = classifyError(err);
       if (status === "500 Internal Server Error") {
         devError("http.composite.500", err, { action, ip });
         console.error(`[http] composite/${action} 500:`, err);
       } else {
         devLog("http.composite.error", { action, status, message });
       }
-      jsonResponse(res, status, { error: message });
+      jsonResponse(res, status, code ? { error: message, code } : { error: message });
     }
   });
 

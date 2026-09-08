@@ -37,7 +37,7 @@ export async function requireServiceScope(authHeader: string, scope: string): Pr
   // A project token is a valid credential elsewhere, but it carries no tool owner
   // and no scope list, so it can never satisfy this endpoint: 403, not 401.
   if (!toolClaims && isProjectToken(token)) throw AppError.forbidden(`Scope ${scope} is required`);
-  const claims = toolClaims ?? verifyToken(token);
+  const claims = toolClaims ?? await verifyToken(token);
   if (!UUID_PATTERN.test(claims.sub)) throw AppError.unauthorized("Invalid bearer token subject");
 
   if (claims.tokenType === "tool") {

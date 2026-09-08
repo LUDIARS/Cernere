@@ -81,7 +81,7 @@ describe("requireExportAuth の project token 判定", () => {
 
   it("project token でなければ user token として admin 判定へ落ちる", async () => {
     mocks.verifyProjectToken.mockImplementation(() => { throw new Error("not a project token"); });
-    mocks.verifyToken.mockReturnValue({ sub: "user-1" });
+    mocks.verifyToken.mockResolvedValue({ sub: "user-1" });
     mocks.usersRows.mockReturnValue([{ role: "admin" }]);
 
     await expect(requireExportAuth("Bearer t")).resolves.toEqual({ kind: "admin", subject: "user-1" });

@@ -40,10 +40,10 @@ function parseQuery(query: string): z.infer<typeof querySchema> {
   return validate(querySchema, Object.fromEntries(new URLSearchParams(query)));
 }
 
-function currentUser(authHeader: string): string {
+async function currentUser(authHeader: string): Promise<string> {
   const token = extractBearerToken(authHeader);
   if (!token) throw AppError.unauthorized("Missing bearer token");
-  const claims = verifyToken(token);
+  const claims = await verifyToken(token);
   if (!claims.sub) throw AppError.unauthorized("Invalid bearer token");
   return claims.sub;
 }
@@ -52,17 +52,17 @@ export async function handleFaceTemplateRoute(method: string, path: string, body
   const { facilityId } = parseQuery(query);
   if (method === "GET" && path === "policy") return { status: "200 OK", data: faceConsentPolicy };
   if (method === "POST" && path === "consent") {
-    const userId = currentUser(authHeader);
+    const userId = await currentUser(authHeader);
     const input = validate(consentSchema, parse(body));
     return { status: "201 Created", data: await createFaceConsent(userId, input.policyVersion, input.facilityId) };
   }
-  if (method === "GET" && path === "status") return { status: "200 OK", data: await listFaceTemplateStatus(currentUser(authHeader)) };
+  if (method === "GET" && path === "status") return { status: "200 OK", data: await listFaceTemplateStatus(await currentUser(authHeader)) };
   if (method === "PUT" && path === "template") {
     await requireExportAuth(authHeader);
     const input = validate(putSchema, parse(body));
     return { status: "200 OK", data: await putFaceTemplate(input) };
   }
-  if (method === "DELETE" && path === "template") return { status: "200 OK", data: await revokeFaceTemplates(currentUser(authHeader), facilityId, "user_revoked", true) };
+  if (method === "DELETE" && path === "template") return { status: "200 OK", data: await revokeFaceTemplates(await currentUser(authHeader), facilityId, "user_revoked", true) };
   if (method === "DELETE" && path.startsWith("template/")) {
     await requireExportAuth(authHeader);
     const userId = validate(uuidSchema, path.slice("template/".length));

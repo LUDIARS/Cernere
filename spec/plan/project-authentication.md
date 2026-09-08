@@ -3,11 +3,11 @@
 - 状態: Proposed
 - 対象: Project backend の機械認証、Project WebSocket、ユーザーからProjectへの委譲、Project間peer通信、launcher credential
 - 非対象: 対話型ユーザー認証の内部実装、tool client認証、Project固有の業務認可
-- 関連設計: [パスキー既定・メール認証併存設計](passkey-default-authentication.md)
+- 関連設計: [端末セッション・運用者回復設計](passkey-default-authentication.md)
 
 ## 1. 結論
 
-Project認証は`CERNERE_USER_AUTH_MODE=passkey|email|hybrid`と別軸にする。人はCernere-hosted UIで認証し、Project backendは機械資格情報で認証する。Projectがユーザーとして振る舞うことは許可せず、必要な操作だけ短命なuser×project assertionで委譲する。
+Project認証は、Google OIDC・MFA・パスキー等の対話型ユーザー認証と別軸にする。人はCernere-hosted UIで認証し、Project backendは機械資格情報で認証する。Projectがユーザーとして振る舞うことは許可せず、必要な操作だけ短命なuser×project assertionで委譲する。
 
 1. 新規confidential Projectの既定認証はEd25519の`private_key_jwt`とする。Projectは秘密鍵、Cernereは公開JWKだけを保持する。
 2. Excubitorが自分の子processを起動・停止まで管理する場合は、起動ごとの`launcher_managed_secret`をfirst-class methodとして認める。一般Projectの長期`client_id + client_secret`はversioned compatibility methodとして残し、新規登録の既定にはしない。
@@ -411,7 +411,7 @@ dispatcherはassertionを共通validatorで検証して`UserProjectPrincipal`へ
 
 - Project frontend/backendはユーザーpassword、passkey challenge/assertion、Device Credentialを受け取らない。
 - `server/src/ws/project-dispatch.ts`の`auth.login/register/mfa-verify`は新契約で無効化する。
-- email modeで既存Projectを移行する間だけ`CERNERE_PROJECT_USER_PASSWORD_RELAY_COMPAT=true`でversioned v1を許可できる。既定false、passkey modeでは常にfalseとする。
+- 既存Projectを移行する間だけ`CERNERE_PROJECT_USER_PASSWORD_RELAY_COMPAT=true`でversioned v1を許可できる。既定falseとし、対話型認証方式の別で暗黙に有効化しない。
 - 成功結果にCernere access token/refresh tokenを含めない。
 
 ### 10.2 authorization開始
@@ -712,7 +712,7 @@ CERNERE_PROJECT_QUERY_TOKEN_COMPAT=false
 CERNERE_PROJECT_USER_PASSWORD_RELAY_COMPAT=false
 ```
 
-- `CERNERE_USER_AUTH_MODE`はProject client authenticationを変更しない。
+- 対話型認証方式の選択はProject client authenticationを変更しない。
 - Project user delegation UIだけがuser auth modeに従う。
 - 新規production deploymentはlegacy flagsをfalseにする。
 - legacy flag有効時はwarning、利用counter、対象client IDを監査し、無期限compatibilityにしない。
@@ -849,7 +849,7 @@ Project auth用JWS/JWK検証を自前実装しない。ライブラリ側の`jwt
 
 ### 22.4 User delegation
 
-- passkey/email/hybridの全user modeで同じProject code contractになる
+- Google OIDC・MFA・パスキーの各ユーザー認証経路で同じProject code contractになる
 - Project側へpassword/passkey assertion/Device Credentialが送られない
 - exact redirect/origin、PKCE S256、state/source/issを検証
 - code recordにCernere access/refresh tokenがない
@@ -882,7 +882,7 @@ Project auth用JWS/JWK検証を自前実装しない。ライブラリ側の`jwt
 - 既存secret clientがcompat flag有効時だけProject Sessionを取得できる
 - legacy HS256/query/password relayが各flagとallowlistの両方なしでは到達不能
 - compatibility pathもProject active、scope、rate limit、監査を迂回しない
-- `CERNERE_USER_AUTH_MODE`変更でProject client authentication契約が変わらない
+- 対話型認証方式の変更でProject client authentication契約が変わらない
 
 ## 23. 受け入れ条件
 

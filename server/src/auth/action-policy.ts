@@ -6,6 +6,10 @@ export const ACTION_AUTH_TTL_SECONDS = 5 * 60;
 
 export const protectedActionSchema = z.enum([
   "mfa.manage",
+  "device_session.revoke",
+  "device_session.revoke_all",
+  "account_recovery.issue",
+  "account_recovery.revoke",
   "passkey.register",
   "passkey.delete",
   "passkey.device_link",
@@ -43,6 +47,10 @@ export const actionTargetSchema = z.object({
 }).strict();
 
 const protectedWsActions = new Set<ProtectedAction>([
+  "device_session.revoke",
+  "device_session.revoke_all",
+  "account_recovery.issue",
+  "account_recovery.revoke",
   "organization.delete",
   "member.remove",
   "member.update_role",
@@ -74,6 +82,10 @@ export function resolveWsActionTarget(
 
   const p = asObject(payload);
   switch (parsedAction.data) {
+    case "device_session.revoke": return target(parsedAction.data, requiredString(p, "deviceId"));
+    case "device_session.revoke_all": return target(parsedAction.data, userId);
+    case "account_recovery.issue": return target(parsedAction.data, requiredString(p, "userId"));
+    case "account_recovery.revoke": return target(parsedAction.data, requiredString(p, "grantId"));
     case "organization.delete":
       return target(parsedAction.data, requiredString(p, "organizationId"));
     case "member.remove":

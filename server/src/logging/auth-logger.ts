@@ -19,6 +19,7 @@ type AuthEventType =
   | "user.login"
   | "user.login.failed"
   | "user.register"
+  | "user.passkey.recovered"
   | "user.oauth"
   | "user.oauth.failed"
   | "user.ws.connect"

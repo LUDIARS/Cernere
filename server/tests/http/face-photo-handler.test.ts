@@ -50,7 +50,8 @@ function multipart(bytes: Buffer, mime = "image/jpeg"): { body: Buffer; contentT
 describe("face photo HTTP boundary", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.verifyToken.mockReturnValue({ sub: USER_ID, role: "user", tokenType: "user_access" });
+    // verifyToken は async。 resolved value にしないと await 漏れを見逃す。
+    mocks.verifyToken.mockResolvedValue({ sub: USER_ID, role: "user", tokenType: "user_access" });
     mocks.requireServiceScope.mockResolvedValue({
       kind: "tool",
       subject: "svc",
@@ -96,7 +97,7 @@ describe("face photo HTTP boundary", () => {
   });
 
   it("本人経路では project token を user token として受理しない", async () => {
-    mocks.verifyToken.mockReturnValue({
+    mocks.verifyToken.mockResolvedValue({
       sub: USER_ID,
       projectKey: "unrelated-project",
       tokenType: "project",

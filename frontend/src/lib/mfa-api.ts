@@ -1,5 +1,7 @@
 /** MFA settings transport. Tickets and enrollment keys remain in component memory. */
 import { authorizeAction } from "./action-auth";
+import { getAccessToken } from "./browser-token-store";
+import { refreshBrowserAccessToken } from "./browser-refresh";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 export type MfaMethod = "totp" | "email";
@@ -13,7 +15,8 @@ export interface MfaManagement { managementToken: string }
 export interface TotpSetup { secret: string; provisioningUri: string }
 
 async function mfaRequest<T>(action: string, payload?: unknown, proof?: string): Promise<T> {
-  const token = localStorage.getItem("accessToken");
+  let token = getAccessToken();
+  if (!token && await refreshBrowserAccessToken()) token = getAccessToken();
   if (!token) throw new Error("ログインし直してください。");
   const response = await fetch(`${API_BASE}/api/auth/mfa/${action}`, {
     method: payload === undefined ? "GET" : "POST",

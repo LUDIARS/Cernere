@@ -66,6 +66,12 @@
     },
     {
       "pathPattern": "(^|/)server/tests/identity/(?:.*/)?[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)frontend/src/(lib/browser-(refresh|token-store)\\.ts|pages/(DeviceSessionsPage|PasskeyRecoveryPage)\\.tsx|pages/admin/AccountRecoveryPage\\.tsx)$"
+    },
+    {
+      "pathPattern": "(^|/)server/src/lib/authentication-evidence\\.ts$"
     }
   ],
   "cardTemplate": "Summarise the \"authentication\" domain: Credential verification, token issuance, consent-bound biometric identity templates, and sealed profile face photos with pending review.",
@@ -81,7 +87,12 @@
     "SPEC-MFA-TOTP",
     "SPEC-MFA-CHALLENGE",
     "SPEC-MFA-EMAIL",
-    "SPEC-MFA-SETTINGS"
+    "SPEC-MFA-SETTINGS",
+    "SPEC-DEVICE-SESSION",
+    "SPEC-DEVICE-ROTATION",
+    "SPEC-DEVICE-REVOCATION",
+    "SPEC-DEVICE-RECOVERY",
+    "SPEC-ENTERPRISE-AUTH-FACTS"
   ],
   "rationale": "Authentication methods and biometric identity material (templates and sealed face photos) converge in server/src/auth, identity, oidc, and http; the id-service package is the reusable SDK for the same concern."
 }

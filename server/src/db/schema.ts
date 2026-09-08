@@ -57,6 +57,15 @@ export const users = pgTable("users", {
   // 表示名をエッジ認証の初回ログインで書き換えないため。
   displayNameSource: text("display_name_source").notNull().default("user"),
 
+  // WebAuthn の opaque user handle 用の列 (spec/plan/passkey-default-authentication.md §6.1)。
+  // 現時点では migration 052 が既存 passkey 保有者へ backfill するだけで、 発行・検証
+  // 経路はまだ users.id の UTF-8 byte 列を userID に使う。 乱数 handle へ移す際は
+  // 登録・回復・login の全経路を同時に切り替えること (混在させると同一 user が
+  // authenticator 上で別アカウントに見える)。
+  webauthnUserId: text("webauthn_user_id"),
+  // 回復・全端末失効で increment し、 旧 access token / WS session を無効化する (§7.1)。
+  authEpoch: bigint("auth_epoch", { mode: "number" }).notNull().default(0),
+
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -70,6 +79,9 @@ export const refreshSessions = pgTable("refresh_sessions", {
   id: uuid("id").primaryKey(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   refreshToken: text("refresh_token").notNull().unique(),
+  deviceId: uuid("device_id").references(() => deviceCredentials.id),
+  authentication: jsonb("authentication"),
+  authEpoch: bigint("auth_epoch", { mode: "number" }).notNull().default(0),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   // ローテーション済み検出用。 非 null = この token は既に refresh に使われた
   // (= 再提示されたら盗用とみなす)。
@@ -128,11 +140,74 @@ export const passkeys = pgTable("passkeys", {
   transports: jsonb("transports").notNull().default([]),  // ["internal"] / ["usb","nfc"] 等
   nickname: text("nickname"),                              // 表示用 (例: "iPhone 15", "Yubikey 5C")
   aaguid: text("aaguid"),
+  // residentKey: "required" で成功した ceremony 由来か (§7.1)。 既存行は安全側に false。
+  discoverable: boolean("discoverable").notNull().default(false),
+  // 削除は hard delete ではなく論理失効 (§7.1)。 login / list / excludeCredentials /
+  // counter update / export の全 query で revokedAt IS NULL を共通適用する。
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
 }, (t) => [
   uniqueIndex("idx_passkeys_credential_id").on(t.credentialId),
   index("idx_passkeys_user").on(t.userId, t.createdAt),
+]);
+
+// ── Device Credentials / Registration Grants ─────────────────
+//
+// spec/plan/passkey-default-authentication.md §7.2 / §7.3。
+
+export const deviceCredentials = pgTable("device_credentials", {
+  /** この id が stable な device_id になる。 */
+  id: uuid("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  /** 発行元パスキー。 監査と失効連動のための参照で、 逆向きに passkey を消さない。 */
+  rootPasskeyId: uuid("root_passkey_id").references(() => passkeys.id, { onDelete: "set null" }),
+  /** 'browser' | 'native' のみ。 OS / UA / 自由入力ラベルは保存しない (§6.2)。 */
+  clientKind: text("client_kind").notNull(),
+  /** 検証に使った master key の識別子 (CERNERE_AUTH_SESSION_KEY_ID)。 */
+  tokenKeyId: text("token_key_id").notNull(),
+  authentication: jsonb("authentication"),
+  authEpoch: bigint("auth_epoch", { mode: "number" }),
+  generation: bigint("generation", { mode: "number" }).notNull().default(0),
+  currentSecretHash: text("current_secret_hash").notNull(),
+  previousSecretHash: text("previous_secret_hash"),
+  previousValidUntil: timestamp("previous_valid_until", { withTimezone: true }),
+  lastRotationId: uuid("last_rotation_id"),
+  lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }).notNull().defaultNow(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  revokedReason: text("revoked_reason"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("idx_device_credentials_user_active").on(t.userId, t.lastUsedAt),
+]);
+
+export const registrationGrants = pgTable("registration_grants", {
+  id: uuid("id").primaryKey(),
+  targetAuthEpoch: bigint("target_auth_epoch", { mode: "number" }),
+  issuerAuthEpoch: bigint("issuer_auth_epoch", { mode: "number" }),
+  issuerMfaRevision: integer("issuer_mfa_revision"),
+  /** 'bootstrap' | 'create_user' | 'recover_user' | 'email_enroll'。 */
+  purpose: text("purpose").notNull(),
+  /** recover_user / email_enroll のとき既存 user を指す。 */
+  subjectUserId: uuid("subject_user_id").references(() => users.id, { onDelete: "cascade" }),
+  /** bootstrap / create_user のとき予約する未作成 user の id。 まだ存在しないので FK にしない。 */
+  pendingUserId: uuid("pending_user_id"),
+  pendingWebauthnUserId: text("pending_webauthn_user_id"),
+  role: text("role"),
+  /** 回復時に失効させる passkey id 群。 発行時点で固定し client から変更させない (§12.2)。 */
+  revokePasskeyIds: jsonb("revoke_passkey_ids").notNull().default([]),
+  revokeAllExistingPasskeys: boolean("revoke_all_existing_passkeys").notNull().default(false),
+  /** token 本体は保存しない。 SHA-256 digest のみ。 */
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("idx_registration_grants_subject").on(t.subjectUserId),
 ]);
 
 // ── Organizations ────────────────────────────────────────────

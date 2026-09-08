@@ -28,7 +28,7 @@
  */
 
 import crypto from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   generateRegistrationOptions,
   verifyRegistrationResponse,
@@ -46,8 +46,16 @@ import { config } from "../config.js";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { redis, checkRateLimit } from "../redis.js";
-import { generateTokenPair, verifyToken, extractBearerToken, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
+import { generateAccessToken, generateTokenPair, verifyToken, extractBearerToken, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
+import { completedAuthentication } from "../lib/authentication-evidence.js";
+import { assertUserSessionCurrent, type UserSessionState } from "../auth/user-session-state.js";
+import { handlePasskeyRecovery } from "./passkey-recovery-handler.js";
 import { hashRefreshToken } from "../auth/token-hash.js";
+import {
+  issueDeviceCredential,
+} from "../auth/device-credential.js";
+import { buildDeviceCookie } from "../auth/device-cookie.js";
+import { assertDeviceOrigin } from "../auth/device-origin.js";
 import { issueAuthCode } from "../auth/auth-code.js";
 import { logUserLogin, logUserLoginFailed, logUserRegister } from "../logging/auth-logger.js";
 import { devError, devLog } from "../logging/dev-logger.js";
@@ -61,10 +69,12 @@ import {
 import { publicPasskeyCompositeError } from "../auth/passkey-public-error.js";
 import { AppError } from "../error.js";
 
-interface RouteResult { status: string; data: unknown }
+interface RouteResult { status: string; data: unknown; cookies?: string[] }
 export interface RequestCtx {
   ip?: string;
   userAgent?: string;
+  hostname?: string;
+  origin?: string;
   /**
    * project WS (埋め込み SDK → サービス backend → Cernere) 経由の呼び出しでは、
    * 認証成立時に project_data_<key> の行を確保するために projectKey を載せる。
@@ -125,6 +135,7 @@ export async function handlePasskeyRoute(
 ): Promise<RouteResult> {
   devLog("passkey.route", { action, ip: ctx.ip });
   switch (action) {
+    case "recovery-begin": case "recovery-finish": return handlePasskeyRecovery(action, parseBody(body), ctx.ip);
     case "signup-begin":    return signupBegin(parseBody(body), ctx);
     case "signup-finish":   return signupFinish(parseBody(body), ctx);
     case "register-begin":  return registerBegin(authHeader, actionProof);
@@ -219,11 +230,22 @@ export async function executePasskeyCompositeAction(
 async function requireUserId(authHeader: string): Promise<{ id: string; role: string; token: string }> {
   const token = extractBearerToken(authHeader);
   if (!token) throw new Error("Unauthorized: missing bearer token");
-  const payload = verifyToken(token);
+  const payload = await verifyToken(token);
   if (!payload || typeof payload.sub !== "string") {
     throw new Error("Unauthorized: invalid token");
   }
   return { id: payload.sub, role: (payload.role as string) || "general", token };
+}
+
+/**
+ * 生きている passkey だけを対象にする述語 (§7.1)。
+ *
+ * 削除を hard delete から論理失効へ移したので、 login / list /
+ * excludeCredentials / counter update / export の全 query に共通適用する。
+ * 1 箇所でも漏らすと、 失効させたはずの資格情報がそこだけ通ってしまう。
+ */
+function activePasskeysOf(userId: string) {
+  return and(eq(schema.passkeys.userId, userId), isNull(schema.passkeys.revokedAt));
 }
 
 function challengeKey(prefix: string, id: string): string {
@@ -390,11 +412,11 @@ async function finalizePasskeySignup(
 
 /** REST: 作成したアカウントの JWT ペアを返す (Cernere 自身の /login や device 登録が使う)。 */
 async function signupFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
-  let tokens: { accessToken: string; refreshToken: string } | null = null;
+  let tokens: Awaited<ReturnType<typeof generateTokenPair>> | null = null;
   const account = await finalizePasskeySignup(p, ctx, async (tx, created) => {
-    tokens = generateTokenPair(created.userId, created.role);
+    tokens = await generateTokenPair(created.userId, created.role, undefined, { database: tx });
     await tx.insert(schema.refreshSessions).values({
-      id: crypto.randomUUID(),
+      authEpoch: tokens.authEpoch, id: crypto.randomUUID(),
       userId: created.userId,
       refreshToken: hashRefreshToken(tokens.refreshToken),
       expiresAt: new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000),
@@ -452,7 +474,7 @@ async function registerBegin(authHeader: string, actionProof: string): Promise<R
   const existing = await db.select({
     credentialId: schema.passkeys.credentialId,
     transports: schema.passkeys.transports,
-  }).from(schema.passkeys).where(eq(schema.passkeys.userId, userId));
+  }).from(schema.passkeys).where(activePasskeysOf(userId));
 
   // 最初の passkey は step-up 自体に使える資格情報がまだ無いためブートストラップとして許可する。
   // 2 本目以降は、既存 passkey による fresh authentication を必須にする。
@@ -553,7 +575,7 @@ async function loginBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise<
       const rows = await db.select({
         credentialId: schema.passkeys.credentialId,
         transports: schema.passkeys.transports,
-      }).from(schema.passkeys).where(eq(schema.passkeys.userId, user.id));
+      }).from(schema.passkeys).where(activePasskeysOf(user.id));
       allowCredentials = rows.map((r) => ({
         id: r.credentialId,
         transports: Array.isArray(r.transports)
@@ -584,18 +606,26 @@ async function verifyPasskeyAssertion(
 ): Promise<{
   user: typeof schema.users.$inferSelect;
   challengeOwner: string;
+  /** 認証に使われた passkey 行。 発行する Device Credential の root として記録する。 */
+  passkeyId: string;
+  verifiedAt: number;
 }> {
   const response = p.response as AuthenticationResponseJSON | undefined;
   const challengeOwner = typeof p.challengeOwner === "string" ? p.challengeOwner : "";
   if (!response) throw new Error("response is required");
   if (!challengeOwner) throw new Error("challengeOwner is required");
 
-  const expectedChallenge = await redis.get(challengeKey("login", challengeOwner));
+  const expectedChallenge = await redis.getdel(challengeKey("login", challengeOwner));
   if (!expectedChallenge) throw new Error("Challenge expired or missing — please retry");
 
   // 提示された credential.id (= base64url) で passkey を DB から引く
+  // 論理失効済み passkey では認証させない (§7.1)。 hard delete をやめた分、
+  // ここで弾かないと失効済みの資格情報でログインできてしまう。
   const cred = (await db.select().from(schema.passkeys)
-    .where(eq(schema.passkeys.credentialId, response.id)).limit(1))[0];
+    .where(and(
+      eq(schema.passkeys.credentialId, response.id),
+      isNull(schema.passkeys.revokedAt),
+    )).limit(1))[0];
   if (!cred) {
     logUserLoginFailed(undefined, "passkey", "credential not registered", ctx);
     throw new Error("Unauthorized: passkey not registered");
@@ -621,31 +651,43 @@ async function verifyPasskeyAssertion(
     throw new Error("Unauthorized: passkey signature failed");
   }
 
-  // counter を進める。 既存 counter より小さい / 同じなら攻撃の徴候 (clone)
+  const verifiedAt = Date.now();
   const newCounter = verification.authenticationInfo.newCounter;
-  await db.update(schema.passkeys)
-    .set({ counter: newCounter, lastUsedAt: new Date() })
-    .where(eq(schema.passkeys.id, cred.id));
-
-  const user = (await db.select().from(schema.users).where(eq(schema.users.id, cred.userId)).limit(1))[0];
-  if (!user) throw new Error("Unauthorized: linked user not found");
-
-  const now = new Date();
-  await db.update(schema.users).set({ lastLoginAt: now, updatedAt: now })
-    .where(eq(schema.users.id, user.id));
-
-  await redis.del(challengeKey("login", challengeOwner));
-  return { user, challengeOwner };
+  const user = await db.transaction(async tx => {
+    // Serialize with passkey deletion and recovery, then re-check the verified credential.
+    const current = (await tx.select().from(schema.users).where(eq(schema.users.id, cred.userId)).for("update"))[0];
+    const active = (await tx.select().from(schema.passkeys)
+      .where(and(eq(schema.passkeys.id, cred.id), isNull(schema.passkeys.revokedAt))).limit(1))[0];
+    if (!current || !active || active.userId !== current.id || Number(active.counter) !== Number(cred.counter)) {
+      throw AppError.unauthorized("Passkey authorization changed; authenticate again");
+    }
+    await tx.update(schema.passkeys).set({ counter: newCounter, lastUsedAt: new Date() }).where(eq(schema.passkeys.id, active.id));
+    await tx.update(schema.users).set({ lastLoginAt: new Date(), updatedAt: new Date() }).where(eq(schema.users.id, current.id));
+    return current;
+  });
+  return { user, challengeOwner, passkeyId: cred.id, verifiedAt };
 }
 
 async function loginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
-  const { user } = await verifyPasskeyAssertion(p, ctx);
-  const { accessToken, refreshToken } = generateTokenPair(user.id, user.role);
+  const { user, passkeyId, verifiedAt } = await verifyPasskeyAssertion(p, ctx);
+  const authentication = completedAuthentication("passkey", user.mfaRevision, verifiedAt);
+  if (config.deviceSessionsEnabled && p.deviceSession === true) {
+    if (!ctx.hostname) throw AppError.forbidden("Browser device context required");
+    assertDeviceOrigin(ctx.origin ?? "");
+    const issued = await issueDeviceCredential({ userId: user.id, rootPasskeyId: passkeyId, clientKind: "browser", authentication, authEpoch: user.authEpoch });
+    const accessToken = await generateAccessToken(user.id, user.role, authentication, { deviceId: issued.deviceId, authEpoch: user.authEpoch });
+    return { status: "200 OK", cookies: [buildDeviceCookie(issued.token, ctx.hostname, issued.expiresAt)], data: {
+      user: { id: user.id, login: user.login, displayName: user.displayName, email: user.email, role: user.role, avatarUrl: user.avatarUrl },
+      accessToken, refreshToken: "", deviceSession: true,
+    } };
+  }
+  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(user.id, user.role, authentication, { authEpoch: user.authEpoch });
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
-    id: crypto.randomUUID(), userId: user.id, refreshToken: hashRefreshToken(refreshToken), expiresAt,
+    authEpoch, id: crypto.randomUUID(), userId: user.id, refreshToken: hashRefreshToken(refreshToken), expiresAt, authentication,
   });
   logUserLogin(user.id, user.email ?? user.login, "passkey", { ip: ctx.ip });
+
   return {
     status: "200 OK",
     data: {
@@ -667,13 +709,15 @@ async function loginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise
  *  親サービス (Memoria Hub 等) が postMessage で受け取り、 /api/auth/exchange
  *  経由で実トークンに交換する。 */
 async function compositeLoginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
-  const { user } = await verifyPasskeyAssertion(p, ctx);
+  const { user, verifiedAt } = await verifyPasskeyAssertion(p, ctx);
   await ensureProjectRowForComposite(user.id, ctx);
   const authCode = await issueAuthCode({
     userId: user.id,
     displayName: user.displayName,
     email: user.email,
     role: user.role ?? "general",
+    authentication: completedAuthentication("passkey", user.mfaRevision, verifiedAt),
+    authEpoch: user.authEpoch,
   });
   logUserLogin(user.id, user.email ?? user.login, "passkey-composite", { ip: ctx.ip });
   return { status: "200 OK", data: { authCode } };
@@ -696,6 +740,7 @@ async function deviceLinkCreate(
   actionProof: string,
 ): Promise<RouteResult> {
   const { id: userId, token: bearer } = await requireUserId(authHeader);
+  const authorization = await verifyToken(bearer);
   const user = (await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1))[0];
   if (!user) throw new Error("Unauthorized: user not found");
   await checkRateLimit(`passkey-device-link:${userId}`, 5, 600);
@@ -703,7 +748,7 @@ async function deviceLinkCreate(
   // passkey を既に持つユーザには fresh step-up を要求する (register-begin と同じ方針)。
   // パスワード/OAuth のみのユーザは step-up に使える passkey が無いため bootstrap 扱い。
   const existing = await db.select({ id: schema.passkeys.id })
-    .from(schema.passkeys).where(eq(schema.passkeys.userId, userId));
+    .from(schema.passkeys).where(activePasskeysOf(userId));
   if (existing.length > 0) {
     await actionProofStore.consume(actionProof, {
       userId,
@@ -716,7 +761,7 @@ async function deviceLinkCreate(
   const linkToken = crypto.randomBytes(32).toString("base64url");
   await redis.set(
     deviceLinkKey(digestDeviceLinkToken(linkToken)),
-    JSON.stringify({ userId }),
+    JSON.stringify({ userId, authorization }),
     "EX",
     DEVICE_LINK_TTL_SEC,
   );
@@ -735,7 +780,9 @@ async function deviceRegisterBegin(p: Record<string, unknown>, ctx: RequestCtx):
   // GETDEL で grant を単回消費 (並行 begin は 1 件だけ成功する)。
   const raw = await redis.getdel(deviceLinkKey(digestDeviceLinkToken(linkToken)));
   if (!raw) throw new Error("Registration link is invalid, expired, or already used");
-  const { userId } = JSON.parse(raw) as { userId: string };
+  const { userId, authorization } = JSON.parse(raw) as { userId: string; authorization?: UserSessionState };
+  if (!authorization || authorization.sub !== userId) throw AppError.unauthorized("Registration link must be reissued");
+  await assertUserSessionCurrent(authorization);
 
   const user = (await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1))[0];
   if (!user) throw new Error("Registration link is invalid, expired, or already used");
@@ -743,7 +790,7 @@ async function deviceRegisterBegin(p: Record<string, unknown>, ctx: RequestCtx):
   const existing = await db.select({
     credentialId: schema.passkeys.credentialId,
     transports: schema.passkeys.transports,
-  }).from(schema.passkeys).where(eq(schema.passkeys.userId, userId));
+  }).from(schema.passkeys).where(activePasskeysOf(userId));
 
   const options = await generateRegistrationOptions({
     rpName: RP_NAME,
@@ -764,7 +811,7 @@ async function deviceRegisterBegin(p: Record<string, unknown>, ctx: RequestCtx):
   const ceremonyId = crypto.randomUUID();
   await redis.set(
     deviceRegisterKey(ceremonyId),
-    JSON.stringify({ challenge: options.challenge, userId }),
+    JSON.stringify({ challenge: options.challenge, userId, authorization }),
     "EX",
     CHALLENGE_TTL_SEC,
   );
@@ -782,7 +829,8 @@ async function deviceRegisterFinish(p: Record<string, unknown>, ctx: RequestCtx)
 
   const raw = await redis.getdel(deviceRegisterKey(ceremonyId));
   if (!raw) throw new Error("Challenge expired or missing - please retry from a new link");
-  const pending = JSON.parse(raw) as { challenge: string; userId: string };
+  const pending = JSON.parse(raw) as { challenge: string; userId: string; authorization?: UserSessionState };
+  if (!pending.authorization || pending.authorization.sub !== pending.userId) throw AppError.unauthorized("Registration link must be reissued");
 
   const verification = await verifyRegistrationResponse({
     response,
@@ -802,10 +850,13 @@ async function deviceRegisterFinish(p: Record<string, unknown>, ctx: RequestCtx)
   const info = verification.registrationInfo;
   const credential = info.credential;
   const now = new Date();
-  const { accessToken, refreshToken } = generateTokenPair(user.id, user.role);
   const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
 
-  await db.transaction(async (tx) => {
+  const { accessToken, refreshToken } = await db.transaction(async (tx) => {
+    await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, user.id)).for("update");
+    await assertUserSessionCurrent(pending.authorization!, tx);
+    const authentication = completedAuthentication("passkey", user.mfaRevision, now.getTime());
+    const tokens = await generateTokenPair(user.id, user.role, authentication, { authEpoch: pending.authorization!.authEpoch, database: tx });
     await tx.insert(schema.passkeys).values({
       id: crypto.randomUUID(),
       userId: user.id,
@@ -820,11 +871,12 @@ async function deviceRegisterFinish(p: Record<string, unknown>, ctx: RequestCtx)
       createdAt: now,
     });
     await tx.insert(schema.refreshSessions).values({
-      id: crypto.randomUUID(),
+      authEpoch: tokens.authEpoch, authentication, id: crypto.randomUUID(),
       userId: user.id,
-      refreshToken: hashRefreshToken(refreshToken),
+      refreshToken: hashRefreshToken(tokens.refreshToken),
       expiresAt,
     });
+    return tokens;
   });
 
   logUserLogin(user.id, user.email ?? user.login, "passkey-device-link", { ip: ctx.ip });
@@ -860,7 +912,7 @@ async function listPasskeys(authHeader: string): Promise<RouteResult> {
     lastUsedAt: schema.passkeys.lastUsedAt,
   })
     .from(schema.passkeys)
-    .where(eq(schema.passkeys.userId, userId))
+    .where(activePasskeysOf(userId))
     .orderBy(sql`${schema.passkeys.createdAt} DESC`);
   return { status: "200 OK", data: { items: rows } };
 }
@@ -886,17 +938,27 @@ async function deletePasskey(
     await tx.select({ id: schema.users.id }).from(schema.users)
       .where(eq(schema.users.id, userId)).for("update");
     const owned = await tx.select({ id: schema.passkeys.id })
-      .from(schema.passkeys).where(eq(schema.passkeys.userId, userId));
+      .from(schema.passkeys).where(activePasskeysOf(userId));
     if (!owned.some((passkey) => passkey.id === id)) {
       throw AppError.notFound("Passkey not found");
     }
     if (owned.length <= 1) {
       throw AppError.conflict("The final passkey cannot be deleted");
     }
-    return tx.delete(schema.passkeys)
-      .where(and(eq(schema.passkeys.id, id), eq(schema.passkeys.userId, userId)))
+    // hard delete をやめ論理失効にする (§7.1)。 行を残すのは、 どの端末が
+    // どの passkey 由来かを後から辿れないと失効連動も監査もできないため。
+    const changed = await tx.update(schema.passkeys)
+      .set({ revokedAt: new Date() })
+      .where(and(
+        eq(schema.passkeys.id, id),
+        eq(schema.passkeys.userId, userId),
+        isNull(schema.passkeys.revokedAt),
+      ))
       .returning({ id: schema.passkeys.id });
+    await tx.update(schema.deviceCredentials).set({ revokedAt: new Date(), revokedReason: "passkey_revoked" }).where(eq(schema.deviceCredentials.rootPasskeyId, id));
+    return changed;
   });
+
   return { status: "200 OK", data: { ok: true, removed: removed.length } };
 }
 
@@ -925,7 +987,7 @@ async function exportPasskeys(authHeader: string, query: string): Promise<RouteR
     publicKey: schema.passkeys.publicKey,
     counter: schema.passkeys.counter,
     transports: schema.passkeys.transports,
-  }).from(schema.passkeys);
+  }).from(schema.passkeys).where(isNull(schema.passkeys.revokedAt));
 
   const userIds = [...new Set(rows.map((r) => r.userId))];
   const memberships = userIds.length === 0 ? [] : await db.select({

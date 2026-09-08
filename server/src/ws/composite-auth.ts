@@ -97,6 +97,7 @@ export async function resolveCompositeTicket(
 
 async function issueAuthCode(user: AuthSessionUser): Promise<string> {
   return sharedIssueAuthCode({
+    authEpoch: user.authEpoch, authentication: user.authentication,
     userId: user.userId,
     displayName: user.displayName,
     email: user.email,

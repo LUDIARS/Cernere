@@ -370,10 +370,10 @@ async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader
   // Composite flow: auth_code を生成して composite callback にリダイレクト
   if (isComposite) {
     const userRole = userRows.length > 0 ? userRows[0].role : "general";
-    const { accessToken, refreshToken } = generateTokenPair(userId, userRole);
+    const { accessToken, refreshToken, authEpoch } = await generateTokenPair(userId, userRole);
     const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
     await db.insert(schema.refreshSessions).values({
-      id: crypto.randomUUID(), userId, refreshToken: hashRefreshToken(refreshToken), expiresAt,
+      authEpoch, id: crypto.randomUUID(), userId, refreshToken: hashRefreshToken(refreshToken), expiresAt,
     });
 
     const authCode = crypto.randomUUID();

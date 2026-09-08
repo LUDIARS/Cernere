@@ -11,7 +11,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../src/auth/jwt.js", () => ({
   extractBearerToken: vi.fn(() => "token"),
-  verifyToken: vi.fn(() => ({ sub: "11111111-1111-4111-8111-111111111111" })),
+  // verifyToken は async。 同期戻り値だと await 漏れがテストを素通りする。
+  verifyToken: vi.fn(async () => ({ sub: "11111111-1111-4111-8111-111111111111" })),
 }));
 
 vi.mock("../../src/db/connection.js", () => ({ db: { select: vi.fn() } }));

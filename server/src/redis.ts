@@ -6,6 +6,9 @@
 
 import Redis from "ioredis";
 import { config } from "./config.js";
+import { verifyToken } from "./auth/jwt.js";
+import { assertUserSessionCurrent, type UserSessionState } from "./auth/user-session-state.js";
+import { AppError } from "./error.js";
 
 export const redis = new Redis(config.redisUrl, {
   maxRetriesPerRequest: 3,
@@ -26,11 +29,14 @@ export interface RedisSession {
   userId: string;
   expiresAt: string; // ISO 8601
   accessToken: string;
+  authorization?: UserSessionState;
 }
 
 export async function putSession(session: RedisSession): Promise<void> {
+  const authorization = await verifyToken(session.accessToken);
+  if (authorization.sub !== session.userId) throw new Error("Session user mismatch");
   const key = `session:${session.id}`;
-  await redis.set(key, JSON.stringify({ ...session, authenticationVersion: 2 }), "EX", SESSION_TTL_SECS);
+  await redis.set(key, JSON.stringify({ ...session, authorization, authenticationVersion: 3 }), "EX", SESSION_TTL_SECS);
 }
 
 export async function getSession(sessionId: string): Promise<RedisSession | null> {
@@ -38,7 +44,17 @@ export async function getSession(sessionId: string): Promise<RedisSession | null
   if (!raw) return null;
   const session = JSON.parse(raw) as RedisSession & { authenticationVersion?: number };
   // Legacy sessions may originate from an MFA challenge. Never promote them on reconnect.
-  return session?.authenticationVersion === 2 ? session : null;
+  if (session?.authenticationVersion !== 3 || !session.authorization || session.authorization.sub !== session.userId
+    || !Number.isFinite(Date.parse(session.expiresAt)) || Date.parse(session.expiresAt) <= Date.now()) return null;
+  // 失効判定 (AppError) だけを「無効セッション」 として扱う。 DB 接続断などの
+  // 基盤障害まで null にすると、 呼び出し側 (ws/handler の sessionIsActive) が
+  // deleteSession してしまい、 一過性の障害が恒久ログアウトに化ける。
+  try { await assertUserSessionCurrent(session.authorization); }
+  catch (err) {
+    if (err instanceof AppError) return null;
+    throw err;
+  }
+  return session;
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {

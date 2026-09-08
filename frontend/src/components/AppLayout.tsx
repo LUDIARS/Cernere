@@ -6,6 +6,8 @@ const navItems = [
   { path: "/", label: "Dashboard" },
   { path: "/organizations", label: "Organizations" },
   { path: "/profile", label: "Profile" },
+  { path: "/devices", label: "端末" },
+  { path: "/account-recovery", label: "回復", adminOnly: true },
   { path: "/data-optout", label: "Data" },
   { path: "/oidc-clients", label: "OIDC", adminOnly: true },
 ];

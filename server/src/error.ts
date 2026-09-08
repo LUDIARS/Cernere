@@ -6,9 +6,23 @@ export class AppError extends Error {
   constructor(
     public readonly statusCode: number,
     message: string,
+    /**
+     * 機械可読なエラー識別子。
+     *
+     * クライアントに message の文言解析をさせないための構造化フィールド
+     * (spec/plan/passkey-default-authentication.md §11.4)。 同じ 401 でも
+     * 「Cookie を消してパスキーへ」 と「消さずに再試行」 では動作が変わるため、
+     * 分岐に足るのは status ではなく code の方。
+     */
+    public readonly code?: string,
   ) {
     super(message);
     this.name = "AppError";
+  }
+
+  /** code 付きで返す。 statusCode は既存の分類をそのまま使う。 */
+  static withCode(statusCode: number, code: string, msg: string) {
+    return new AppError(statusCode, msg, code);
   }
 
   static badRequest(msg: string) { return new AppError(400, msg); }

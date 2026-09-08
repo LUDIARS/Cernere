@@ -18,6 +18,8 @@ import { AppError } from "../error.js";
 import { signIdToken } from "../auth/oidc-keys.js";
 import { config } from "../config.js";
 import { devLog } from "../logging/dev-logger.js";
+import { assertUserSessionCurrent, currentUserSessionState, type UserSessionState } from "../auth/user-session-state.js";
+import { readAuthenticationEvidence } from "../lib/authentication-evidence.js";
 import {
   getClientByClientId,
   isRedirectUriAllowed,
@@ -178,7 +180,11 @@ export async function getConsentInfo(requestId: string): Promise<ConsentInfo | n
   return { clientName: client.name, scopes: req.scope, redirectUri: req.redirectUri };
 }
 
-export async function approveAuthorization(requestId: string, userId: string): Promise<{ redirectTo: string }> {
+export async function approveAuthorization(requestId: string, userId: string, authentication?: unknown,
+  source?: UserSessionState): Promise<{ redirectTo: string }> {
+  const authorization = source ?? { ...await currentUserSessionState(userId), authentication: readAuthenticationEvidence(authentication) };
+  if (authorization.sub !== userId) throw AppError.unauthorized("OIDC session user mismatch");
+  await assertUserSessionCurrent(authorization);
   const req = await getAuthRequest(requestId);
   if (!req) throw AppError.badRequest("Invalid or expired authorization request");
   await deleteAuthRequest(requestId);
@@ -190,7 +196,8 @@ export async function approveAuthorization(requestId: string, userId: string): P
     nonce: req.nonce,
     codeChallenge: req.codeChallenge,
     userId,
-    authTime: Math.floor(Date.now() / 1000),
+    authorization,
+    authTime: authorization.authentication?.authTime,
   });
 
   devLog("oidc.authorize.approved", { clientId: req.clientId, userId, requestId });
@@ -253,6 +260,9 @@ export async function exchangeToken(params: TokenRequestParams): Promise<TokenRe
 
   const record = await consumeAuthCode(params.code);
   if (!record) throw new OidcError("invalid_grant", "code is invalid, expired, or already used");
+  if (!record.authorization || record.authorization.sub !== record.userId) throw new OidcError("invalid_grant", "Session provenance is unavailable");
+  try { await assertUserSessionCurrent(record.authorization); }
+  catch { throw new OidcError("invalid_grant", "Authorizing session was revoked"); }
 
   if (record.clientId !== client.clientId) {
     throw new OidcError("invalid_grant", "code was issued to a different client");
@@ -279,12 +289,14 @@ export async function exchangeToken(params: TokenRequestParams): Promise<TokenRe
       iss: config.oidcIssuer,
       aud: client.clientId,
       auth_time: record.authTime,
+      amr: record.authorization.authentication?.amr,
       nonce: record.nonce,
     },
     ID_TOKEN_TTL_SEC,
   );
 
   const accessToken = await putAccessToken({
+    authorization: record.authorization,
     userId: user.id,
     clientId: client.clientId,
     scope: record.scope,
@@ -308,6 +320,8 @@ export async function userinfo(accessToken: string | null): Promise<Record<strin
   if (!accessToken) throw AppError.unauthorized("missing access token");
   const record = await getAccessToken(accessToken);
   if (!record) throw AppError.unauthorized("invalid or expired access token");
+  if (!record.authorization || record.authorization.sub !== record.userId) throw AppError.unauthorized("Session provenance is unavailable");
+  await assertUserSessionCurrent(record.authorization);
   const user = await loadClaimUser(record.userId);
   if (!user) throw AppError.unauthorized("user no longer exists");
   return buildClaims(user, record.scope);

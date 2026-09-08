@@ -96,7 +96,7 @@ sequenceDiagram
 
 email 無しアカウントは新しい端末でログイン手段を持たないため、ログイン済み端末から
 one-time リンクを発行して新端末の passkey を追加する
-(spec/plan/passkey-default-authentication.md §7.3 registration_grants の簡略形。
+(spec/plan/passkey-default-authentication.md §7 の本人による追加登録経路。
 スマホも同じ経路で、その端末自身の credential を登録する — パスワードへのフォールバックはしない)。
 
 1. ログイン済み端末: `POST /api/auth/passkey/device-link` (bearer + 既存 passkey 保持者は
@@ -107,6 +107,7 @@ one-time リンクを発行して新端末の passkey を追加する
 3. 新端末: `POST /api/auth/passkey/device-register-finish` — UV 必須で attestation を検証し、
    passkey 追加 + refresh session 発行 (= その端末はそのままログイン状態になる)。
 4. begin 時点で token を消費するため、ceremony 中断時はリンクを再発行する (fail-closed)。
+5. 発行元の認可状態を grant/ceremony に保存し、begin と finish で再検証する。元セッション失効後の追加登録と旧形式リンクは拒否する。
 - アカウントリンク: `state="link:<userId>"` で既存ユーザに OAuth ID を後付け追加
 
 ## 3. project (client_credentials)

@@ -15,6 +15,8 @@
 
 import crypto from "node:crypto";
 import { redis } from "../redis.js";
+import { assertUserSessionCurrent, currentUserSessionState } from "./user-session-state.js";
+import type { AuthenticationEvidence } from "../lib/authentication-evidence.js";
 
 export type AuthSessionState =
   | "pending_device"      // 資格情報OK、fingerprint 待ち
@@ -23,6 +25,9 @@ export type AuthSessionState =
   | "expired";            // 明示的に破棄 (UI 表示用)
 
 export interface AuthSessionUser {
+  authEpoch?: number;
+  authentication?: AuthenticationEvidence;
+  mfaRevision?: number;
   userId: string;
   displayName: string;
   email: string | null;
@@ -62,10 +67,13 @@ export async function createAuthSession(
   ctx: { ip?: string; userAgent?: string; projectKey?: string } = {},
 ): Promise<AuthSession> {
   const ticket = crypto.randomUUID();
+  const current = await currentUserSessionState(user.userId);
+  await assertUserSessionCurrent({ ...current, sub: user.userId, role: user.role,
+    authEpoch: user.authEpoch ?? current.authEpoch, mfaRevision: user.mfaRevision ?? current.mfaRevision, authentication: user.authentication });
   const session: AuthSession = {
     ticket,
     state: "pending_device",
-    user,
+    user: { ...user, authEpoch: current.authEpoch, mfaRevision: current.mfaRevision },
     ip: ctx.ip,
     userAgent: ctx.userAgent,
     projectKey: ctx.projectKey,
@@ -78,7 +86,11 @@ export async function createAuthSession(
 export async function getAuthSession(ticket: string): Promise<AuthSession | null> {
   const raw = await redis.get(key(ticket));
   if (!raw) return null;
-  return JSON.parse(raw) as AuthSession;
+  const session = JSON.parse(raw) as AuthSession;
+  if (session.user.authEpoch === undefined || session.user.mfaRevision === undefined) return null;
+  try { await assertUserSessionCurrent({ ...session.user, sub: session.user.userId }); }
+  catch { return null; }
+  return session;
 }
 
 export async function updateAuthSession(

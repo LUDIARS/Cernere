@@ -61,9 +61,9 @@ export async function verifyMfaChallenge<T>(token: string, method: MfaMethod, co
 
 export async function issueMfaLogin(user: MfaUser, tx: MfaTransaction): Promise<MfaLoginResult> {
   const now = new Date();
-  const tokens = generateTokenPair(user.id, user.role);
+  const tokens = await generateTokenPair(user.id, user.role, undefined, { authEpoch: user.authEpoch, database: tx });
   await tx.update(users).set({ lastLoginAt: now, updatedAt: now }).where(eq(users.id, user.id));
-  await tx.insert(refreshSessions).values({ id: crypto.randomUUID(), userId: user.id,
+  await tx.insert(refreshSessions).values({ authEpoch: tokens.authEpoch, id: crypto.randomUUID(), userId: user.id,
     refreshToken: hashRefreshToken(tokens.refreshToken), expiresAt: new Date(now.getTime() + REFRESH_TOKEN_DAYS * 86400_000) });
   return { ...tokens, userId: user.id, user: { id: user.id, displayName: user.displayName, email: user.email, role: user.role } };
 }

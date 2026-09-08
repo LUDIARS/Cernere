@@ -4,6 +4,7 @@
 
 import type uWS from "uWebSockets.js";
 import type { WsUserData } from "../app.js";
+import { getSession } from "../redis.js";
 import type { ServerMessage, RelayTarget } from "./protocol.js";
 
 export interface RegisteredSession {
@@ -15,6 +16,7 @@ export interface RegisteredSession {
 class SessionRegistry {
   private sessions = new Map<string, RegisteredSession>();
   private userSessions = new Map<string, Set<string>>();
+  private outgoing = new WeakMap<uWS.WebSocket<WsUserData>, Promise<void>>();
 
   register(sessionId: string, userId: string, ws: uWS.WebSocket<WsUserData>): void {
     this.sessions.set(sessionId, { sessionId, userId, ws });
@@ -59,18 +61,16 @@ class SessionRegistry {
    * を確認 + try/catch で二重に防御する (handler.ts の send と同方針)。
    */
   private send(ws: uWS.WebSocket<WsUserData>, msg: ServerMessage): void {
-    let data: WsUserData | undefined;
-    try {
-      data = ws.getUserData();
-    } catch {
-      return;
-    }
-    if (data.closed) return;
-    try {
+    // Serialize outgoing events per socket and revalidate at delivery, including idle sockets.
+    const next = (this.outgoing.get(ws) ?? Promise.resolve()).then(async () => {
+      const data = ws.getUserData();
+      if (data.closed) return;
+      const session = await getSession(data.sessionId);
+      if (data.closed) return;
+      if (session?.userId !== data.userId) { ws.end(1008, "Session revoked"); return; }
       ws.send(JSON.stringify(msg));
-    } catch {
-      data.closed = true;
-    }
+    }).catch(() => { /* Closed sockets or unavailable authorization never receive events. */ });
+    this.outgoing.set(ws, next);
   }
 
   sendTo(sessionId: string, msg: ServerMessage): void {

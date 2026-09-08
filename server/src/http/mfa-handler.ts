@@ -7,10 +7,10 @@ import { sendMfaChallengeCode, verifyMfaChallenge, issueMfaLogin } from "../auth
 import { mfaStatus, beginMfaManagement, verifyMfaManagement, setupTotp, setupEmailMfa, changeMfaFactor,
   type MfaActor } from "../auth/mfa-settings.js";
 
-function requireActor(header: string, actionProof?: string): MfaActor {
+async function requireActor(header: string, actionProof?: string): Promise<MfaActor> {
   const token = extractBearerToken(header);
   if (!token) throw AppError.unauthorized("User authentication required");
-  return { userId: verifyToken(token).sub, token, actionProof };
+  return { userId: (await verifyToken(token)).sub, token, actionProof };
 }
 
 export async function handleMfaRoute(action: string, body: unknown, authHeader: string, actionProof?: string): Promise<unknown> {
@@ -20,7 +20,7 @@ export async function handleMfaRoute(action: string, body: unknown, authHeader: 
     return { sent: true };
   }
   if (action === "verify") return verifyMfaChallenge(p.mfaToken ?? "", requireMfaMethod(p.method), p.code ?? "", { purpose: "rest" }, issueMfaLogin);
-  const actor = requireActor(authHeader, actionProof);
+  const actor = await requireActor(authHeader, actionProof);
   switch (action) {
     case "status": return mfaStatus(actor.userId);
     case "manage/begin": return beginMfaManagement(actor, p.password);
