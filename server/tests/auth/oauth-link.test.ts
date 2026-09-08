@@ -17,6 +17,7 @@ vi.mock("../../src/config.js", () => ({
     googleClientId: "google-id",
     googleClientSecret: "google-secret",
     googleRedirectUri: "https://auth.example.com/auth/google/callback",
+    googleOidcHostedDomains: "",
     discordClientId: "discord-id",
     discordClientSecret: "discord-secret",
     discordRedirectUri: "https://auth.example.com/auth/discord/callback",

@@ -35,6 +35,7 @@ const config: EnvCliConfig = {
     // ─── Google OAuth ──────────────────────────────────────
     GOOGLE_CLIENT_ID: "",
     GOOGLE_CLIENT_SECRET: "",
+    GOOGLE_OIDC_HOSTED_DOMAINS: "",
     GOOGLE_REDIRECT_URI: "http://localhost:8080/auth/google/callback",
 
     // ─── Discord OAuth ─────────────────────────────────────

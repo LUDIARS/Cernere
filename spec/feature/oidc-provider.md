@@ -6,6 +6,9 @@ Cernere を **OpenID Connect Provider (IdP)** として動作させ、 外部 Re
 ログイン自体は Cernere が担う (Google/GitHub OAuth・パスワード・パスキー・MFA は
 すべて既存フローを再利用)。 RP には認可コードフローで `id_token` を渡す。
 
+Google を上流の認証元として使う処理は [Google OIDC](google-oidc-identity-source.md) を参照。
+Google の本人認証から本ページの同意画面へ復帰できる。企業 MFA の証明と実認証時刻の継承は別途必要。
+
 > セットアップ手順 (鍵生成・Cloudflare Access 登録) は
 > [`spec/setup/oidc-provider.md`](../setup/oidc-provider.md) を参照。
 

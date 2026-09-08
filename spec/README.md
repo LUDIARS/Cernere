@@ -16,6 +16,7 @@ LUDIARS 認証プラットフォーム Cernere の仕様書。AIFormat
 | [project-connection-registry.md](feature/project-connection-registry.md) | プロジェクト WS 接続状態 (使用中バッジ) |
 | [volputas-survey-responses.md](feature/volputas-survey-responses.md) | Volputas設問とCernere本人回答の分離保管 |
 | [oidc-provider.md](feature/oidc-provider.md) | Cernere を OpenID Connect Provider として外部 RP に提供 |
+| [google-oidc-identity-source.md](feature/google-oidc-identity-source.md) | Google を Cr の外部認証元にし、署名・nonce・PKCE とブラウザの戻りを検証 |
 | [edge-assertion-login.md](feature/edge-assertion-login.md) | **Proposed**: Cloudflare Access 等のエッジ認証を Cernere へバイパス |
 
 ### `interface/` — API・外部連携・セキュリティ境界
@@ -32,6 +33,7 @@ LUDIARS 認証プラットフォーム Cernere の仕様書。AIFormat
 | ドキュメント | 範囲 |
 |---|---|
 | [service-registration.md](setup/service-registration.md) | サービス登録手順 |
+| [google-oidc.md](setup/google-oidc.md) | Google client・公開 callback・任意の Workspace 制限 |
 | [oidc-provider.md](setup/oidc-provider.md) | OIDC 署名鍵の生成と RP (Cloudflare Access 等) の登録 |
 | [cf-access-bypass.md](setup/cf-access-bypass.md) | **Proposed**: Cloudflare Access + Tunnel + binding 登録手順 |
 

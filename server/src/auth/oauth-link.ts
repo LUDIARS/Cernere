@@ -11,6 +11,7 @@
 import { config } from "../config.js";
 import { redis } from "../redis.js";
 import { createLinkStateToken } from "./oauth-state.js";
+import { startGoogleOidc } from "./google-oidc-client.js";
 
 export type OAuthLinkProvider = "github" | "google" | "discord";
 
@@ -35,7 +36,7 @@ function requireProviderConfig(provider: OAuthLinkProvider): void {
   if (!configured) throw new Error(`${provider} OAuth is not configured`);
 }
 
-function authorizationUrl(provider: OAuthLinkProvider, state: string): string {
+async function authorizationUrl(provider: OAuthLinkProvider, state: string): Promise<string> {
   if (provider === "github") {
     const params = new URLSearchParams({
       client_id: config.githubClientId,
@@ -48,14 +49,7 @@ function authorizationUrl(provider: OAuthLinkProvider, state: string): string {
     return `https://github.com/login/oauth/authorize?${params}`;
   }
   if (provider === "google") {
-    const params = new URLSearchParams({
-      client_id: config.googleClientId,
-      redirect_uri: config.googleRedirectUri,
-      response_type: "code",
-      scope: "openid email profile",
-      state,
-    });
-    return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+    return startGoogleOidc(state);
   }
   const params = new URLSearchParams({
     client_id: config.discordClientId,
@@ -75,7 +69,7 @@ export async function createOAuthLinkGrant(
   const state = createLinkStateToken(crypto.randomUUID());
   const grant: OAuthLinkGrant = { userId, provider };
   await redis.set(`oauthlink:${state}`, JSON.stringify(grant), "EX", OAUTH_LINK_TTL_SEC);
-  return { authorizationUrl: authorizationUrl(provider, state), state };
+  return { authorizationUrl: await authorizationUrl(provider, state), state };
 }
 
 export async function loadOAuthLinkGrant(

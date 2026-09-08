@@ -47,7 +47,8 @@
   "cardTemplate": "Summarise the \"web-frontend\" domain: React 19 + React Router 7 client: pages, hooks, and the WebSocket/auth client library that drives all state changes through the session.",
   "specRefs": [
     "1.1 Cernere 概要",
-    "フロントエンド"
+    "フロントエンド",
+    "SPEC-GOOGLE-OIDC-HANDOFF"
   ],
   "rationale": "The React frontend (pages, hooks, client lib) is a coherent presentation domain consuming the WS/auth backend."
 }

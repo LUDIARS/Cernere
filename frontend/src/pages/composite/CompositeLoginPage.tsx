@@ -51,7 +51,7 @@ export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
   const redirectUri = self ? null : params.get("redirect_uri");
   // passkey 指定時は端末種別にかかわらずパスワードへ暗黙フォールバックしない。
   const passkeyOnly = !self && params.get("auth_mode") === "passkey";
-  const { googleAuthUrl: selfGoogleUrl, githubAuthUrl: selfGithubUrl } = useAuth();
+  const { githubAuthUrl: selfGithubUrl } = useAuth();
 
   const session = useCompositeLoginSession({
     self,
@@ -68,6 +68,13 @@ export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
     : redirectUri
       ? `composite_origin=${encodeURIComponent(redirectUri)}`
       : "";
+  const oidcRequestId = self && window.location.pathname === "/oidc/consent" ? params.get("request_id") : null;
+  // self モードの戻り先は Google 経路でも失わない (password/passkey と同じ `?redirect=`)。
+  const selfGoogleParams = new URLSearchParams();
+  if (oidcRequestId) selfGoogleParams.set("oidc_request_id", oidcRequestId);
+  else if (params.get("redirect")) selfGoogleParams.set("redirect", params.get("redirect")!);
+  const selfGoogleQuery = selfGoogleParams.toString();
+  const selfGoogleUrl = `/login/google/start${selfGoogleQuery ? `?${selfGoogleQuery}` : ""}`;
   const googleAuthUrl = self ? selfGoogleUrl : `/auth/google/login${compositeParam ? `?${compositeParam}` : ""}`;
   const githubAuthUrl = self ? selfGithubUrl : `/auth/github/login${compositeParam ? `?${compositeParam}` : ""}`;
 

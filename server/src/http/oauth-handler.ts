@@ -14,9 +14,12 @@ import { generateTokenPair, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
 import { hashRefreshToken } from "../auth/token-hash.js";
 import { redis, SESSION_TTL_SECS } from "../redis.js";
 import { logAuthEvent } from "../logging/auth-logger.js";
-import { encryptSecret } from "../lib/crypto/secret-box.js";
 import { isCompositeTargetAllowed } from "../auth/composite-redirect.js";
 import { verifyOAuthStateParam, isLinkStateToken } from "../auth/oauth-state.js";
+import { startGoogleOidc, completeGoogleOidc } from "../auth/google-oidc-client.js";
+import { GOOGLE_OIDC_REQUEST_TTL } from "../auth/google-oidc-request.js";
+import { AppError } from "../error.js";
+import { issueAuthCodeForUserId } from "../auth/auth-code.js";
 import {
   createOAuthLinkGrant,
   deleteOAuthLinkGrant,
@@ -85,9 +88,10 @@ export function handleOAuthRoute(
       } else if (provider === "github" && action === "callback") {
         await githubCallback(res, query, cookieHeader, aborted, ctx);
       } else if (provider === "google" && action === "login") {
-        await googleLogin(res, aborted, compositeOrigin);
+        await googleLogin(res, () => aborted, compositeOrigin,
+          queryParams.get("oidc_request_id") ?? undefined, queryParams.get("browser_state") ?? undefined);
       } else if (provider === "google" && action === "callback") {
-        await googleCallback(res, query, cookieHeader, aborted, ctx);
+        await googleCallback(res, query, cookieHeader, () => aborted, ctx);
       } else if (provider === "discord" && action === "callback") {
         await discordCallback(res, query, cookieHeader, aborted, ctx);
       } else {
@@ -96,7 +100,10 @@ export function handleOAuthRoute(
         throw new Error("Unsupported OAuth route");
       }
     } catch (err) {
-      const message = (err as Error).message;
+      // Google failures can include database values or upstream responses; expose only known errors.
+      const message = provider === "google" && !(err instanceof AppError)
+        ? "Google sign-in failed; please start again"
+        : (err as Error).message;
       logAuthEvent({
         event: "user.oauth.failed",
         provider,
@@ -105,7 +112,10 @@ export function handleOAuthRoute(
         userAgent: ctx.userAgent,
       });
       if (aborted) return;
-      redirect(res, `${config.frontendUrl}?authError=${encodeURIComponent(message)}`);
+      const failureTarget = provider === "google"
+        ? `${config.frontendUrl}/login/google/callback?error=${encodeURIComponent(message)}`
+        : `${config.frontendUrl}?authError=${encodeURIComponent(message)}`;
+      redirect(res, failureTarget, provider === "google" ? [deleteCookieHeader(CSRF_COOKIE)] : []);
     }
   })();
 }
@@ -410,28 +420,25 @@ async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader
 
 // ── Google ────────────────────────────────────────────────
 
-async function googleLogin(res: uWS.HttpResponse, aborted: boolean, compositeOrigin?: string): Promise<void> {
-  if (!config.googleClientId) throw new Error("Google OAuth is not configured");
+/** @implements SPEC-GOOGLE-OIDC-REQUEST */
+async function googleLogin(res: uWS.HttpResponse, isAborted: () => boolean, compositeOrigin?: string, oidcRequestId?: string, browserState?: string): Promise<void> {
+  if (!compositeOrigin && !browserState) throw AppError.badRequest("Start Google sign-in from the Cernere login page");
+  if (compositeOrigin && (oidcRequestId || !isCompositeTargetAllowed(compositeOrigin))) {
+    throw AppError.badRequest("Invalid Google sign-in destination");
+  }
 
   const csrfState = compositeOrigin
     ? `composite:${compositeOrigin}:${crypto.randomUUID()}`
     : crypto.randomUUID();
-  const params = new URLSearchParams({
-    client_id: config.googleClientId,
-    redirect_uri: config.googleRedirectUri,
-    response_type: "code",
-    scope: "openid email profile",
-    state: csrfState,
-    access_type: "offline",
-    prompt: "consent",
-  });
-  if (aborted) return;
-  redirect(res, `https://accounts.google.com/o/oauth2/v2/auth?${params}`, [
-    setCookieHeader(CSRF_COOKIE, csrfState, 600),
+  const authorizationUrl = await startGoogleOidc(csrfState, oidcRequestId, browserState);
+  if (isAborted()) return;
+  redirect(res, authorizationUrl, [
+    setCookieHeader(CSRF_COOKIE, csrfState, GOOGLE_OIDC_REQUEST_TTL),
   ]);
 }
 
-async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader: string, aborted: boolean, ctx: { ip?: string; userAgent?: string }): Promise<void> {
+/** @implements SPEC-GOOGLE-OIDC-VERIFICATION */
+async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader: string, isAborted: () => boolean, ctx: { ip?: string; userAgent?: string }): Promise<void> {
   const params = new URLSearchParams(query);
   const code = params.get("code");
   const stateParam = params.get("state");
@@ -441,61 +448,22 @@ async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader
   const isCompositeGoogle = stateParam?.startsWith("composite:");
   if (!stateParam || !expectedState || !verifyOAuthStateParam({ stateParam, cookieState: expectedState }).ok) throw new Error("Invalid OAuth state");
   if (!code) throw new Error("Authorization code not provided");
+  const verified = await completeGoogleOidc(stateParam, code);
   const linkUserId = await resolveLinkTarget(stateParam, "google");
   // github と同じく、 期限切れの link callback を通常ログインへ落とさない。
   if (!linkUserId && isLinkStateToken(stateParam)) {
     throw new Error("Account link expired; please start linking again");
   }
 
-  // Exchange code for tokens
-  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    redirect: "error",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      code, client_id: config.googleClientId, client_secret: config.googleClientSecret,
-      redirect_uri: config.googleRedirectUri, grant_type: "authorization_code",
-    }),
-  });
-  if (!tokenRes.ok) {
-    if (aborted) return;
-    redirect(res, `${frontend}?authError=${encodeURIComponent("Failed to exchange authorization code")}`);
-    return;
+  if (!linkUserId && !isCompositeGoogle && !verified.browserState) {
+    throw AppError.unauthorized("Google sign-in browser binding is missing; start again");
   }
-  const rawTokenData = (await tokenRes.json()) as {
-    access_token?: unknown; refresh_token?: unknown; expires_in?: unknown;
-  };
-  if (typeof rawTokenData.access_token !== "string" || rawTokenData.access_token === ""
-    || typeof rawTokenData.expires_in !== "number" || !Number.isFinite(rawTokenData.expires_in)
-    || (rawTokenData.refresh_token !== undefined && typeof rawTokenData.refresh_token !== "string")) {
-    throw new Error("Google returned an invalid token response");
-  }
-  const tokenData = {
-    access_token: rawTokenData.access_token,
-    refresh_token: rawTokenData.refresh_token,
-    expires_in: rawTokenData.expires_in,
-  };
 
-  // Fetch Google user
-  const userRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
-    headers: { Authorization: `Bearer ${tokenData.access_token}` },
-    redirect: "error",
-  });
-  if (!userRes.ok) throw new Error("Failed to fetch Google profile");
-  const rawGoogleUser = (await userRes.json()) as {
-    id?: unknown; email?: unknown; name?: unknown; picture?: unknown;
-  };
-  if (typeof rawGoogleUser.id !== "string" || rawGoogleUser.id === ""
-    || typeof rawGoogleUser.email !== "string" || rawGoogleUser.email === ""
-    || typeof rawGoogleUser.name !== "string" || rawGoogleUser.name === ""
-    || typeof rawGoogleUser.picture !== "string") {
-    throw new Error("Google returned an invalid user profile");
-  }
   const gUser = {
-    id: rawGoogleUser.id,
-    email: rawGoogleUser.email,
-    name: rawGoogleUser.name,
-    picture: rawGoogleUser.picture,
+    id: verified.identity.sub,
+    email: verified.identity.email,
+    name: verified.identity.name ?? verified.identity.email.split("@")[0],
+    picture: verified.identity.picture,
   };
 
   const now = new Date();
@@ -506,7 +474,7 @@ async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader
     if (existing[0] && existing[0].id !== linkUserId) {
       await deleteOAuthLinkGrant(stateParam);
       logAuthEvent({ event: "user.oauth.failed", userId: linkUserId, provider: "google", linkAttempt: true, error: "google account already linked to another user", ip: ctx.ip, userAgent: ctx.userAgent });
-      if (!aborted) {
+      if (!isAborted()) {
         redirect(res, `${frontend}?authError=${encodeURIComponent("This Google account is already linked to another user")}`, [
           deleteCookieHeader(CSRF_COOKIE),
         ]);
@@ -517,61 +485,56 @@ async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader
     await deleteOAuthLinkGrant(stateParam);
     // github / discord の link と同じく監査ログを残す (RULE.md Step 8)。
     logAuthEvent({ event: "user.oauth", userId: linkUserId, provider: "google", linked: true, ip: ctx.ip, userAgent: ctx.userAgent });
-    if (!aborted) redirect(res, `${frontend}?linked=google`, [deleteCookieHeader(CSRF_COOKIE)]);
+    if (!isAborted()) redirect(res, `${frontend}?linked=google`, [deleteCookieHeader(CSRF_COOKIE)]);
     return;
   }
 
   // Find or create user
   let userId: string;
-  let userRole: string;
   const userRows = await db.select().from(schema.users)
     .where(eq(schema.users.googleId, gUser.id)).limit(1);
 
   if (userRows.length > 0) {
     userId = userRows[0].id;
-    userRole = userRows[0].role;
+    // users.email は unique。 Google 側でメールが変わった結果が別 Cr ユーザと衝突する場合、
+    // ログイン全体を失敗させず、 既存のメールを保持する (本人特定は google_id で済んでいる)。
+    let email = gUser.email;
+    if (email !== userRows[0].email) {
+      const emailTaken = await db.select({ id: schema.users.id }).from(schema.users)
+        .where(eq(schema.users.email, email)).limit(1);
+      if (emailTaken[0] && emailTaken[0].id !== userId) email = userRows[0].email ?? gUser.email;
+    }
     await db.update(schema.users).set({
-      displayName: gUser.name, avatarUrl: gUser.picture, email: gUser.email,
-      // 機密トークンは保存時に暗号化する (RULE.md §7.2)。refresh_token が
-      // 今回返らない場合は既存 (暗号化済み) 値をそのまま保持する。
-      googleAccessToken: encryptSecret(tokenData.access_token),
-      googleRefreshToken: tokenData.refresh_token
-        ? encryptSecret(tokenData.refresh_token)
-        : userRows[0].googleRefreshToken,
-      googleTokenExpiresAt: Math.floor(Date.now() / 1000) + tokenData.expires_in,
+      displayName: userRows[0].displayNameSource === "user" ? userRows[0].displayName : gUser.name,
+      displayNameSource: userRows[0].displayNameSource === "user" ? "user" : verified.identity.name ? "idp" : "provisional",
+      avatarUrl: gUser.picture ?? userRows[0].avatarUrl, email,
       lastLoginAt: now, updatedAt: now,
     }).where(eq(schema.users.id, userId));
   } else {
+    const sameEmail = await db.select({ id: schema.users.id }).from(schema.users)
+      .where(eq(schema.users.email, gUser.email)).limit(1);
+    if (sameEmail.length > 0) {
+      throw AppError.conflict("Sign in to your existing Cernere account and link Google from your profile");
+    }
     const countResult = await db.select({ count: sql<number>`count(*)` }).from(schema.users);
-    userRole = Number(countResult[0]?.count ?? 0) === 0 ? "admin" : "general";
+    const userRole = Number(countResult[0]?.count ?? 0) === 0 ? "admin" : "general";
     userId = crypto.randomUUID();
     await db.insert(schema.users).values({
-      id: userId, googleId: gUser.id, login: gUser.email.split("@")[0],
+      id: userId, googleId: gUser.id, login: `google_${userId}`,
       displayName: gUser.name, avatarUrl: gUser.picture, email: gUser.email,
-      role: userRole, googleAccessToken: encryptSecret(tokenData.access_token),
-      googleRefreshToken: tokenData.refresh_token ? encryptSecret(tokenData.refresh_token) : null,
-      googleTokenExpiresAt: Math.floor(Date.now() / 1000) + tokenData.expires_in,
+      displayNameSource: verified.identity.name ? "idp" : "provisional",
+      role: userRole,
       lastLoginAt: now, createdAt: now, updatedAt: now,
     });
   }
 
-  // JWT token pair
-  const { accessToken, refreshToken } = generateTokenPair(userId, userRole);
-  const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
-  await db.insert(schema.refreshSessions).values({
-    id: crypto.randomUUID(), userId, refreshToken: hashRefreshToken(refreshToken), expiresAt,
-  });
-
-  // Auth code → Redis (フロントが exchange で取得)
-  const authCode = crypto.randomUUID();
-  const authCodeTtl = isCompositeGoogle ? 60 : 300;
-  await redis.set(`authcode:${authCode}`, JSON.stringify({
-    accessToken, refreshToken, user: { id: userId, displayName: gUser.name, email: gUser.email, role: userRole },
-  }), "EX", authCodeTtl);
+  // Use the common short-lived Cr exchange code, with the current DB profile/role.
+  const authCode = await issueAuthCodeForUserId(userId);
+  if (!authCode) throw AppError.unauthorized("Google sign-in account is unavailable");
 
   logAuthEvent({ event: "user.oauth", userId, email: gUser.email, provider: "google", composite: isCompositeGoogle, ip: ctx.ip, userAgent: ctx.userAgent });
 
-  if (aborted) return;
+  if (isAborted()) return;
 
   // Composite flow: composite callback にリダイレクト
   if (isCompositeGoogle) {
@@ -590,7 +553,14 @@ async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader
     return;
   }
 
-  redirect(res, `${frontend}?authCode=${authCode}`, [
+  const callback = new URL(`${frontend}/login/google/callback`);
+  callback.searchParams.set("code", authCode);
+  if (!verified.browserState) throw AppError.unauthorized("Google sign-in browser binding is missing");
+  callback.searchParams.set("browser_state", verified.browserState);
+  if (verified.oidcRequestId) {
+    callback.searchParams.set("redirect", `/oidc/consent?request_id=${verified.oidcRequestId}`);
+  }
+  redirect(res, callback.toString(), [
     deleteCookieHeader(CSRF_COOKIE),
   ]);
 }

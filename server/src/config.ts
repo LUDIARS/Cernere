@@ -54,6 +54,7 @@ export const config = {
   // Google OAuth
   googleClientId: env("GOOGLE_CLIENT_ID", ""),
   googleClientSecret: env("GOOGLE_CLIENT_SECRET", ""),
+  googleOidcHostedDomains: env("GOOGLE_OIDC_HOSTED_DOMAINS", ""),
   googleRedirectUri: env("GOOGLE_REDIRECT_URI", "http://localhost:8080/auth/google/callback"),
 
   // Discord OAuth (identity linking only)

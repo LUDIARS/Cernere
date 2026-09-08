@@ -12,6 +12,8 @@ import { CompositeCallbackPage } from "./pages/composite/CompositeCallbackPage";
 import { DeviceRegisterPage } from "./pages/DeviceRegisterPage";
 import { OidcConsentPage } from "./pages/oidc/OidcConsentPage";
 import { CheckinPage } from "./pages/CheckinPage";
+import { GoogleSignInPage } from "./pages/GoogleSignInPage";
+import { OAuthCallbackPage } from "./pages/OAuthCallbackPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -39,6 +41,8 @@ function AppRoutes() {
 
   return (
     <Routes>
+      <Route path="/login/google/start" element={<GoogleSignInPage />} />
+      <Route path="/login/google/callback" element={<OAuthCallbackPage />} />
       {/* Composite: 他サービス組み込み用 (アプリシェルなし) */}
       <Route path="/composite/login" element={<CompositeLoginPage />} />
       <Route path="/composite/callback" element={<CompositeCallbackPage />} />
