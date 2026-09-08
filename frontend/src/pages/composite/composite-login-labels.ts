@@ -7,6 +7,16 @@ import type { CompositeLoginLabels } from "@ludiars/cernere-composite/ui";
 
 export const CERNERE_LOGIN_LABELS: Partial<CompositeLoginLabels> = {
   title: "Cernere",
+  mfaTitle: "追加の本人確認",
+  mfaCode: "6桁の確認コード",
+  submitMfa: "コードを確認",
+  mfaMethod: "確認方法",
+  mfaTotp: "Authenticator アプリ",
+  mfaEmail: "メール",
+  mfaSend: "メールコードを送信・再送",
+  mfaSent: "登録メールへコードを送信しました。再送は60秒後から可能です。",
+  mfaHint: "開始から5分以内に入力してください。Authenticator の同じコードは再利用できません。",
+  mfaCancel: "最初からやり直す",
   subtitle: "Sign in to continue",
   subtitlePasskeyOnly: "Passkey でログイン",
   loginTab: "Login",

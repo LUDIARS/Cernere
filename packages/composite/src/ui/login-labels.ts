@@ -30,6 +30,13 @@ export interface CompositeLoginLabels {
   mfaTitle: string;
   mfaCode: string;
   submitMfa: string;
+  mfaMethod: string;
+  mfaTotp: string;
+  mfaEmail: string;
+  mfaSend: string;
+  mfaSent: string;
+  mfaHint: string;
+  mfaCancel: string;
   // ── パスキー ──────────────────
   passkeyLogin: string;
   passkeyRetry: string;
@@ -83,6 +90,13 @@ export const DEFAULT_LABELS: CompositeLoginLabels = {
   mfaTitle: "MFA Verification",
   mfaCode: "Code",
   submitMfa: "Verify",
+  mfaMethod: "Verification method",
+  mfaTotp: "Authenticator app",
+  mfaEmail: "Email",
+  mfaSend: "Send / resend email code",
+  mfaSent: "Code sent to your registered email. Wait 60 seconds before resending.",
+  mfaHint: "Enter the 6-digit code within 5 minutes. Each Authenticator code can be used only once.",
+  mfaCancel: "Start again",
   passkeyLogin: "🔐 Sign in with passkey (biometrics / Windows Hello PIN / security key)",
   passkeyRetry: "🔐 Try passkey again",
   passkeyRunning: "Waiting for your authenticator...",

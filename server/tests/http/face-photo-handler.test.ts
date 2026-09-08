@@ -50,7 +50,7 @@ function multipart(bytes: Buffer, mime = "image/jpeg"): { body: Buffer; contentT
 describe("face photo HTTP boundary", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.verifyToken.mockReturnValue({ sub: USER_ID, role: "user" });
+    mocks.verifyToken.mockReturnValue({ sub: USER_ID, role: "user", tokenType: "user_access" });
     mocks.requireServiceScope.mockResolvedValue({
       kind: "tool",
       subject: "svc",

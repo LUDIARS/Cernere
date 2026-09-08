@@ -48,7 +48,8 @@
   "specRefs": [
     "1.1 Cernere 概要",
     "フロントエンド",
-    "SPEC-GOOGLE-OIDC-HANDOFF"
+    "SPEC-GOOGLE-OIDC-HANDOFF",
+    "SPEC-MFA-SETTINGS"
   ],
   "rationale": "The React frontend (pages, hooks, client lib) is a coherent presentation domain consuming the WS/auth backend."
 }

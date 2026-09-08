@@ -87,6 +87,8 @@ export interface CompositeAuthApi extends Partial<CompositePasskeyApi> {
   register(params: { name: string; email?: string; password?: string; device?: DeviceFingerprint }): Promise<CompositeAuthResponse>;
   /** MFA チャレンジ応答 (任意) */
   mfaVerify?(params: { mfaToken: string; method: string; code: string; device?: DeviceFingerprint }): Promise<CompositeAuthResponse>;
+  /** 登録済みメールへ MFA コードを送信・再送する。 */
+  mfaSendCode?(params: { mfaToken: string; method: string }): Promise<void>;
   /** デバイス本人確認: 確認コードを検証し authCode を取得する */
   deviceVerify?(params: { deviceToken: string; code: string }): Promise<CompositeAuthResponse>;
   /** 確認コードを再送する */

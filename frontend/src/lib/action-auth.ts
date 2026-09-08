@@ -7,6 +7,7 @@ import type {
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 export type ProtectedAction =
+  | "mfa.manage"
   | "passkey.register"
   | "passkey.delete"
   | "passkey.device_link"

@@ -77,7 +77,11 @@
     "顔テンプレート保存・配布",
     "トークン用途の分離",
     "SPEC-GOOGLE-OIDC-REQUEST",
-    "SPEC-GOOGLE-OIDC-VERIFICATION"
+    "SPEC-GOOGLE-OIDC-VERIFICATION",
+    "SPEC-MFA-TOTP",
+    "SPEC-MFA-CHALLENGE",
+    "SPEC-MFA-EMAIL",
+    "SPEC-MFA-SETTINGS"
   ],
   "rationale": "Authentication methods and biometric identity material (templates and sealed face photos) converge in server/src/auth, identity, oidc, and http; the id-service package is the reusable SDK for the same concern."
 }

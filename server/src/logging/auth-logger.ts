@@ -25,6 +25,7 @@ type AuthEventType =
   | "user.ws.disconnect"
   | "user.mfa.challenge"
   | "user.mfa.verified"
+  | "user.mfa.settings.changed"
   | "project.login"
   | "project.login.failed"
   | "project.ws.connect"

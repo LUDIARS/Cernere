@@ -104,22 +104,6 @@ interface MfaChallengeResponse {
   mfaMethods: string[];
 }
 
-interface TotpSetupResponse {
-  secret: string;
-  provisioningUri: string;
-}
-
-interface MfaStatusResponse {
-  mfaEnabled: boolean;
-  methods: string[];
-  totpEnabled: boolean;
-  hasPhone: boolean;
-  phoneVerified: boolean;
-  hasEmail: boolean;
-  smsAvailable: boolean;
-  emailMfaAvailable: boolean;
-}
-
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE}${path}`;
   const headers: Record<string, string> = {
@@ -432,27 +416,8 @@ export const auth = {
 
   isMfaChallenge,
 
-  async mfaStatus(): Promise<MfaStatusResponse> {
-    return request<MfaStatusResponse>("/api/auth/mfa/status");
-  },
-
-  async mfaTotpSetup(): Promise<TotpSetupResponse> {
-    return request<TotpSetupResponse>("/api/auth/mfa/totp/setup", { method: "POST" });
-  },
-
-  async mfaTotpEnable(code: string): Promise<void> {
-    await request("/api/auth/mfa/totp/enable", {
-      method: "POST",
-      body: JSON.stringify({ code }),
-    });
-  },
-
-  async mfaTotpDisable(code: string): Promise<void> {
-    await request("/api/auth/mfa/totp/disable", {
-      method: "POST",
-      body: JSON.stringify({ code }),
-    });
-  },
+  // MFA の状態取得と要素の登録/解除は mfaApi (lib/mfa-api.ts) を直接使う。
+  // management token を扱う経路をひとつに保つため、ここには再輸出を置かない。
 
   async mfaSmsSetup(phoneNumber: string): Promise<void> {
     await request("/api/auth/mfa/sms/setup", {
@@ -476,20 +441,16 @@ export const auth = {
     await request("/api/auth/mfa/sms/disable", { method: "POST" });
   },
 
-  async mfaEmailEnable(): Promise<void> {
-    await request("/api/auth/mfa/email/enable", { method: "POST" });
-  },
-
-  async mfaEmailDisable(): Promise<void> {
-    await request("/api/auth/mfa/email/disable", { method: "POST" });
-  },
-
   async mfaSendCode(mfaToken: string, method: string): Promise<void> {
-    await fetch(`${API_BASE}/api/auth/mfa/send-code`, {
+    const response = await fetch(`${API_BASE}/api/auth/mfa/send-code`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mfaToken, method }),
     });
+    if (!response.ok) {
+      const data = await response.json() as { error?: string };
+      throw new Error(data.error ?? "MFA code delivery failed");
+    }
   },
 
   async mfaVerify(mfaToken: string, method: string, code: string): Promise<AuthResponse> {

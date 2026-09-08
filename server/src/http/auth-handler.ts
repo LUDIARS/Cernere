@@ -6,6 +6,7 @@
  */
 
 import bcrypt from "bcryptjs";
+import { beginMfaChallenge } from "../auth/mfa-challenge.js";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
@@ -167,7 +168,7 @@ async function login(p: Record<string, unknown>, ctx: RequestCtx): Promise<Route
   }
 
   if (user.mfaEnabled) {
-    return { status: "200 OK", data: { mfaRequired: true, mfaMethods: user.mfaMethods ?? [] } };
+    return { status: "200 OK", data: await beginMfaChallenge(user, { purpose: "rest" }) };
   }
 
   const now = new Date();

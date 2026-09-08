@@ -17,6 +17,7 @@ LUDIARS 認証プラットフォーム Cernere の仕様書。AIFormat
 | [volputas-survey-responses.md](feature/volputas-survey-responses.md) | Volputas設問とCernere本人回答の分離保管 |
 | [oidc-provider.md](feature/oidc-provider.md) | Cernere を OpenID Connect Provider として外部 RP に提供 |
 | [google-oidc-identity-source.md](feature/google-oidc-identity-source.md) | Google を Cr の外部認証元にし、署名・nonce・PKCE とブラウザの戻りを検証 |
+| [mfa-authenticator.md](feature/mfa-authenticator.md) | Authenticator の QR 登録、TOTP / メール OTP、ログインと設定変更の本人確認 |
 | [edge-assertion-login.md](feature/edge-assertion-login.md) | **Proposed**: Cloudflare Access 等のエッジ認証を Cernere へバイパス |
 
 ### `interface/` — API・外部連携・セキュリティ境界
@@ -57,6 +58,7 @@ LUDIARS 認証プラットフォーム Cernere の仕様書。AIFormat
 |---|---|
 | [README.md](data/README.md) | スコープ（Cernere 所有 / 委託データ除外）+ テーブル一覧（ドメイン別） |
 | [schema.md](data/schema.md) | 静的テーブルの列定義・制約・インデックス・FK |
+| [mfa-authenticator.md](data/schema/mfa-authenticator.md) | MFA の暗号化鍵、TOTP 再利用防止、短期 challenge / grant の保存契約 |
 
 ※ 動的 `project_data_<key>`（他サービス委託データ）は対象外。
 

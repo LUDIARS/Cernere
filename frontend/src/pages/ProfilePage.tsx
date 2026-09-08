@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import QRCode from "qrcode";
 import { useAuth } from "../contexts/AuthContext";
 import { LinkedAccountsSection } from "./LinkedAccountsSection";
+import { MfaSettingsSection } from "./MfaSettingsSection";
 import { profile as profileApi, auth as authApi, faceTemplates, type UserProfileData, type ProfilePrivacy } from "../lib/api";
 
 export function ProfilePage() {
@@ -249,6 +250,7 @@ export function ProfilePage() {
         <DeviceLinkSection />
 
         <LinkedAccountsSection />
+        {user?.id && <MfaSettingsSection userId={user.id} />}
 
         <PasskeySection />
         <FaceTemplateSection />

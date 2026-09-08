@@ -21,7 +21,7 @@ function shouldLog(): boolean {
 
 const ENABLED = shouldLog();
 const SENSITIVE_QUERY_RELATION =
-  /\b(?:volputas_survey_(?:responses|answers)|users|user_profiles|user_data_optouts|managed_projects|project_definition_history)\b/i;
+  /\b(?:volputas_survey_(?:responses|answers)|users|user_profiles|user_data_optouts|managed_projects|project_definition_history|refresh_sessions)\b/i;
 
 function safeStringify(value: unknown): string {
   if (value === undefined) return "";

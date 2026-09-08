@@ -59,12 +59,13 @@ export async function dispatchProjectCommand(
     // ─── auth (embedded SPA login for mobile; CORS-free via project WS) ───
     case "auth.login":
     case "auth.register":
-    case "auth.mfa-verify": {
+    case "auth.mfa-verify":
+    case "auth.mfa-send-code": {
       const { executeCompositeAction } = await import("../http/composite-handler.js");
       // projectKey を ctx に載せて、認証完了時に project_data_<key> へ
       // 行を初期化できるようにする (ensureUserProjectRow).
       return executeCompositeAction(
-        action as "login" | "register" | "mfa-verify",
+        action as "login" | "register" | "mfa-verify" | "mfa-send-code",
         payload,
         { projectKey },
       );

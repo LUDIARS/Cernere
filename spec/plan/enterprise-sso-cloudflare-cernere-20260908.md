@@ -68,7 +68,8 @@ Cloudflare で MFA が完了しても通常の個人 Cr セッションを一律
 **現状のコードだけで MFA・失効まで統合済みとは扱わない。**
 OIDC に `amr` がなく、`auth_time` も現在は本人認証時刻ではなく同意承認時刻から作られる。
 edge assertion は外部の強度や期限を継承せず、通常の長期 refresh を発行する経路につながる。
-Cr 独自 TOTP / email MFA の完了器も未配線で、今回の修正は不正な成功を拒否するもの。
+Cr 独自 TOTP / email MFA は後続の [MFA 実装](../feature/mfa-authenticator.md) で配線する。
+その認証方法や実認証時刻を企業 OIDC / セッションに継承する機能は、この統合タスク側に残る。
 
 ## 実装タスク案
 

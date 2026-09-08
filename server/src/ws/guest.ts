@@ -8,7 +8,9 @@ import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { AppError } from "../error.js";
 import { checkRateLimit } from "../redis.js";
-import { generateTokenPair, generateMfaToken, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
+import { generateTokenPair, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
+import { beginMfaChallenge, sendMfaChallengeCode, verifyMfaChallenge, issueMfaLogin } from "../auth/mfa-challenge.js";
+import { parseMfaInput, requireMfaMethod } from "../auth/mfa-contract.js";
 import { hashRefreshToken } from "../auth/token-hash.js";
 
 export interface GuestAuthResult {
@@ -32,6 +34,15 @@ export async function handleGuestAuthCommand(
   switch (action) {
     case "register": return guestRegister(p);
     case "login": return guestLogin(p, ip);
+    case "mfa-verify": {
+      const input = parseMfaInput(p);
+      return verifyMfaChallenge(input.mfaToken ?? "", requireMfaMethod(input.method), input.code ?? "", { purpose: "guest" }, issueMfaLogin);
+    }
+    case "mfa-send-code": {
+      const input = parseMfaInput(p);
+      await sendMfaChallengeCode(input.mfaToken ?? "", requireMfaMethod(input.method), { purpose: "guest" });
+      return {};
+    }
     default:
       throw AppError.badRequest(`Guest auth action '${action}' not supported. Use 'register' or 'login'.`);
   }
@@ -100,9 +111,7 @@ async function guestLogin(p: Record<string, unknown>, ip?: string): Promise<Gues
 
   // MFA
   if (user.mfaEnabled) {
-    const methods = (user.mfaMethods as string[]) ?? [];
-    const mfaToken = generateMfaToken(user.id, user.role);
-    return { mfaRequired: true, mfaMethods: methods, mfaToken };
+    return beginMfaChallenge(user, { purpose: "guest" });
   }
 
   const now = new Date();

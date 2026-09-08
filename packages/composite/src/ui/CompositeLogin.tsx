@@ -140,6 +140,7 @@ export function CompositeLogin(props: CompositeLoginProps): ReactElement {
   const [password, setPassword] = useState("");
   const [mfaToken, setMfaToken] = useState("");
   const [mfaMethod, setMfaMethod] = useState("totp");
+  const [mfaMethods, setMfaMethods] = useState<string[]>([]);
   const [mfaCode, setMfaCode] = useState("");
   const [device, setDevice] = useState<DeviceChallenge | null>(null);
   const [deviceCode, setDeviceCode] = useState("");
@@ -148,6 +149,9 @@ export function CompositeLogin(props: CompositeLoginProps): ReactElement {
   const [loading, setLoading] = useState(false);
 
   const switchMode = (next: CompositeLoginMode) => {
+    setMfaToken("");
+    setMfaCode("");
+    setMfaMethods([]);
     setModeState(next);
     setError("");
     setInfo("");
@@ -169,8 +173,12 @@ export function CompositeLogin(props: CompositeLoginProps): ReactElement {
   const handleResponse = (r: CompositeAuthResponse) => {
     setInfo("");
     if (r.mfaRequired) {
-      setMfaToken(r.mfaToken ?? "");
-      setMfaMethod(r.mfaMethods?.[0] ?? "totp");
+      if (!r.mfaToken || !r.mfaMethods?.length) throw new Error("Invalid MFA challenge response");
+      setPassword("");
+      setMfaCode("");
+      setMfaToken(r.mfaToken);
+      setMfaMethods(r.mfaMethods);
+      setMfaMethod(r.mfaMethods[0] ?? "totp");
       setModeState("mfa");
       return;
     }
@@ -479,9 +487,27 @@ export function CompositeLogin(props: CompositeLoginProps): ReactElement {
         {mode === "mfa" && (
           <div style={{ marginBottom: "0.75rem" }}>
             <p style={{ fontSize: "0.9rem", marginBottom: "0.5rem" }}>{l.mfaTitle}</p>
+            <label style={labelStyle}>{l.mfaMethod}
+              <select value={mfaMethod} disabled={loading} style={inputStyle} onChange={(event) => { setMfaMethod(event.target.value); setMfaCode(""); setInfo(""); setError(""); }}>
+                {mfaMethods.map((method) => <option key={method} value={method}>{method === "totp" ? l.mfaTotp : method === "email" ? l.mfaEmail : method}</option>)}
+              </select>
+            </label>
+            {mfaMethod === "email" && <button type="button" disabled={loading || !authApi.mfaSendCode} onClick={async () => {
+              if (!authApi.mfaSendCode) return;
+              setLoading(true); setError(""); setInfo("");
+              try { await authApi.mfaSendCode({ mfaToken, method: mfaMethod }); setInfo(l.mfaSent); }
+              catch (err) { setError(err instanceof Error ? err.message : "MFA code delivery failed"); }
+              finally { setLoading(false); }
+            }}>{l.mfaSend}</button>}
+            <p style={hintStyle}>{l.mfaHint}</p>
             <label style={labelStyle}>{l.mfaCode}</label>
             <input
               type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              disabled={loading}
               value={mfaCode}
               onChange={(e) => setMfaCode(e.target.value)}
               placeholder="123456"
@@ -489,6 +515,7 @@ export function CompositeLogin(props: CompositeLoginProps): ReactElement {
               style={inputStyle}
               autoFocus
             />
+            <button type="button" disabled={loading} onClick={() => switchMode("login")}>{l.mfaCancel}</button>
           </div>
         )}
 

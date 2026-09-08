@@ -13,7 +13,8 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { checkRateLimit } from "../redis.js";
-import { AppError } from "../error.js";
+import { beginMfaChallenge, sendMfaChallengeCode, verifyMfaChallenge } from "../auth/mfa-challenge.js";
+import { parseMfaInput, requireMfaMethod } from "../auth/mfa-contract.js";
 import {
   logUserLogin,
   logUserLoginFailed,
@@ -49,6 +50,7 @@ export async function handleCompositeRoute(
     case "login": return compositeLogin(p, ctx);
     case "register": return compositeRegister(p, ctx);
     case "mfa-verify": return compositeMfaVerify(p, ctx);
+    case "mfa-send-code": return compositeMfaSendCode(p, ctx);
     default:
       return { status: "404 Not Found", data: { error: `Unknown composite action: ${action}` } };
   }
@@ -56,7 +58,7 @@ export async function handleCompositeRoute(
 
 /** project WS から呼ばれる auth コマンド用のエントリポイント */
 export async function executeCompositeAction(
-  action: "login" | "register" | "mfa-verify",
+  action: "login" | "register" | "mfa-verify" | "mfa-send-code",
   payload: Record<string, unknown>,
   ctx: CompositeCtx = {},
 ): Promise<unknown> {
@@ -64,6 +66,7 @@ export async function executeCompositeAction(
     case "login":      return (await compositeLogin(payload, ctx)).data;
     case "register":   return (await compositeRegister(payload, ctx)).data;
     case "mfa-verify": return (await compositeMfaVerify(payload, ctx)).data;
+    case "mfa-send-code": return (await compositeMfaSendCode(payload, ctx)).data;
   }
 }
 
@@ -141,7 +144,7 @@ async function compositeLogin(p: Record<string, unknown>, ctx: CompositeCtx): Pr
     logAuthEvent({ event: "user.mfa.challenge", userId: user.id, email: user.email ?? undefined, provider: "composite", ip: ctx.ip, userAgent: ctx.userAgent });
     return {
       status: "200 OK",
-      data: { mfaRequired: true, mfaMethods: user.mfaMethods ?? [] },
+      data: await beginMfaChallenge(user, { purpose: "composite", projectKey: ctx.projectKey }),
     };
   }
 
@@ -191,7 +194,14 @@ async function compositeRegister(p: Record<string, unknown>, ctx: CompositeCtx):
   );
 }
 
-async function compositeMfaVerify(_p: Record<string, unknown>, _ctx: CompositeCtx): Promise<RouteResult> {
-  // There is no configured factor issuer/verifier yet. A Redis ticket alone is not MFA proof.
-  throw AppError.serviceUnavailable("MFA verification is not configured");
+async function compositeMfaVerify(p: Record<string, unknown>, ctx: CompositeCtx): Promise<RouteResult> {
+  const { mfaToken, method, code } = parseMfaInput(p);
+  return verifyMfaChallenge(mfaToken ?? "", requireMfaMethod(method), code ?? "",
+    { purpose: "composite", projectKey: ctx.projectKey }, async (user) => openAuthSession(user, ctx));
+}
+
+async function compositeMfaSendCode(p: Record<string, unknown>, ctx: CompositeCtx): Promise<RouteResult> {
+  const { mfaToken, method } = parseMfaInput(p);
+  await sendMfaChallengeCode(mfaToken ?? "", requireMfaMethod(method), { purpose: "composite", projectKey: ctx.projectKey });
+  return { status: "200 OK", data: { sent: true } };
 }

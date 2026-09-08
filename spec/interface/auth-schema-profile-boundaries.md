@@ -19,10 +19,10 @@ project の既存検証器と署名形式は継続する。
 `authenticationVersion: 2` を付け、新しい正規認証経路が保存した session だけを再開する。
 旧 session の自動昇格や互換受理はしない。
 
-composite の MFA 完了処理には実際のコード照合器が配線されていない。
-任意の非空コードを成功扱いした経路を廃止し、`AppError(503)` で明示的に拒否する。
-**この変更は Cr 独自 TOTP / email MFA の完成を意味しない。** 対応済みの
-passkey 等を利用し、MFA 完了器は別途実装する。Cloudflare と企業認証を統合する案は
+当初の境界修正では、照合器がない composite MFA の任意コード成功を廃止し、503 で拒否した。
+後続の [Authenticator / メール MFA](../feature/mfa-authenticator.md) で実検証を配線する。
+完了器を実装しても用途分離は保持し、検証と一回限りの消費後にのみ通常ログインへ進む。
+Cloudflare と企業認証を統合する案は
 [企業 SSO 提案](../plan/enterprise-sso-cloudflare-cernere-20260908.md) に分ける。
 
 ## スキーマ既定値は SQL 式ではなく値
@@ -100,8 +100,8 @@ project 自身の `managed_project.update_schema` では `profile_access` を変
 - 旧 user access token / tool token / Redis session は受理されなくなる。
   user は再ログインまたは既存の正規 refresh 経路で更新し、tool は client credentials で再取得する。
   refresh_sessions を一括削除する変更は含まない。
-- MFA 設定済みの password login は、未実装の MFA 完了処理で成功しない。
-  利用可能な別認証手段の事前確認が必要。
+- MFA 設定済みの password login は、登録済み TOTP / メールコードの実検証が必要。
+  利用可能な別認証手段の事前確認と、MFA 後続仕様の migration・秘密設定が必要。
 - profile API 利用サービスには管理者が必要最小限の grant を設定する。
   自動で全ユーザー・全項目を付与する移行は行わない。更新応答の変更に利用側を合わせる。
 - SQL 式の既定値を使った既存定義は値へ置き換えてから再保存する。

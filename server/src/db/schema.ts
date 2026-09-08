@@ -41,10 +41,11 @@ export const users = pgTable("users", {
   discordUsername: text("discord_username"),
 
   // MFA
-  // totpSecret は秘密鍵。MFA 配線時は encryptSecret()/decryptSecret() を必ず通す
-  // こと (現状未配線で書込みコードは無い)。RULE.md §7.2。
+  // MFA secret は保存時に encryptSecret()/decryptSecret() を必ず通す。RULE.md §7.2。
   totpSecret: text("totp_secret"),
   totpEnabled: boolean("totp_enabled").notNull().default(false),
+  totpLastStep: bigint("totp_last_step", { mode: "number" }),
+  mfaRevision: integer("mfa_revision").notNull().default(0),
   phoneNumber: text("phone_number"),
   phoneVerified: boolean("phone_verified").notNull().default(false),
   mfaEnabled: boolean("mfa_enabled").notNull().default(false),

@@ -84,8 +84,7 @@ function currentUser(authHeader: string): string {
   if (typeof claims.sub !== "string"
     || typeof claims.role !== "string"
     || claims.owner !== undefined
-    || claims.tokenType === "project"
-    || claims.tokenType === "tool"
+    || claims.tokenType !== "user_access"
     || !uuidSchema.safeParse(claims.sub).success) {
     throw AppError.unauthorized("Invalid user access token");
   }

@@ -5,6 +5,7 @@ import { AppError } from "../error.js";
 export const ACTION_AUTH_TTL_SECONDS = 5 * 60;
 
 export const protectedActionSchema = z.enum([
+  "mfa.manage",
   "passkey.register",
   "passkey.delete",
   "passkey.device_link",

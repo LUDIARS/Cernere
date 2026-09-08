@@ -27,6 +27,8 @@ interface CompositeLoginResponse {
   ticket?: string;
   wsPath?: string;
   mfaRequired?: boolean;
+  mfaToken?: string;
+  mfaMethods?: string[];
   error?: string;
 }
 
@@ -92,6 +94,17 @@ export class CernereCompositeAuthAdapter implements CompositeAuthApi {
     return response;
   }
 
+  async mfaSendCode(params: { mfaToken: string; method: string }): Promise<void> {
+    await postJson(`${this.apiBase}/api/auth/composite/mfa-send-code`, params, "MFA code delivery failed");
+  }
+
+  async mfaVerify(params: { mfaToken: string; method: string; code: string; device?: DeviceFingerprint }): Promise<CompositeAuthResponse> {
+    const { mfaToken, method, code, device } = params;
+    const data = await postJson<CompositeLoginResponse>(`${this.apiBase}/api/auth/composite/mfa-verify`,
+      { mfaToken, method, code }, "MFA verification failed");
+    return this.completePasswordFlow(data, device);
+  }
+
   async deviceResend(): Promise<CompositeAuthResponse> {
     await this.requireSession().resend();
     return {};
@@ -138,8 +151,14 @@ export class CernereCompositeAuthAdapter implements CompositeAuthApi {
     const data = await postJson<CompositeLoginResponse>(
       `${this.apiBase}/api/auth/composite/${action}`, body, "Authentication failed");
     if (data.mfaRequired) {
-      throw new Error("MFA is required but not yet supported in composite mode.");
+      this.disposeSession();
+      if (!data.mfaToken || !data.mfaMethods?.length) throw new Error("Invalid MFA challenge response");
+      return { mfaRequired: true, mfaToken: data.mfaToken, mfaMethods: data.mfaMethods };
     }
+    return this.completePasswordFlow(data, device);
+  }
+
+  private async completePasswordFlow(data: CompositeLoginResponse, device: DeviceFingerprint | undefined): Promise<CompositeAuthResponse> {
     if (!data.wsPath) throw new Error("Missing wsPath in login response");
 
     // やり直し (前回の WS が残っている) は先に閉じてから張り直す。
