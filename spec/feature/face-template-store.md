@@ -1,5 +1,14 @@
 # 顔テンプレート保存・配布
 
+> **撤去予定 (2026-09-12 方針変更)**: 顔テンプレート・顔写真の正本は Ostiarius (施設 kiosk ホスト) の
+> ローカルへ移し、Cernere は生体情報を持たない。`face_templates` / `face_photos` (migration 041 / 045)、
+> `PUT/GET/DELETE /api/identity/face-template*`、`/api/identity/face-photo/*`、promote / reject、
+> `FACE_TEMPLATE_*` / `FACE_PHOTO_*` / `FACE_SIDECAR_URL` の各 env は撤去対象。
+> 残すのは `face-consent` 系、`roster`、`auth/code/exchange`、passkey export 拡張と、新設する
+> `GET /api/identity/face-revocations` / `GET /api/identity/face-consents` / `POST /api/identity/face-consent/revoke`
+> (契約は `Ostiarius/spec/interface/cernere-face-template.md` §A、方針は `Ostiarius/spec/plan/face-data-local-only.md`)。
+> 以下は撤去までの現行実装の記述。
+
 対面登録で受け取った顔写真や動画は保持せず、512 次元の特徴テンプレートだけを `face_templates` に AES-256-GCM で暗号化して保存する。本人が別途同意して登録するプロフィール顔写真だけは、後述の制約で 1 人 1 枚を封緘保存する。保存暗号文には user・facility・model・version を AAD として結び付け、DB 内で暗号文やメタデータを差し替えても認証に失敗させる。
 
 ## API
