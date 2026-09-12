@@ -233,63 +233,22 @@ export const faceConsents = pgTable("face_consents", {
   index("idx_face_consents_user_facility").on(t.userId, t.facilityId),
 ]);
 
-// ── Face templates ──────────────────────────────────────────
-// 生テンプレートは決して DB に置かない。templateEnc は AES-256-GCM の
-// nonce/ciphertext/tag を結合した bytea で、復号は専用 service に閉じる。
-export const faceTemplates = pgTable("face_templates", {
-  id: uuid("id").primaryKey(),
-  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  templateEnc: bytea("template_enc").notNull(),
-  keyId: text("key_id").notNull(),
-  modelId: text("model_id").notNull(),
-  quality: integer("quality").notNull(),
-  version: integer("version").notNull(),
-  facilityId: uuid("facility_id").notNull().references(() => organizations.id),
-  // 登録担当者の退会が、他ユーザーのテンプレート削除をブロックしないよう nullable。
-  enrolledBy: uuid("enrolled_by").references(() => users.id, { onDelete: "set null" }),
-  consentId: uuid("consent_id").notNull().references(() => faceConsents.id),
-  revokedAt: timestamp("revoked_at", { withTimezone: true }),
-  // 'pending' = 写真から自動抽出しただけで職員未承認。export (照合配布) に出さない。
-  // 'active'   = 職員が承認済み。照合に使ってよい。
-  // 'revoked'  = 失効済み (通常は物理削除 + tombstone なので過渡状態のみ)。
-  state: text("state").notNull().default("active"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [
-  uniqueIndex("idx_face_templates_user_facility").on(t.userId, t.facilityId),
-  index("idx_face_templates_facility_active").on(t.facilityId, t.revokedAt),
-  index("idx_face_templates_facility_state").on(t.facilityId, t.state),
-]);
-
-export const faceTemplateTombstones = pgTable("face_template_tombstones", {
+// ── Face revocations (失効指示) ────────────────────
+// 顔テンプレート・顔写真の正本は Ostiarius (施設 kiosk ホスト) にあり、Cernere は
+// 「この人の登録を消せ」という指示だけを持つ (spec/feature/face-consent-and-revocation.md)。
+// 生体情報を一切含めない。30 日で回収する。
+//
+// user_id / facility_id に FK を張らないのは意図的。アカウント削除・施設削除は
+// それ自身が失効指示の発生源なので、cascade で指示が消えると Ostiarius 側に
+// 生体情報が残る (face_template_tombstones と同じ設計)。
+export const faceRevocations = pgTable("face_revocations", {
   id: uuid("id").primaryKey(),
   userId: uuid("user_id").notNull(),
   facilityId: uuid("facility_id").notNull(),
-  version: integer("version").notNull(),
-  revokedAt: timestamp("revoked_at", { withTimezone: true }).notNull(),
   reason: text("reason").notNull(),
+  at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
-  index("idx_face_template_tombstones_facility_time").on(t.facilityId, t.revokedAt),
-]);
-
-// ── Face photos ─────────────────────────────────────────────
-// プロフィール顔写真は 1 人 1 枚。ciphertext / iv / tag を分けて持ち、
-// テンプレートとは別鍵 (keyId) で封緘する。復号は face-photo-store に閉じる。
-export const facePhotos = pgTable("face_photos", {
-  id: uuid("id").primaryKey(),
-  userId: uuid("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
-  ciphertext: bytea("ciphertext").notNull(),
-  iv: bytea("iv").notNull(),
-  tag: bytea("tag").notNull(),
-  keyId: text("key_id").notNull(),
-  mime: text("mime").notNull(),
-  width: integer("width").notNull(),
-  height: integer("height").notNull(),
-  byteSize: integer("byte_size").notNull(),
-  consentId: uuid("consent_id").notNull().references(() => faceConsents.id, { onDelete: "cascade" }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [
-  index("idx_face_photos_consent").on(t.consentId),
+  index("idx_face_revocations_facility_time").on(t.facilityId, t.at),
 ]);
 
 export const organizationMembers = pgTable("organization_members", {

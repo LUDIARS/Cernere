@@ -11,8 +11,9 @@ import { handleAuthRoute } from "./http/auth-handler.js";
 import { registerMfaRoutes } from "./http/mfa-routes.js";
 import { handlePasskeyRoute } from "./http/passkey-handler.js";
 import { handleDeviceRoute } from "./http/device-handler.js";
-import { handleFaceTemplateRoute } from "./http/face-template-handler.js";
-import { handleFacePhotoRoute } from "./http/face-photo-handler.js";
+import { handleFaceConsentRoute } from "./http/face-consent-handler.js";
+import { handleFaceRevocationRoute } from "./http/face-revocation-handler.js";
+import { handleIdentityRosterRoute } from "./http/identity-roster-handler.js";
 import { handleActionAuthRoute } from "./http/action-auth-handler.js";
 import { handleAuthCodeExchange } from "./http/auth-code-exchange-handler.js";
 import { exportProjectSchemas } from "./http/project-schema-handler.js";
@@ -174,27 +175,6 @@ function jsonResponse(
     for (const [name, value] of Object.entries(headers)) res.writeHeader(name, value);
     for (const cookie of cookies) res.writeHeader("Set-Cookie", cookie);
     res.end(JSON.stringify(data));
-  });
-}
-
-/**
- * 画像などのバイナリ応答。個人データなので中間キャッシュに残さない
- * (private, no-store) ことを応答側で強制する。
- */
-function binaryResponse(
-  res: uWS.HttpResponse,
-  status: string,
-  contentType: string,
-  bytes: Buffer,
-): void {
-  res.cork(() => {
-    res.writeStatus(status)
-      .writeHeader("Content-Type", contentType)
-      .writeHeader("Cache-Control", "private, no-store")
-      .writeHeader("X-Content-Type-Options", "nosniff")
-      .writeHeader("Access-Control-Allow-Origin", config.frontendUrl)
-      .writeHeader("Access-Control-Allow-Credentials", "true");
-    res.end(bytes);
   });
 }
 
@@ -602,24 +582,21 @@ export function createApp() {
     }
   });
 
-  // ── Face template / consent / roster ──────────────────────
-  // 全メソッドを一箇所で受け、認可と保存境界は face-template-handler に閉じる。
-  const registerFaceRoute = (method: "get" | "post" | "put" | "delete", url: string, path: string) => {
+  // ── Face consent / failed-consent revocation / roster ─────
+  // 顔テンプレートと顔写真は Cernere に存在しない (正本は施設 kiosk の Ostiarius)。
+  // ここで受けるのは同意記録・失効指示・名簿だけで、認可と保存境界は各 handler に閉じる。
+  const registerFaceConsentRoute = (method: "get" | "post" | "delete", url: string, path: string) => {
     const handler = async (res: uWS.HttpResponse, req: uWS.HttpRequest) => {
       const authHeader = req.getHeader("authorization") ?? "";
       const query = req.getQuery() ?? "";
-      const readsBody = method === "post" || method === "put"
-        || (method === "delete" && path === "template/:userId");
+      const readsBody = method === "post";
       let aborted = false;
       if (!readsBody) res.onAborted(() => { aborted = true; });
       try {
-        // base64 template を含めても 1 MiB を超える payload は受理しない。
-        const body = readsBody
-          ? await readBody(res, 1_100_000, () => { aborted = true; })
-          : "";
+        // 同意・撤回の payload は小さい。生体情報を運ばないので 16 KiB で足りる。
+        const body = readsBody ? await readBody(res, 16_384, () => { aborted = true; }) : "";
         if (aborted) return;
-        const actualPath = path === "template/:userId" ? `template/${req.getParameter(0) ?? ""}` : path;
-        const result = await handleFaceTemplateRoute(method.toUpperCase(), actualPath, body, authHeader, query);
+        const result = await handleFaceConsentRoute(method.toUpperCase(), path, body, authHeader, query);
         jsonResponse(res, result.status, result.data);
       } catch (err) {
         if (aborted) return;
@@ -630,69 +607,48 @@ export function createApp() {
     switch (method) {
       case "get": app.get(url, handler); break;
       case "post": app.post(url, handler); break;
-      case "put": app.put(url, handler); break;
       case "delete": app.del(url, handler); break;
     }
   };
-  registerFaceRoute("get", "/api/identity/face-consent/policy", "policy");
-  registerFaceRoute("post", "/api/identity/face-consent", "consent");
-  registerFaceRoute("get", "/api/identity/face-template/status", "status");
-  registerFaceRoute("put", "/api/identity/face-template", "template");
-  registerFaceRoute("delete", "/api/identity/face-template", "template");
-  registerFaceRoute("delete", "/api/identity/face-template/:userId", "template/:userId");
-  registerFaceRoute("get", "/api/identity/face-template/export", "export");
-  registerFaceRoute("get", "/api/identity/roster", "roster");
+  registerFaceConsentRoute("get", "/api/identity/face-consent/policy", "policy");
+  registerFaceConsentRoute("post", "/api/identity/face-consent", "consent");
+  registerFaceConsentRoute("delete", "/api/identity/face-consent", "consent");
+  registerFaceConsentRoute("get", "/api/identity/face-consent/status", "status");
+  registerFaceConsentRoute("post", "/api/identity/face-consent/revoke", "consent/revoke");
+  registerFaceConsentRoute("get", "/api/identity/face-consents", "consents");
 
-  // ── Face photo (プロフィール顔写真 / pending テンプレート審査) ──
-  // 写真は個人データそのものなので、一括取得の口を作らず 1 件ずつだけ返す。
-  // multipart と画像バイトを扱うため body は Buffer のまま handler へ渡す。
-  const FACE_PHOTO_MAX_BYTES = 12 * 1024 * 1024;
-  const registerFacePhotoRoute = (
-    method: "get" | "post" | "delete",
-    url: string,
-    resolvePath: (req: uWS.HttpRequest) => string,
-  ) => {
-    const handler = async (res: uWS.HttpResponse, req: uWS.HttpRequest) => {
-      const authHeader = req.getHeader("authorization") ?? "";
-      const contentType = req.getHeader("content-type") ?? "";
-      const query = req.getQuery() ?? "";
-      const path = resolvePath(req);
-      const readsBody = method === "post" || method === "delete";
-      let aborted = false;
-      if (!readsBody) res.onAborted(() => { aborted = true; });
-      try {
-        const body = readsBody
-          ? await readBodyBuffer(res, FACE_PHOTO_MAX_BYTES, () => { aborted = true; })
-          : Buffer.alloc(0);
-        if (aborted) return;
-        const result = await handleFacePhotoRoute({ method: method.toUpperCase(), path, body, contentType, authHeader, query });
-        if (result.binary) binaryResponse(res, result.status, result.binary.contentType, result.binary.bytes);
-        else jsonResponse(res, result.status, result.data);
-      } catch (err) {
-        if (aborted) return;
-        const { status, message, code } = classifyError(err);
-        jsonResponse(res, status, code ? { error: message, code } : { error: message });
-      }
-    };
-    switch (method) {
-      case "get": app.get(url, handler); break;
-      case "post": app.post(url, handler); break;
-      case "delete": app.del(url, handler); break;
+  // 失効指示の pull と名簿は GET のみ。body を読まない。
+  app.get("/api/identity/face-revocations", async (res, req) => {
+    const authHeader = req.getHeader("authorization") ?? "";
+    const query = req.getQuery() ?? "";
+    let aborted = false;
+    res.onAborted(() => { aborted = true; });
+    try {
+      const result = await handleFaceRevocationRoute("GET", authHeader, query);
+      if (aborted) return;
+      jsonResponse(res, result.status, result.data);
+    } catch (err) {
+      if (aborted) return;
+      const { status, message, code } = classifyError(err);
+      jsonResponse(res, status, code ? { error: message, code } : { error: message });
     }
-  };
-  // /me と /:userId は uWS のパターン優先順位に依存させず、param 値で分岐する。
-  const photoTarget = (req: uWS.HttpRequest) => {
-    const param = req.getParameter(0) ?? "";
-    return param === "me" ? "photo/me" : `photo/${param}`;
-  };
-  registerFacePhotoRoute("post", "/api/identity/face-photo", () => "photo");
-  registerFacePhotoRoute("delete", "/api/identity/face-photo", () => "photo");
-  registerFacePhotoRoute("get", "/api/identity/face-photo/:userId", photoTarget);
-  registerFacePhotoRoute("delete", "/api/identity/face-photo/:userId", photoTarget);
-  registerFacePhotoRoute("post", "/api/identity/face-template/:userId/promote",
-    (req) => `template/${req.getParameter(0) ?? ""}/promote`);
-  registerFacePhotoRoute("post", "/api/identity/face-template/:userId/reject",
-    (req) => `template/${req.getParameter(0) ?? ""}/reject`);
+  });
+
+  app.get("/api/identity/roster", async (res, req) => {
+    const authHeader = req.getHeader("authorization") ?? "";
+    const query = req.getQuery() ?? "";
+    let aborted = false;
+    res.onAborted(() => { aborted = true; });
+    try {
+      const result = await handleIdentityRosterRoute("GET", authHeader, query);
+      if (aborted) return;
+      jsonResponse(res, result.status, result.data);
+    } catch (err) {
+      if (aborted) return;
+      const { status, message, code } = classifyError(err);
+      jsonResponse(res, status, code ? { error: message, code } : { error: message });
+    }
+  });
 
   // ── Project schema export (GET): スキーマ定義 shape のみ (admin/service 限定) ──
   // Foedus (クロスサービス契約/PII レビューア) がコミット済み JSON の代わりに

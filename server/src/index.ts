@@ -7,7 +7,8 @@ import { createApp } from "./app.js";
 import { redis } from "./redis.js";
 import { runMigrations } from "./db/migrate.js";
 import { initOidcKeys } from "./auth/oidc-keys.js";
-import { purgeExpiredFaceTemplates } from "./identity/face-template-store.js";
+import { purgeExpiredFaceConsents } from "./identity/face-consent-store.js";
+import { purgeExpiredFaceRevocations } from "./identity/face-revocation-store.js";
 
 async function main() {
   console.log("=== Cernere Server (uWebSockets.js) ===");
@@ -23,7 +24,8 @@ async function main() {
   assertRuntimeSecrets();
 
   await runMigrations();
-  await purgeExpiredFaceTemplates();
+  await purgeExpiredFaceConsents();
+  await purgeExpiredFaceRevocations();
   await redis.connect();
   await initOidcKeys();
 

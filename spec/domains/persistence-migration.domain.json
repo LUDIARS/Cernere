@@ -1,6 +1,6 @@
 {
   "name": "persistence-migration",
-  "description": "Drizzle ORM schema, DB connection, and numbered idempotent SQL migrations with the no-DROP / logical-delete rules.",
+  "description": "Drizzle ORM schema, DB connection, and numbered idempotent SQL migrations with the no-DROP / logical-delete rules. Physical DROP stays prohibited; the face biometric tables (face_templates / face_photos / face_template_tombstones) are now unreferenced and their drop migration is deferred until the no-DROP exception is approved, see spec/feature/face-consent-and-revocation.md.",
   "presetRules": [],
   "templateRules": [],
   "membership": [
@@ -33,5 +33,5 @@
     "冪等性",
     "禁止事項"
   ],
-  "rationale": "db/ + migrations/ + migration-scanner form the data-persistence and schema-evolution domain governed by explicit migration rules."
+  "rationale": "db/ + migrations/ + migration-scanner form the data-persistence and schema-evolution domain governed by explicit migration rules. Physical DROP stays an explicitly documented exception, not a precedent."
 }

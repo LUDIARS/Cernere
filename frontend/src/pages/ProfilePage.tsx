@@ -4,7 +4,7 @@ import QRCode from "qrcode";
 import { useAuth } from "../contexts/AuthContext";
 import { LinkedAccountsSection } from "./LinkedAccountsSection";
 import { MfaSettingsSection } from "./MfaSettingsSection";
-import { profile as profileApi, auth as authApi, faceTemplates, type UserProfileData, type ProfilePrivacy } from "../lib/api";
+import { profile as profileApi, auth as authApi, faceConsents, type UserProfileData, type ProfilePrivacy } from "../lib/api";
 
 export function ProfilePage() {
   const { user } = useAuth();
@@ -253,30 +253,30 @@ export function ProfilePage() {
         {user?.id && <MfaSettingsSection userId={user.id} />}
 
         <PasskeySection />
-        <FaceTemplateSection />
+        <FaceConsentSection />
       </div>
     </div>
   );
 }
 
-function FaceTemplateSection() {
-  const [items, setItems] = useState<Awaited<ReturnType<typeof faceTemplates.status>>["items"]>([]);
+function FaceConsentSection() {
+  const [items, setItems] = useState<Awaited<ReturnType<typeof faceConsents.status>>["items"]>([]);
   const [message, setMessage] = useState("");
   const refresh = useCallback(async () => {
-    try { setItems((await faceTemplates.status()).items); }
+    try { setItems((await faceConsents.status()).items); }
     catch (error) { setMessage(`⚠ ${(error as Error).message}`); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
-  const remove = async (facilityId: string) => {
-    if (!window.confirm("この施設の顔認証登録を削除しますか？ 顔写真も同時に削除されます。この操作は取り消せません。")) return;
-    try { await faceTemplates.remove(facilityId); setMessage("✓ 顔認証の登録を削除しました"); await refresh(); }
+  const revoke = async (facilityId: string) => {
+    if (!window.confirm("この施設の顔認証の同意を撤回しますか？ 施設の受付端末にある顔データは同期時に削除されます。この操作は取り消せません。")) return;
+    try { await faceConsents.revoke(facilityId); setMessage("✓ 顔認証の同意を撤回しました"); await refresh(); }
     catch (error) { setMessage(`⚠ ${(error as Error).message}`); }
   };
   return <div style={{ background: "var(--bg-surface-2)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "1.5rem", marginTop: "1rem" }}>
     <h2 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.5rem", color: "var(--text-muted)" }}>顔認証</h2>
-    <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>顔写真とそこから作られた顔テンプレートは暗号化して保持されます。写真は職員の名簿・出席確認画面と、このプロフィールでのみ表示されます。削除すると写真とテンプレートは同時に消えます。</p>
+    <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>顔の特徴テンプレートと顔写真は施設の受付端末 (kiosk) にのみ暗号化して保存され、施設外へは出ません。ここには同意の記録だけがあります。撤回すると、施設の端末にある顔データは同期時に削除されます。</p>
     {message && <p style={{ fontSize: "0.8rem", color: message.startsWith("⚠") ? "var(--red)" : "var(--green)" }}>{message}</p>}
-    {items.length === 0 ? <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>顔認証は登録されていません。</p> : <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>{items.map((item) => <li key={item.facilityId} style={{ display: "flex", gap: "0.75rem", alignItems: "center", padding: "0.5rem 0" }}><span style={{ flex: 1, fontSize: "0.85rem" }}>{item.state === "pending" ? "審査待ち (pending)" : "登録済み"} ({new Date(item.enrolledAt).toLocaleDateString()})</span><button type="button" onClick={() => { void remove(item.facilityId); }} style={{ color: "var(--red)", border: "1px solid var(--red)", background: "transparent", borderRadius: "var(--radius-sm)", padding: "0.25rem 0.6rem" }}>削除</button></li>)}</ul>}
+    {items.length === 0 ? <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>顔認証の同意はありません。</p> : <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>{items.map((item) => <li key={item.facilityId} style={{ display: "flex", gap: "0.75rem", alignItems: "center", padding: "0.5rem 0" }}><span style={{ flex: 1, fontSize: "0.85rem" }}>{item.reconsentRequired ? "再同意が必要 (同意文が更新されました)" : "同意済み"} ({new Date(item.at).toLocaleDateString()})</span><button type="button" onClick={() => { void revoke(item.facilityId); }} style={{ color: "var(--red)", border: "1px solid var(--red)", background: "transparent", borderRadius: "var(--radius-sm)", padding: "0.25rem 0.6rem" }}>撤回</button></li>)}</ul>}
   </div>;
 }
 

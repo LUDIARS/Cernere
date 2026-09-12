@@ -19,7 +19,7 @@ import { eq, and, sql, inArray } from "drizzle-orm";
 import { AppError } from "./error.js";
 import { getUserState, getSession } from "./redis.js";
 import { redactSensitive } from "./lib/redact.js";
-import { revokeFaceTemplates, revokeFacilityFaceTemplates } from "./identity/face-template-store.js";
+import { revokeFaceConsents, revokeFacilityFaceConsents } from "./identity/face-consent-store.js";
 import { deviceSessionCommand } from "./auth/device-command.js";
 import { recoveryCommand } from "./auth/recovery-command.js";
 
@@ -165,7 +165,7 @@ async function organizationCmd(userId: string, action: string, p?: Record<string
     case "delete": {
       await requireSystemAdmin(userId);
       const orgId = requireStr(p, "organizationId");
-      await revokeFacilityFaceTemplates(orgId, "facility_deleted");
+      await revokeFacilityFaceConsents(orgId, "left_facility");
       await db.delete(schema.organizations).where(eq(schema.organizations.id, orgId));
       return { ok: true };
     }
@@ -220,7 +220,7 @@ async function memberCmd(userId: string, action: string, p?: Record<string, unkn
       if (targetUserId !== userId) {
         await requireOrgRole(userId, orgId, ["admin", "owner", "maintainer"]);
       }
-      await revokeFaceTemplates(targetUserId, orgId, "membership_removed", true);
+      await revokeFaceConsents(targetUserId, orgId, "left_facility");
       await db.delete(schema.organizationMembers)
         .where(and(
           eq(schema.organizationMembers.organizationId, orgId),

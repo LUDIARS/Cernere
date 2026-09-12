@@ -468,13 +468,18 @@ export const auth = {
   },
 };
 
-export const faceTemplates = {
-  status(): Promise<{ items: Array<{ facilityId: string; modelId: string; version: number; state: "pending" | "active" | "revoked"; enrolledAt: string }> }> {
-    return request("/api/identity/face-template/status");
+export const faceConsents = {
+  /**
+   * 自分の顔認証同意の一覧。顔テンプレート・顔写真は Cernere に無く (正本は施設の
+   * 受付端末)、ここで見えるのは「どの施設にいつ同意したか」だけ。
+   */
+  status(): Promise<{ items: Array<{ facilityId: string; consentId: string; policyVersion: string; at: string; reconsentRequired: boolean }> }> {
+    return request("/api/identity/face-consent/status");
   },
-  remove(facilityId?: string): Promise<{ ok: true; removed: number }> {
+  /** 同意を撤回する。施設の端末にある登録は失効指示の同期で削除される。 */
+  revoke(facilityId?: string): Promise<{ ok: true; revoked: number; facilities: string[] }> {
     const suffix = facilityId ? `?facilityId=${encodeURIComponent(facilityId)}` : "";
-    return request(`/api/identity/face-template${suffix}`, { method: "DELETE" });
+    return request(`/api/identity/face-consent${suffix}`, { method: "DELETE" });
   },
 };
 

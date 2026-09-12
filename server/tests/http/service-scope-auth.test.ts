@@ -1,4 +1,4 @@
-/** 写真 read scope が DB 上で現在も有効な tool credential に限定されること。 */
+/** 失効指示 / 同意記録の scope が DB 上で現在も有効な tool credential に限定されること。 */
 
 import { describe, expect, it, vi } from "vitest";
 import { createFakeDb } from "../identity/fake-drizzle.js";
@@ -16,12 +16,12 @@ describe("requireServiceScope", () => {
   it("active な tool client の現在の DB scope を確認して owner を actor にする", async () => {
     fake.queueSelect([{
       ownerUserId: OWNER_ID,
-      scopes: ["face-photo:read"],
+      scopes: ["face-revocation:read"],
       isActive: true,
     }]);
-    const token = generateToolToken(TOOL_ID, OWNER_ID, ["face-photo:read"]);
+    const token = generateToolToken(TOOL_ID, OWNER_ID, ["face-revocation:read"]);
 
-    await expect(requireServiceScope(`Bearer ${token}`, "face-photo:read"))
+    await expect(requireServiceScope(`Bearer ${token}`, "face-revocation:read"))
       .resolves.toEqual({ kind: "tool", subject: TOOL_ID, actorUserId: OWNER_ID });
   });
 
@@ -31,19 +31,19 @@ describe("requireServiceScope", () => {
       scopes: [],
       isActive: true,
     }]);
-    const token = generateToolToken(TOOL_ID, OWNER_ID, ["face-photo:read"]);
+    const token = generateToolToken(TOOL_ID, OWNER_ID, ["face-revocation:read"]);
 
-    await expect(requireServiceScope(`Bearer ${token}`, "face-photo:read"))
+    await expect(requireServiceScope(`Bearer ${token}`, "face-revocation:read"))
       .rejects.toMatchObject({ statusCode: 403 });
   });
 
-  it("scope を発行できない project token は写真 read / manage に流用しない", async () => {
+  it("scope を発行できない project token は失効指示 read / 撤回に流用しない", async () => {
     fake.queueSelect([]);
     const token = generateProjectToken("client-1", "ostiarius");
 
-    await expect(requireServiceScope(`Bearer ${token}`, "face-photo:read"))
+    await expect(requireServiceScope(`Bearer ${token}`, "face-revocation:read"))
       .rejects.toMatchObject({ statusCode: 403 });
-    await expect(requireServiceScope(`Bearer ${token}`, "face-photo:manage"))
+    await expect(requireServiceScope(`Bearer ${token}`, "face-consent:revoke"))
       .rejects.toMatchObject({ statusCode: 403 });
   });
 });

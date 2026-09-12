@@ -601,8 +601,8 @@ export async function deleteUserAccount(
     throw AppError.conflict("User owns organizations and cannot be deleted");
   }
 
-  const { revokeFaceTemplates } = await import("../identity/face-template-store.js");
-  await revokeFaceTemplates(userId, undefined, "account_deleted", true);
+  const { revokeFaceConsents } = await import("../identity/face-consent-store.js");
+  await revokeFaceConsents(userId, undefined, "account_deleted");
   await db.transaction(async (tx) => {
     // 監査ログを purge (token/PII が params に残らないよう、かつ FK ブロック解消)。
     await tx.delete(dbSchema.operationLogs)

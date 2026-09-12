@@ -1,9 +1,10 @@
 /**
- * 顔写真・顔テンプレート操作の監査記録。
+ * 顔認証の同意・失効指示操作の監査記録。
  *
  * 既存の監査台帳 (operation_logs) にそのまま載せる。記録するのは
  * 「誰が・誰に対して・どの施設で・どんな理由で」だけで、
- * **写真バイト / base64 / 埋め込みベクトルは絶対に渡さない**。
+ * **生体情報 (写真バイト / base64 / 埋め込みベクトル) は絶対に渡さない**
+ * (そもそも Cernere は生体情報を保存しない)。
  * 失敗しても業務処理は止めず、監査欠落として console に残す (commands.ts と同じ方針)。
  */
 
@@ -12,11 +13,10 @@ import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 
 export type FaceAuditAction =
-  | "identity.face_photo.save"
-  | "identity.face_photo.read"
-  | "identity.face_photo.delete"
-  | "identity.face_template.promote"
-  | "identity.face_template.reject";
+  | "identity.face_consent.create"
+  | "identity.face_consent.revoke"
+  | "identity.face_revocation.read"
+  | "identity.face_consent.read";
 
 export interface FaceAuditEntry {
   action: FaceAuditAction;
