@@ -1,6 +1,6 @@
 # peer relay (サービス間直接 WS 通信)
 
-LUDIARS バックエンド (Actio / Imperativus / Nuntius 等) が **Cernere をデータ経路に挟まずに** 直接 WebSocket で呼び出し合うための仕組み。Cernere は **認証局** (control-plane) としてのみ介在する。
+LUDIARS バックエンド (Actio / Imperativus 等) が **Cernere をデータ経路に挟まずに** 直接 WebSocket で呼び出し合うための仕組み。Cernere は **認証局** (control-plane) としてのみ介在する。
 
 ## 関連パッケージ
 

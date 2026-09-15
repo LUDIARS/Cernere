@@ -66,7 +66,7 @@ const sa = new PeerAdapter({
   saPublicBaseUrl: "ws://actio.internal:{port}", // Cernere に通知する URL
   accept: {
     imperativus: ["tasks.create", "tasks.query"],
-    nuntius:     "*",
+    memoria:     "*",
   },
 });
 
@@ -144,7 +144,7 @@ Cernere 側を噛ませた challenge 方式で、各 peer 接続がなりすま�
 ```typescript
 accept: {
   imperativus: ["tasks.create"],       // 指定コマンドのみ許可
-  nuntius:     "*",                     // 全コマンド許可
+  memoria:     "*",                     // 全コマンド許可
   // unregistered peer は reject (forbidden)
 }
 ```

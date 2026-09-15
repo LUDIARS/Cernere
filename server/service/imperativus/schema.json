@@ -12,15 +12,6 @@
     "bridge_path": "/imperativus"
   },
 
-  "data_sharing": [
-    {
-      "project_key": "nuntius",
-      "modules": ["alexa"],
-      "access": "readwrite",
-      "description": "音声チャネル (Alexa) 配信のため Nuntius と alexa_user_id を共有"
-    }
-  ],
-
   "user_data": {
     "columns": {
       "stt_language": {
