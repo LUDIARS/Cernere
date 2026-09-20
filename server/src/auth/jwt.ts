@@ -135,6 +135,9 @@ export async function verifyToken(token: string): Promise<JwtClaims> {
       if (claims[key] !== undefined && (!Number.isSafeInteger(claims[key]) || Number(claims[key]) < 0)) throw AppError.unauthorized("Invalid session revision");
     }
     if (claims.deviceId !== undefined && typeof claims.deviceId !== "string") throw AppError.unauthorized("Invalid device session");
+    // 認証事実 (amr / authTime) の形も署名検証と同じ層で弾く。 ここを通すと
+    // 壊れた evidence が assertUserSessionCurrent の外で ZodError になり、 401 と区別できなくなる。
+    readAuthenticationEvidence(claims.authentication);
     typed = claims as unknown as JwtClaims;
   } catch {
     // 署名・形式の検証はここで完結する (DB へ触れない)。

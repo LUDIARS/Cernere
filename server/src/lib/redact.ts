@@ -13,6 +13,7 @@ const REDACTED = "[REDACTED]";
 
 /** キー名 (小文字化) に含まれていたらその値をマスクする部分一致リスト。 */
 const SENSITIVE_KEY_PARTS = [
+  "cloudflaresubject", "assertion",
   "token",        // accessToken / refreshToken / tokenType / refresh_token ...
   "secret",       // clientSecret / serviceSecret ...
   "password",

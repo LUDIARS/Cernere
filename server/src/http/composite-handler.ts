@@ -23,6 +23,7 @@ import {
 } from "../logging/auth-logger.js";
 import { devLog } from "../logging/dev-logger.js";
 import { createAuthSession } from "../auth/auth-session.js";
+import { completedAuthentication, type AuthenticationEvidence } from "../lib/authentication-evidence.js";
 
 interface RouteResult {
   status: string;
@@ -87,6 +88,7 @@ function parseBody(body: string): Record<string, unknown> {
 async function openAuthSession(
   user: { id: string; displayName: string; email: string | null; role: string },
   ctx: CompositeCtx,
+  authentication?: AuthenticationEvidence,
 ): Promise<RouteResult> {
   const session = await createAuthSession(
     {
@@ -94,6 +96,7 @@ async function openAuthSession(
       displayName: user.displayName,
       email: user.email,
       role: user.role,
+      authentication,
     },
     sessionCtx(ctx),
   );
@@ -153,6 +156,7 @@ async function compositeLogin(p: Record<string, unknown>, ctx: CompositeCtx): Pr
   return openAuthSession(
     { id: user.id, displayName: user.displayName ?? "", email: user.email, role: user.role },
     ctx,
+    completedAuthentication("password", user.mfaRevision),
   );
 }
 
@@ -197,7 +201,7 @@ async function compositeRegister(p: Record<string, unknown>, ctx: CompositeCtx):
 async function compositeMfaVerify(p: Record<string, unknown>, ctx: CompositeCtx): Promise<RouteResult> {
   const { mfaToken, method, code } = parseMfaInput(p);
   return verifyMfaChallenge(mfaToken ?? "", requireMfaMethod(method), code ?? "",
-    { purpose: "composite", projectKey: ctx.projectKey }, async (user) => openAuthSession(user, ctx));
+    { purpose: "composite", projectKey: ctx.projectKey }, async (user, _tx, authentication) => openAuthSession(user, ctx, authentication));
 }
 
 async function compositeMfaSendCode(p: Record<string, unknown>, ctx: CompositeCtx): Promise<RouteResult> {

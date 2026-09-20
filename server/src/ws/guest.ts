@@ -12,6 +12,7 @@ import { generateTokenPair, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
 import { beginMfaChallenge, sendMfaChallengeCode, verifyMfaChallenge, issueMfaLogin } from "../auth/mfa-challenge.js";
 import { parseMfaInput, requireMfaMethod } from "../auth/mfa-contract.js";
 import { hashRefreshToken } from "../auth/token-hash.js";
+import { completedAuthentication } from "../lib/authentication-evidence.js";
 
 export interface GuestAuthResult {
   userId?: string;
@@ -118,10 +119,11 @@ async function guestLogin(p: Record<string, unknown>, ip?: string): Promise<Gues
   await db.update(schema.users).set({ lastLoginAt: now, updatedAt: now })
     .where(eq(schema.users.id, user.id));
 
-  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(user.id, user.role);
+  const authentication = completedAuthentication("password", user.mfaRevision, now.getTime());
+  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(user.id, user.role, authentication, { authEpoch: user.authEpoch });
   const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
-    authEpoch, id: crypto.randomUUID(), userId: user.id, refreshToken: hashRefreshToken(refreshToken), expiresAt,
+    authEpoch, id: crypto.randomUUID(), userId: user.id, refreshToken: hashRefreshToken(refreshToken), expiresAt, authentication,
   });
 
   return {

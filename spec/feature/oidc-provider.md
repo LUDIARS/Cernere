@@ -7,7 +7,8 @@ Cernere を **OpenID Connect Provider (IdP)** として動作させ、 外部 Re
 すべて既存フローを再利用)。 RP には認可コードフローで `id_token` を渡す。
 
 Google を上流の認証元として使う処理は [Google OIDC](google-oidc-identity-source.md) を参照。
-Google の本人認証から本ページの同意画面へ復帰できる。企業 MFA の証明と実認証時刻の継承は別途必要。
+Google の本人認証から本ページの同意画面へ復帰できる。企業 MFA と認証時刻の扱いは
+[Cloudflare 企業認証](cloudflare-enterprise-sso.md) に従う。
 
 > セットアップ手順 (鍵生成・Cloudflare Access 登録) は
 > [`spec/setup/oidc-provider.md`](../setup/oidc-provider.md) を参照。
@@ -144,7 +145,8 @@ RP (Cloudflare)                Cernere server              Cernere frontend     
 | `email` | `email`, `email_verified` (google/github 連携済みなら true) |
 | `profile` | `name`, `preferred_username`, `picture` |
 
-id_token には上記に加え `iss` / `aud`(=client_id) / `iat` / `exp` / `auth_time` / `nonce` を含む。
+id_token には上記に加え `iss` / `aud`(=client_id) / `iat` / `exp` / `nonce` を含む。
+`auth_time` / `amr` は検証済みの認証情報がある場合だけ含む。
 
 ---
 
@@ -189,4 +191,10 @@ id_token には上記に加え `iss` / `aud`(=client_id) / `iat` / `exp` / `auth
 | ルート配線 | `server/src/app.ts` |
 | クライアント管理 (WS) | `server/src/commands.ts` (`oidc_client` module) |
 | consent UI | `frontend/src/pages/oidc/OidcConsentPage.tsx` |
-| テスト | `server/tests/oidc/scopes.test.ts`, `server/tests/auth/oidc-keys.test.ts`, `server/tests/auth/oidc-key-persistence.test.ts` |
+| テスト | `server/tests/oidc/scopes.test.ts`, `server/tests/oidc/authorization-provenance.test.ts`, `server/tests/auth/oidc-keys.test.ts`, `server/tests/auth/oidc-key-persistence.test.ts` |
+
+## 8. 企業認証との接続
+
+認証時刻・MFA 情報、prompt / max_age、企業クライアントの現在認可は
+[Cloudflare 企業認証](cloudflare-enterprise-sso.md) の SPEC-ENTERPRISE-OIDC / AUTH-FACTS に従う。
+同意時刻を auth_time として発行しない。

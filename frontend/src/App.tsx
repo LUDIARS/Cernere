@@ -7,6 +7,7 @@ import { ProfilePage } from "./pages/ProfilePage";
 import { DataOptOutPage } from "./pages/DataOptOutPage";
 import { OrganizationsPage } from "./pages/OrganizationsPage";
 import { OidcClientsPage } from "./pages/admin/OidcClientsPage";
+import { EnterpriseConnectionsPage } from "./pages/admin/EnterpriseConnectionsPage";
 import { CompositeLoginPage } from "./pages/composite/CompositeLoginPage";
 import { CompositeCallbackPage } from "./pages/composite/CompositeCallbackPage";
 import { DeviceRegisterPage } from "./pages/DeviceRegisterPage";
@@ -70,6 +71,7 @@ function AppRoutes() {
         <Route path="/data-optout" element={<DataOptOutPage />} />
         <Route path="/organizations" element={<OrganizationsPage />} />
         <Route path="/oidc-clients" element={<OidcClientsPage />} />
+        <Route path="/enterprise" element={<EnterpriseConnectionsPage />} />
       </Route>
     </Routes>
   );

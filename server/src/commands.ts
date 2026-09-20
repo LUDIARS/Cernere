@@ -97,6 +97,11 @@ async function execute(
   switch (module) {
     case "device_session": return deviceSessionCommand(userId, sessionId, action, payload);
     case "account_recovery": return recoveryCommand(userId, action, payload);
+    case "enterprise": {
+      await requireSystemAdmin(userId);
+      const { enterpriseAdminCommand } = await import("./enterprise/admin-command.js");
+      return enterpriseAdminCommand(action, payload);
+    }
     case "organization": return organizationCmd(userId, action, payload);
     case "member": return memberCmd(userId, action, payload);
     case "project_definition": return projectDefCmd(userId, action, payload);

@@ -14,7 +14,6 @@ import {
   generateTokenPair, generateToolToken, generateProjectToken, verifyToken, verifyProjectToken, extractBearerToken, REFRESH_TOKEN_DAYS,
 } from "../auth/jwt.js";
 import { hashRefreshToken } from "../auth/token-hash.js";
-import { readAuthenticationEvidence } from "../lib/authentication-evidence.js";
 import { isPasetoEnabled, signProjectToken } from "../auth/paseto.js";
 import { checkRateLimit, redis } from "../redis.js";
 import {
@@ -27,6 +26,7 @@ import {
 } from "../logging/auth-logger.js";
 import { devLog } from "../logging/dev-logger.js";
 import { issueAuthCodeForUserId } from "../auth/auth-code.js";
+import { completedAuthentication, readAuthenticationEvidence } from "../lib/authentication-evidence.js";
 import { isCompositeTargetAllowed } from "../auth/composite-redirect.js";
 import { AppError } from "../error.js";
 import { canUnlinkProvider } from "../auth/login-methods.js";
@@ -176,10 +176,11 @@ async function login(p: Record<string, unknown>, ctx: RequestCtx): Promise<Route
   await db.update(schema.users).set({ lastLoginAt: now, updatedAt: now })
     .where(eq(schema.users.id, user.id));
 
-  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(user.id, user.role);
+  const authentication = completedAuthentication("password", user.mfaRevision, now.getTime());
+  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(user.id, user.role, authentication, { authEpoch: user.authEpoch });
   const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
-    authEpoch, id: crypto.randomUUID(), userId: user.id, refreshToken: hashRefreshToken(refreshToken), expiresAt,
+    authEpoch, id: crypto.randomUUID(), userId: user.id, refreshToken: hashRefreshToken(refreshToken), expiresAt, authentication,
   });
 
   logUserLogin(user.id, user.email, "email", ctx);
@@ -220,6 +221,7 @@ async function refresh(p: Record<string, unknown>): Promise<RouteResult> {
   if (session.authEpoch !== userRows[0].authEpoch) throw AppError.unauthorized("Refresh session was revoked");
   const authentication = readAuthenticationEvidence(session.authentication);
 
+  if (authentication && authentication.revision !== userRows[0].mfaRevision) throw AppError.unauthorized("Authentication settings changed");
   const { accessToken, refreshToken, authEpoch } = await generateTokenPair(userRows[0].id, userRows[0].role, authentication, { authEpoch: session.authEpoch, deviceId: session.deviceId ?? undefined });
   // 旧 session は削除せず rotated_at を刻んで残す (再提示 = reuse を検出するため)。
   // expires_at を過ぎれば掃除対象。 新 session は別行として sliding expiry で発行。

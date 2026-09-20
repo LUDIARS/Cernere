@@ -1,0 +1,18 @@
+{
+  "name": "enterprise-authentication",
+  "description": "Cr OIDC の検証済み認証事実と Cloudflare Access を接続し、組織・project に限定した企業セッションを管理する。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    { "pathPattern": "(^|/)server/src/enterprise/|(^|/)server/src/lib/authentication-(evidence|freshness)" },
+    { "pathPattern": "(^|/)frontend/src/pages/admin/EnterpriseConnectionsPage|(^|/)frontend/src/pages/admin/enterprise/" },
+    { "pathPattern": "(^|/)packages/service-adapter/src/enterprise-|(^|/)server/tests/auth/enterprise-|(^|/)server/tests/enterprise/" },
+    { "pathPattern": "(^|/)migrations/048_enterprise_cloudflare" }
+  ],
+  "cardTemplate": "Summarise enterprise-authentication: trust configuration, authentication facts, current organization authorization, session revocation and administration.",
+  "specRefs": [
+    "spec/feature/cloudflare-enterprise-sso.md",
+    "spec/setup/cloudflare-enterprise-sso.md",
+    "spec/data/schema/cloudflare-enterprise-sso.md"
+  ]
+}

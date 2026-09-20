@@ -10,6 +10,7 @@ const navItems = [
   { path: "/account-recovery", label: "回復", adminOnly: true },
   { path: "/data-optout", label: "Data" },
   { path: "/oidc-clients", label: "OIDC", adminOnly: true },
+  { path: "/enterprise", label: "Cloudflare", adminOnly: true },
 ];
 
 export function AppLayout() {

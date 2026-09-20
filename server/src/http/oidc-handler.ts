@@ -34,14 +34,19 @@ import {
 
 // ── uWS ヘルパー ────────────────────────────────────────────
 
-function readBody(res: uWS.HttpResponse): Promise<string> {
+function readBody(res: uWS.HttpResponse, onAbort: () => void): Promise<string> {
   return new Promise((resolve, reject) => {
-    let buffer = "";
+    const chunks: Buffer[] = [];
+    let length = 0;
+    let failed = false;
     res.onData((chunk, isLast) => {
-      buffer += Buffer.from(chunk).toString();
-      if (isLast) resolve(buffer);
+      if (failed) return;
+      length += chunk.byteLength;
+      if (length > 32768) { failed = true; chunks.length = 0; reject(AppError.badRequest("Request body too large")); return; }
+      chunks.push(Buffer.from(new Uint8Array(chunk)));
+      if (isLast) resolve(Buffer.concat(chunks).toString("utf8"));
     });
-    res.onAborted(() => reject(new Error("Request aborted")));
+    res.onAborted(() => { onAbort(); chunks.length = 0; reject(new Error("Request aborted")); });
   });
 }
 
@@ -178,10 +183,11 @@ export function handleOidcToken(res: uWS.HttpResponse, req: uWS.HttpRequest): vo
 
   (async () => {
     try {
-      const body = await readBody(res);
+      const body = await readBody(res, () => { aborted = true; });
       if (aborted) return;
       const params = parseTokenBody(body, contentType, authHeader);
       const result = await exchangeToken(params);
+      if (aborted) return;
       json(res, "200 OK", result);
     } catch (err) {
       if (aborted) return;
@@ -207,6 +213,7 @@ export function handleOidcUserinfo(res: uWS.HttpResponse, req: uWS.HttpRequest):
     try {
       const token = extractBearerToken(authHeader);
       const claims = await userinfo(token);
+      if (aborted) return;
       json(res, "200 OK", claims);
     } catch (err) {
       if (aborted) return;
@@ -216,7 +223,7 @@ export function handleOidcUserinfo(res: uWS.HttpResponse, req: uWS.HttpRequest):
           .writeHeader("WWW-Authenticate", 'Bearer error="invalid_token"')
           .writeHeader("Content-Type", "application/json")
           .writeHeader("Access-Control-Allow-Origin", "*")
-          .end(JSON.stringify({ error: "invalid_token", error_description: (err as Error).message }));
+          .end(JSON.stringify({ error: "invalid_token", error_description: "Token is invalid or authorization changed" }));
       });
     }
   })();
@@ -228,12 +235,13 @@ export function handleOidcConsentInfo(res: uWS.HttpResponse, req: uWS.HttpReques
   if (disabledGuard(res)) return;
   const query = new URLSearchParams(req.getQuery() ?? "");
   const requestId = query.get("request_id") ?? "";
+  const token = extractBearerToken(req.getHeader("authorization") ?? "");
   let aborted = false;
   res.onAborted(() => { aborted = true; });
 
   (async () => {
     try {
-      const info = await getConsentInfo(requestId);
+      const info = await getConsentInfo(requestId, token ? await verifyToken(token) : undefined);
       if (aborted) return;
       if (!info) {
         json(res, "404 Not Found", { error: "Invalid or expired authorization request" }, config.frontendUrl, true);
@@ -259,12 +267,13 @@ export function handleOidcApprove(res: uWS.HttpResponse, req: uWS.HttpRequest): 
       if (!token) throw AppError.unauthorized("No token provided");
       const claims = await verifyToken(token);
 
-      const body = await readBody(res);
+      const body = await readBody(res, () => { aborted = true; });
       if (aborted) return;
       const requestId = (parseJson(body).request_id as string | undefined) ?? "";
       if (!requestId) throw AppError.badRequest("request_id is required");
 
       const result = await approveAuthorization(requestId, claims.sub, claims.authentication, claims);
+      if (aborted) return;
       json(res, "200 OK", result, config.frontendUrl, true);
     } catch (err) {
       if (aborted) return;
@@ -281,11 +290,12 @@ export function handleOidcDeny(res: uWS.HttpResponse, req: uWS.HttpRequest): voi
 
   (async () => {
     try {
-      const body = await readBody(res);
+      const body = await readBody(res, () => { aborted = true; });
       if (aborted) return;
       const requestId = (parseJson(body).request_id as string | undefined) ?? "";
       if (!requestId) throw AppError.badRequest("request_id is required");
       const result = await denyAuthorization(requestId);
+      if (aborted) return;
       json(res, "200 OK", result, config.frontendUrl, true);
     } catch (err) {
       if (aborted) return;

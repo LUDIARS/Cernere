@@ -12,6 +12,8 @@
  */
 
 import { eq } from "drizzle-orm";
+import type { JwtClaims } from "../auth/jwt.js";
+import { checkOidcAuthentication, enterpriseOidcClaims } from "../enterprise/oidc-policy.js";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { AppError } from "../error.js";
@@ -39,7 +41,7 @@ import {
 } from "./scopes.js";
 import {
   consumeAuthCode,
-  deleteAuthRequest,
+  consumeAuthRequest,
   getAccessToken,
   getAuthRequest,
   putAccessToken,
@@ -139,7 +141,7 @@ export async function createAuthorization(q: URLSearchParams): Promise<Authorize
 
   const codeChallenge = q.get("code_challenge") ?? undefined;
   const codeChallengeMethod = q.get("code_challenge_method") ?? undefined;
-  if (codeChallenge && codeChallengeMethod && codeChallengeMethod !== "S256") {
+  if ((codeChallenge && (codeChallengeMethod !== "S256" || !/^[A-Za-z0-9_-]{43}$/.test(codeChallenge))) || (!codeChallenge && codeChallengeMethod)) {
     return {
       kind: "redirect",
       url: appendQuery(redirectUri, {
@@ -150,7 +152,19 @@ export async function createAuthorization(q: URLSearchParams): Promise<Authorize
     };
   }
 
+  const prompts = (q.get("prompt") ?? "").split(" ").filter(Boolean);
+  const maxAgeRaw = q.get("max_age");
+  if (prompts.some((p) => !["none", "login", "consent", "select_account"].includes(p))
+    || (prompts.includes("none") && prompts.length > 1)
+    || (maxAgeRaw !== null && (!/^\d+$/.test(maxAgeRaw) || !Number.isSafeInteger(Number(maxAgeRaw))))) {
+    return { kind: "redirect", url: appendQuery(redirectUri, { error: "invalid_request", state }) };
+  }
+  // No silent-consent store exists; prompt=none must never open interactive UI.
+  if (prompts.includes("none")) return { kind: "redirect", url: appendQuery(redirectUri, { error: "interaction_required", state }) };
   const requestId = await putAuthRequest({
+    createdAtMs: Date.now(),
+    forceReauth: prompts.includes("login") || prompts.includes("select_account") || (maxAgeRaw !== null && Number(maxAgeRaw) === 0),
+    maxAge: maxAgeRaw === null ? undefined : Number(maxAgeRaw),
     clientId,
     redirectUri,
     scope,
@@ -170,24 +184,41 @@ export interface ConsentInfo {
   clientName: string;
   scopes: string[];
   redirectUri: string;
+  reauthenticationRequired: boolean;
+  authenticationMessage?: string;
 }
 
-export async function getConsentInfo(requestId: string): Promise<ConsentInfo | null> {
+export async function getConsentInfo(requestId: string, claims?: JwtClaims): Promise<ConsentInfo | null> {
   const req = await getAuthRequest(requestId);
   if (!req) return null;
   const client = await getClientByClientId(req.clientId);
-  if (!client) return null;
-  return { clientName: client.name, scopes: req.scope, redirectUri: req.redirectUri };
+  if (!client?.isActive || !isRedirectUriAllowed(client, req.redirectUri)) return null;
+  let authenticationMessage: string | undefined;
+  if (claims) {
+    try { await checkOidcAuthentication(req.clientId, claims.sub, claims.authentication, req); }
+    catch (error) {
+      if (!(error instanceof AppError) || error.statusCode !== 401) throw error;
+      authenticationMessage = error.message;
+    }
+  }
+  return { clientName: client.name, scopes: req.scope, redirectUri: req.redirectUri,
+    reauthenticationRequired: !claims || !!authenticationMessage, authenticationMessage };
 }
 
+/** 承認は main の provenance 検査 (authEpoch/デバイス失効) と、 企業接続ポリシーの両方を通す。
+ *  source には検証済み JwtClaims をそのまま渡す (exp を見てログインセッション切れも弾く)。 */
 export async function approveAuthorization(requestId: string, userId: string, authentication?: unknown,
-  source?: UserSessionState): Promise<{ redirectTo: string }> {
+  source?: UserSessionState & { exp?: number }): Promise<{ redirectTo: string }> {
+  if (source?.exp !== undefined && source.exp * 1000 <= Date.now()) throw AppError.unauthorized("Login session expired");
   const authorization = source ?? { ...await currentUserSessionState(userId), authentication: readAuthenticationEvidence(authentication) };
   if (authorization.sub !== userId) throw AppError.unauthorized("OIDC session user mismatch");
   await assertUserSessionCurrent(authorization);
   const req = await getAuthRequest(requestId);
   if (!req) throw AppError.badRequest("Invalid or expired authorization request");
-  await deleteAuthRequest(requestId);
+  const client = await getClientByClientId(req.clientId);
+  if (!client?.isActive || !isRedirectUriAllowed(client, req.redirectUri)) throw AppError.forbidden("OIDC client changed");
+  const facts = await checkOidcAuthentication(req.clientId, userId, authorization.authentication, req);
+  if (!await consumeAuthRequest(requestId)) throw AppError.badRequest("Authorization request already used");
 
   const code = await putAuthCode({
     clientId: req.clientId,
@@ -197,7 +228,7 @@ export async function approveAuthorization(requestId: string, userId: string, au
     codeChallenge: req.codeChallenge,
     userId,
     authorization,
-    authTime: authorization.authentication?.authTime,
+    enterprise: facts.enterprise,
   });
 
   devLog("oidc.authorize.approved", { clientId: req.clientId, userId, requestId });
@@ -205,9 +236,8 @@ export async function approveAuthorization(requestId: string, userId: string, au
 }
 
 export async function denyAuthorization(requestId: string): Promise<{ redirectTo: string }> {
-  const req = await getAuthRequest(requestId);
+  const req = await consumeAuthRequest(requestId);
   if (!req) throw AppError.badRequest("Invalid or expired authorization request");
-  await deleteAuthRequest(requestId);
   return {
     redirectTo: appendQuery(req.redirectUri, {
       error: "access_denied",
@@ -270,6 +300,9 @@ export async function exchangeToken(params: TokenRequestParams): Promise<TokenRe
   if (!params.redirectUri || params.redirectUri !== record.redirectUri) {
     throw new OidcError("invalid_grant", "redirect_uri mismatch");
   }
+  if (!isRedirectUriAllowed(client, record.redirectUri)) throw new OidcError("invalid_grant", "client redirect changed");
+  try { await checkOidcAuthentication(client.clientId, record.userId, record.authorization.authentication, undefined, record.enterprise); }
+  catch { throw new OidcError("invalid_grant", "authentication expired or authorization changed"); }
 
   // PKCE: code_challenge があれば code_verifier 必須。
   if (record.codeChallenge) {
@@ -283,16 +316,22 @@ export async function exchangeToken(params: TokenRequestParams): Promise<TokenRe
   if (!user) throw new OidcError("invalid_grant", "user no longer exists");
 
   const claims = buildClaims(user, record.scope);
+  const authenticated = record.authorization.authentication;
+  const ttl = Math.min(ACCESS_TOKEN_TTL_SEC, ID_TOKEN_TTL_SEC,
+    record.enterprise ? record.enterprise.expiresAt - Math.floor(Date.now() / 1000) : ACCESS_TOKEN_TTL_SEC);
+  if (ttl <= 0) throw new OidcError("invalid_grant", "authentication expired");
   const idToken = signIdToken(
     {
       ...claims,
       iss: config.oidcIssuer,
       aud: client.clientId,
-      auth_time: record.authTime,
-      amr: record.authorization.authentication?.amr,
+      ...(authenticated ? { auth_time: authenticated.authTime, amr: authenticated.amr,
+        cr_auth_revision: authenticated.revision } : {}),
+      ...enterpriseOidcClaims(record.enterprise),
+      ...(record.enterprise ? { cr_user_id: user.id } : {}),
       nonce: record.nonce,
     },
-    ID_TOKEN_TTL_SEC,
+    ttl,
   );
 
   const accessToken = await putAccessToken({
@@ -300,7 +339,8 @@ export async function exchangeToken(params: TokenRequestParams): Promise<TokenRe
     userId: user.id,
     clientId: client.clientId,
     scope: record.scope,
-  });
+    enterprise: record.enterprise,
+  }, ttl);
 
   await touchLastUsed(client.clientId);
   devLog("oidc.token.issued", { clientId: client.clientId, userId: user.id, scope: record.scope });
@@ -308,7 +348,7 @@ export async function exchangeToken(params: TokenRequestParams): Promise<TokenRe
   return {
     access_token: accessToken,
     token_type: "Bearer",
-    expires_in: ACCESS_TOKEN_TTL_SEC,
+    expires_in: ttl,
     id_token: idToken,
     scope: record.scope.join(" "),
   };
@@ -322,9 +362,15 @@ export async function userinfo(accessToken: string | null): Promise<Record<strin
   if (!record) throw AppError.unauthorized("invalid or expired access token");
   if (!record.authorization || record.authorization.sub !== record.userId) throw AppError.unauthorized("Session provenance is unavailable");
   await assertUserSessionCurrent(record.authorization);
+  const client = await getClientByClientId(record.clientId);
+  if (!client?.isActive) throw AppError.unauthorized("OIDC client is disabled");
+  await checkOidcAuthentication(record.clientId, record.userId, record.authorization.authentication, undefined, record.enterprise);
   const user = await loadClaimUser(record.userId);
   if (!user) throw AppError.unauthorized("user no longer exists");
-  return buildClaims(user, record.scope);
+  return { ...buildClaims(user, record.scope), ...enterpriseOidcClaims(record.enterprise),
+    ...(record.enterprise ? { cr_user_id: user.id } : {}),
+    ...(record.authorization.authentication ? { auth_time: record.authorization.authentication.authTime,
+      amr: record.authorization.authentication.amr, cr_auth_revision: record.authorization.authentication.revision } : {}) };
 }
 
 // ── discovery ───────────────────────────────────────────────

@@ -28,7 +28,7 @@ function Spinner() {
  * へ window.location で戻る。
  */
 export function OidcConsentPage() {
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth();
   const [params] = useSearchParams();
   const requestId = params.get("request_id") ?? "";
 
@@ -43,11 +43,16 @@ export function OidcConsentPage() {
       setLoadingInfo(false);
       return;
     }
+    let cancelled = false;
+    setLoadingInfo(true);
+    setInfo(null);
+    setError("");
     oidc.getRequest(requestId)
-      .then(setInfo)
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "リクエストの読み込みに失敗しました"))
-      .finally(() => setLoadingInfo(false));
-  }, [requestId]);
+      .then((result) => { if (!cancelled) setInfo(result); })
+      .catch((e: unknown) => { if (!cancelled) setError(e instanceof Error ? e.message : "リクエストの読み込みに失敗しました"); })
+      .finally(() => { if (!cancelled) setLoadingInfo(false); });
+    return () => { cancelled = true; };
+  }, [requestId, user]);
 
   if (loading) return <Spinner />;
   // 未ログイン: ログインフォームを表示。 ログイン成功で user が入り再描画される。
@@ -64,6 +69,12 @@ export function OidcConsentPage() {
       setError(e instanceof Error ? e.message : "処理に失敗しました");
       setBusy(false);
     }
+  };
+  const reauthenticate = async () => {
+    setBusy(true);
+    try { await logout(); }
+    catch (e) { setError(e instanceof Error ? e.message : "ログアウトに失敗しました"); }
+    finally { setBusy(false); }
   };
 
   let redirectHost = info?.redirectUri ?? "";
@@ -83,11 +94,18 @@ export function OidcConsentPage() {
         {error && (
           <div style={{ background: "rgba(248, 81, 73, 0.1)", border: "1px solid var(--red)", borderRadius: "var(--radius-sm)", padding: "0.5rem 0.75rem", marginBottom: "1rem", fontSize: "0.85rem", color: "var(--red)" }}>
             {error}
+            <div><button disabled={busy} onClick={() => void reauthenticate()}>再度ログインする</button></div>
           </div>
         )}
 
         {info && (
           <>
+            {info.reauthenticationRequired && <div role="status" style={{ marginBottom: "1rem" }}>
+              <p>{info.authenticationMessage ?? "再認証が必要です。"}</p>
+              <button onClick={() => void reauthenticate()} disabled={busy}>再度ログインする</button>{" "}
+              <a href="/profile" target="_blank" rel="noreferrer">パスキー・MFA を設定</a>
+              <p>設定後はこの画面へ戻り、再度ログインしてください。</p>
+            </div>}
             <div style={{ background: "var(--bg-surface-2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "0.75rem 1rem", marginBottom: "1rem", fontSize: "0.8rem", color: "var(--text-muted)" }}>
               ログイン中: <strong style={{ color: "var(--text)" }}>{user.name}</strong>（{user.email}）
             </div>
@@ -119,7 +137,7 @@ export function OidcConsentPage() {
                 type="button"
                 className="primary"
                 onClick={() => act("approve")}
-                disabled={busy}
+                disabled={busy || info.reauthenticationRequired}
                 style={{ flex: 1, padding: "0.6rem" }}
               >
                 {busy ? "処理中..." : "許可する"}

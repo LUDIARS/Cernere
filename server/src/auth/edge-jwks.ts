@@ -43,6 +43,7 @@ export async function getEdgeSigningKey(
   kid: string,
   now: number = Date.now(),
   fetchImpl: FetchLike = fetch,
+  allowStale = true,
 ): Promise<KeyObject | null> {
   const cached = cache.get(teamDomain);
   const fresh = cached !== undefined && now - cached.fetchedAt < CACHE_TTL_MS;
@@ -54,7 +55,7 @@ export async function getEdgeSigningKey(
 
   if (!shouldFetch(teamDomain, cached, now)) {
     // レート制限に掛かっている間は、 期限切れキャッシュでも使えるものは使う。
-    return cached?.keys.get(kid) ?? null;
+    return allowStale || fresh ? cached?.keys.get(kid) ?? null : null;
   }
 
   lastFetchAttemptAt.set(teamDomain, now);
@@ -64,7 +65,7 @@ export async function getEdgeSigningKey(
     return keys.get(kid) ?? null;
   } catch {
     // 取得できなければキャッシュで継続する。 キャッシュも無ければ null = 拒否。
-    return cached?.keys.get(kid) ?? null;
+    return allowStale || fresh ? cached?.keys.get(kid) ?? null : null;
   }
 }
 

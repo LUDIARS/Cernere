@@ -491,12 +491,16 @@ export interface OidcConsentInfo {
   clientName: string;
   scopes: string[];
   redirectUri: string;
+  reauthenticationRequired: boolean;
+  authenticationMessage?: string;
 }
 
 export const oidc = {
   async getRequest(requestId: string): Promise<OidcConsentInfo> {
+    const token = getAccessToken();
     const res = await fetch(`${API_BASE}/api/auth/oidc/request?request_id=${encodeURIComponent(requestId)}`, {
       credentials: "include",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     const data = await res.json() as OidcConsentInfo & { error?: string };
     if (!res.ok) throw new Error(data.error || "Failed to load authorization request");

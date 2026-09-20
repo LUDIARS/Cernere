@@ -5,6 +5,9 @@ import { AppError } from "../error.js";
 export const ACTION_AUTH_TTL_SECONDS = 5 * 60;
 
 export const protectedActionSchema = z.enum([
+  "enterprise.save_connection",
+  "enterprise.save_identity",
+  "enterprise.revoke_user",
   "mfa.manage",
   "device_session.revoke",
   "device_session.revoke_all",
@@ -51,6 +54,9 @@ const protectedWsActions = new Set<ProtectedAction>([
   "device_session.revoke_all",
   "account_recovery.issue",
   "account_recovery.revoke",
+  "enterprise.save_connection",
+  "enterprise.save_identity",
+  "enterprise.revoke_user",
   "organization.delete",
   "member.remove",
   "member.update_role",
@@ -86,6 +92,11 @@ export function resolveWsActionTarget(
     case "device_session.revoke_all": return target(parsedAction.data, userId);
     case "account_recovery.issue": return target(parsedAction.data, requiredString(p, "userId"));
     case "account_recovery.revoke": return target(parsedAction.data, requiredString(p, "grantId"));
+    case "enterprise.save_connection":
+      return target(parsedAction.data, requiredString(p, "projectKey"));
+    case "enterprise.save_identity":
+    case "enterprise.revoke_user":
+      return target(parsedAction.data, joinResource(p, "projectKey", "userId"));
     case "organization.delete":
       return target(parsedAction.data, requiredString(p, "organizationId"));
     case "member.remove":

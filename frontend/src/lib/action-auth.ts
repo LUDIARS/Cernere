@@ -13,6 +13,9 @@ export type ProtectedAction =
   | "device_session.revoke_all"
   | "account_recovery.issue"
   | "account_recovery.revoke"
+  | "enterprise.save_connection"
+  | "enterprise.save_identity"
+  | "enterprise.revoke_user"
   | "mfa.manage"
   | "passkey.register"
   | "passkey.delete"
@@ -70,6 +73,11 @@ export function resolveBrowserActionTarget(
     case "device_session.revoke_all": return { action: name, resource: requireCurrentUser(currentUserId) };
     case "account_recovery.issue": return { action: name, resource: requiredString(p, "userId") };
     case "account_recovery.revoke": return { action: name, resource: requiredString(p, "grantId") };
+    case "enterprise.save_connection":
+      return { action: name, resource: requiredString(p, "projectKey") };
+    case "enterprise.save_identity":
+    case "enterprise.revoke_user":
+      return { action: name, resource: joinResource(p, "projectKey", "userId") };
     case "organization.delete":
       return { action: name, resource: requiredString(p, "organizationId") };
     case "member.remove":

@@ -637,3 +637,26 @@ export const edgeIdpBindings = pgTable("edge_idp_bindings", {
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** Enterprise trust configuration is distinct from Cr's personal/system privileges. */
+export const enterpriseConnections = pgTable("enterprise_connections", {
+  projectKey: text("project_key").primaryKey().references(() => managedProjects.key, { onDelete: "cascade" }),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  oidcClientId: text("oidc_client_id").notNull().unique().references(() => oidcClients.clientId, { onDelete: "cascade" }),
+  teamDomain: text("team_domain").notNull(),
+  audience: text("audience").notNull(),
+  requireMfa: boolean("require_mfa").notNull().default(true),
+  maxAuthenticationAge: integer("max_authentication_age").notNull().default(3600),
+  maxSessionSeconds: integer("max_session_seconds").notNull().default(3600),
+  isActive: boolean("is_active").notNull().default(false),
+  revision: uuid("revision").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const enterpriseIdentities = pgTable("enterprise_identities", {
+  projectKey: text("project_key").notNull().references(() => enterpriseConnections.projectKey, { onDelete: "cascade" }),
+  subjectHash: text("subject_hash").notNull(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  revision: uuid("revision").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+}, (t) => [primaryKey({ columns: [t.projectKey, t.subjectHash] }), uniqueIndex("uq_enterprise_identity_user").on(t.projectKey, t.userId)]);

@@ -10,10 +10,11 @@
 
 import { randomBytes } from "node:crypto";
 import type { UserSessionState } from "../auth/user-session-state.js";
+import type { EnterpriseGrant, OidcAuthenticationPolicy } from "../enterprise/oidc-policy.js";
 import { redis } from "../redis.js";
 import { ACCESS_TOKEN_TTL_SEC, AUTH_CODE_TTL_SEC, AUTH_REQUEST_TTL_SEC } from "./scopes.js";
 
-export interface AuthRequestRecord {
+export interface AuthRequestRecord extends OidcAuthenticationPolicy {
   clientId: string;
   redirectUri: string;
   scope: string[];
@@ -31,7 +32,8 @@ export interface AuthCodeRecord {
   nonce?: string;
   codeChallenge?: string;
   userId: string;
-  authTime?: number; // Actual verification time; omitted when unavailable.
+  /** 企業接続経由の付与。 authorization.authentication が認証事実の唯一の正本。 */
+  enterprise?: EnterpriseGrant;
 }
 
 export interface AccessTokenRecord {
@@ -39,6 +41,7 @@ export interface AccessTokenRecord {
   userId: string;
   clientId: string;
   scope: string[];
+  enterprise?: EnterpriseGrant;
 }
 
 function newId(): string {
@@ -62,6 +65,11 @@ export async function deleteAuthRequest(id: string): Promise<void> {
   await redis.del(`oidc:req:${id}`);
 }
 
+export async function consumeAuthRequest(id: string): Promise<AuthRequestRecord | null> {
+  const raw = await redis.getdel(`oidc:req:${id}`);
+  return raw ? JSON.parse(raw) as AuthRequestRecord : null;
+}
+
 // ── authorization code ────────────────────────────────────────
 
 export async function putAuthCode(rec: AuthCodeRecord): Promise<string> {
@@ -80,9 +88,9 @@ export async function consumeAuthCode(code: string): Promise<AuthCodeRecord | nu
 
 // ── access token ──────────────────────────────────────────────
 
-export async function putAccessToken(rec: AccessTokenRecord): Promise<string> {
+export async function putAccessToken(rec: AccessTokenRecord, ttl = ACCESS_TOKEN_TTL_SEC): Promise<string> {
   const token = newId();
-  await redis.set(`oidc:at:${token}`, JSON.stringify(rec), "EX", ACCESS_TOKEN_TTL_SEC);
+  await redis.set(`oidc:at:${token}`, JSON.stringify(rec), "EX", ttl);
   return token;
 }
 

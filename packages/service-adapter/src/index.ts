@@ -39,6 +39,9 @@ export { CernereServiceAdapter } from "./adapter.js";
 
 // Hono middleware
 export { createServiceAuthMiddleware } from "./middleware.js";
+export { EnterpriseSessionClient } from "./enterprise-client.js";
+export { createEnterpriseAuthMiddleware } from "./enterprise-middleware.js";
+export type { EnterpriseSessionInfo, EnterpriseLoginResult, EnterpriseRequest } from "./enterprise-client.js";
 
 // Types
 export type {

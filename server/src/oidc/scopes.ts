@@ -86,6 +86,8 @@ export function discoveryDocument(): Record<string, unknown> {
     code_challenge_methods_supported: ["S256"],
     claims_supported: [
       "sub", "iss", "aud", "exp", "iat", "nonce",
+      "auth_time", "amr", "cr_user_id", "cr_auth_revision", "cr_connection_revision",
+      "cr_project", "cr_organization", "cr_organization_role",
       "email", "email_verified", "name", "preferred_username", "picture",
     ],
   };

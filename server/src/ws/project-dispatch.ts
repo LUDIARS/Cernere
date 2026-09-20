@@ -7,6 +7,9 @@
  */
 
 import { getServiceProfile, updateServiceProfile } from "../project/profile-service.js";
+import { AppError } from "../error.js";
+import { findConnection } from "../enterprise/connections.js";
+import { enterpriseProjectCommand } from "../enterprise/sessions.js";
 
 const VOLPUTAS_PROJECT_KEY = "volputas";
 
@@ -24,6 +27,13 @@ export async function dispatchProjectCommand(
   action: string,
   payload: Record<string, unknown>,
 ): Promise<unknown> {
+  if (module === "enterprise") {
+    try { return await enterpriseProjectCommand(projectKey, action, payload); }
+    catch (error) {
+      if (error instanceof AppError) throw error;
+      throw AppError.unauthorized("Enterprise authorization could not be verified");
+    }
+  }
   switch (`${module}.${action}`) {
     case "profile.get":
       return getServiceProfile(projectKey, payload);
@@ -33,6 +43,7 @@ export async function dispatchProjectCommand(
     // Hub から生アサーションを受け取り、 Cernere 自身が CF の JWKS で検証する。
     // Hub の主張は信用しない。 REST は生やさず project WS 限定にしてある。
     case "auth.edge_assertion": {
+      if (await findConnection(projectKey)) throw AppError.forbidden("Use enterprise.login for this application");
       const { authenticateEdgeAssertion, EdgeAssertionError } = await import("../auth/edge-assertion.js");
       const { ensureUserProjectRow } = await import("../project/service.js");
       // payload の形の検査は try の外。 内側に置くと下の catch が握り潰してしまう。
