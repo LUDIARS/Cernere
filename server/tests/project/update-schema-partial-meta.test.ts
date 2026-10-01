@@ -83,3 +83,26 @@ describe("preserveExistingDefinitionFields — partial-update の既存値保持
     expect(result.identity_claims).toEqual([]);
   });
 });
+
+describe("service_scopes — 管理者所有フィールドとして保持する", () => {
+  it("auto-sync で省略された service_scopes を既存値で保持する", () => {
+    const oldDefinition: ProjectDefinition = {
+      project: { key: "ostiarius", name: "Ostiarius", description: "" },
+      service_scopes: ["face-revocation:read"],
+    };
+    const updated: ProjectDefinition = {
+      project: { key: "ostiarius", name: "Ostiarius", description: "" },
+      user_data: { columns: {} },
+    };
+    expect(preserveExistingDefinitionFields(updated, oldDefinition).service_scopes)
+      .toEqual(["face-revocation:read"]);
+  });
+
+  it("形式外の scope を含む定義は検証で弾く", () => {
+    const parsed = projectDefinitionSchema.safeParse({
+      project: { key: "ostiarius", name: "Ostiarius" },
+      service_scopes: ["Face Revocation Read"],
+    });
+    expect(parsed.success).toBe(false);
+  });
+});

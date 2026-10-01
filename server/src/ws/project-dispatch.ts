@@ -155,7 +155,8 @@ export async function dispatchProjectCommand(
       // 管理者所有フィールドはプロジェクト側の自己申告で書き換えさせない。
       // identity_claims を自己付与できると、プロジェクトが users の identity 列を
       // 勝手に開示対象にできてしまうため data_sharing と同じ扱いにする。
-      const adminOwnedFields = ["data_sharing", "identity_claims", "profile_access"] as const;
+      // service_scopes も同様 (自己申告で service token の scope を広げさせない)。
+      const adminOwnedFields = ["data_sharing", "identity_claims", "service_scopes", "profile_access"] as const;
       const submittedAdminOwned = adminOwnedFields.filter(
         (f) => Object.prototype.hasOwnProperty.call(payload, f),
       );

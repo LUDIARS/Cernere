@@ -66,6 +66,7 @@ export async function handleAuthRoute(
     case "composite-session-code": return compositeSessionCode(parseBody(body), authHeader);
     case "project-token": return projectUserToken(parseBody(body), authHeader, ctx);
     case "project-launch-credential": return projectLaunchCredential(parseBody(body), ctx);
+    case "service-token": return serviceToken(parseBody(body), ctx);
     default:
       return { status: "404 Not Found", data: { error: `Unknown auth action: ${action}` } };
   }
@@ -629,6 +630,38 @@ async function projectLogin(clientId: string | undefined, clientSecret: string |
       },
     },
   };
+}
+
+/**
+ * POST /api/auth/service-token — ユーザ不在の service 間呼び出し用 token を発行 (P2)。
+ *
+ * body: { client_id, client_secret, target_project_key }
+ * sub / aud / scope は body から受け取らず登録情報から解決する (project/service-token-issuer.ts)。
+ */
+async function serviceToken(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
+  const clientId = typeof p.client_id === "string" ? p.client_id : "";
+  const clientSecret = typeof p.client_secret === "string" ? p.client_secret : "";
+  const targetProjectKey = typeof p.target_project_key === "string" ? p.target_project_key.trim() : "";
+  if (!clientId || !clientSecret || !targetProjectKey) {
+    throw AppError.badRequest("client_id, client_secret, and target_project_key are required");
+  }
+  await checkRateLimit(`service_token:${clientId}`, 60, 300);
+
+  const { issueServiceToken } = await import("../project/service-token-issuer.js");
+  let issued;
+  try {
+    issued = await issueServiceToken({ clientId, clientSecret, targetProjectKey });
+  } catch (err) {
+    if (err instanceof AppError && err.statusCode === 401) {
+      logProjectLoginFailed(clientId, "invalid service-token credentials", ctx);
+    }
+    throw err;
+  }
+  const { callerProjectKey, ...data } = issued;
+  devLog("auth.serviceToken.issue", {
+    projectKey: callerProjectKey, subject: data.subject, audience: data.audience, scope: data.scope, ip: ctx.ip,
+  });
+  return { status: "200 OK", data };
 }
 
 /** Excubitor等の認可済launcherが、target projectの起動credentialを毎回発行する。 */

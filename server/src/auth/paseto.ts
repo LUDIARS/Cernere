@@ -208,12 +208,22 @@ export async function signProjectToken(params: {
     exp: new Date(nowMs + ttlSec * 1000).toISOString(),
     jti: crypto.randomUUID(),
   };
-  const opts: ProduceOptions = { kid: keyset.signing.kid };
+  return signPasetoClaims(claims as unknown as Record<string, unknown>);
+}
+
+/**
+ * 現行署名鍵で任意の claims を PASETO v4 署名する (user 版 / service 版の共通経路)。
+ * claims の形と kind は呼び出し側が決める。 keys 未設定なら例外。
+ */
+export async function signPasetoClaims(claims: Record<string, unknown>): Promise<string> {
+  if (!keyset) throw new Error("PASETO is not enabled (set CERNERE_PASETO_SECRET_KEY)");
+  // iat は呼び出し側が exp と同じ時刻から入れる。 paseto の既定 (iat: true) は署名時刻で
+  // 上書きするため、 exp - iat が TTL から数 ms ずれる。 ここでは上書きさせない。
+  const opts: ProduceOptions = { kid: keyset.signing.kid, iat: false };
   // V4.sign は KeyObject (Ed25519 private) を要求する。 loadKeys() で
-  // seedToPrivateKey() 経由で構築済み。 claims は index signature を持たない
-  // 狭い型なので Record<string, unknown> 互換に cast する。
+  // seedToPrivateKey() 経由で構築済み。
   return V4.sign(
-    claims as unknown as Record<string, unknown>,
+    claims,
     keyset.signing.signingKey as unknown as Parameters<typeof V4.sign>[1],
     opts,
   );
@@ -235,6 +245,21 @@ export async function verifyProjectTokenPaseto(
   token: string,
   expectedAudience: string,
 ): Promise<PasetoProjectClaims> {
+  const payload = await verifyPasetoClaims(token, expectedAudience) as unknown as PasetoProjectClaims;
+  if (payload.kind !== "user_for_project") {
+    throw new Error(`PASETO verification failed: invalid token kind: ${payload.kind}`);
+  }
+  return payload;
+}
+
+/**
+ * 署名・exp・aud を検証して payload を返す (kind の判定は呼び出し側)。
+ * ローテーション中は現行 + 旧 public key の全てを順に試す。
+ */
+export async function verifyPasetoClaims(
+  token: string,
+  expectedAudience: string,
+): Promise<Record<string, unknown>> {
   if (!keyset) throw new Error("PASETO is not enabled");
   if (!expectedAudience) {
     throw new Error("expectedAudience is required for project-token verification");
@@ -249,11 +274,7 @@ export async function verifyProjectTokenPaseto(
         key.publicKey as unknown as Parameters<typeof V4.verify>[1],
         opts as unknown as ConsumeOptions<true>,
       );
-      const payload = (result as { payload: unknown }).payload as PasetoProjectClaims;
-      if (payload.kind !== "user_for_project") {
-        throw new Error(`invalid token kind: ${payload.kind}`);
-      }
-      return payload;
+      return (result as { payload: unknown }).payload as Record<string, unknown>;
     } catch (err) {
       lastErr = err;
       // 署名不一致の場合は次の (旧) 鍵を試す。 aud 不一致や期限切れも

@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "contractsDir": "contracts",
+  "importFrom": "@ludiars/log-weaver",
+  "contracts": [
+    {
+      "id": "C-1",
+      "criterion": "C-1 issueServiceToken(request): sub / aud は呼出元・呼出先の storage_slug、scope は呼出元の service_scopes 宣言からのみ導出し、宣言が空なら発行しない",
+      "symbol": "issueServiceToken",
+      "file": "server/src/project/service-token-issuer.ts",
+      "module": "contracts/service-token-issuer.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-2",
+      "criterion": "C-2 declaredServiceScopes(definition): 形式外の値を落とし重複除去・昇順で返す",
+      "symbol": "declaredServiceScopes",
+      "file": "server/src/project/service-scopes.ts",
+      "module": "contracts/service-scopes.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-3",
+      "criterion": "C-3 verifyServiceTokenPaseto(token, aud): kind が service で aud が一致する token だけを受理する",
+      "symbol": "verifyServiceTokenPaseto",
+      "file": "server/src/auth/service-token.ts",
+      "module": "contracts/service-token-verify.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    }
+  ]
+}

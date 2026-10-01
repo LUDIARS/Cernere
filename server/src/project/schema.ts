@@ -97,6 +97,18 @@ export type IdentityClaim = (typeof IDENTITY_CLAIMS)[number];
 
 export const identityClaimSchema = z.enum(IDENTITY_CLAIMS);
 
+/**
+ * service token に載せる scope (`<resource>:<action>`、 例 "review-relay:write")。
+ *
+ * 語彙は受け側 service が決めるため列挙せず形式だけを縛る。 Cernere 自身の
+ * face 系 scope (face-revocation:read 等) も同じ形式。
+ * `service_scopes` は identity_claims と同じ **管理者所有フィールド**で、
+ * project client の update_schema では保存されない (project/service-scopes.ts)。
+ */
+export const serviceScopeSchema = z.string()
+  .max(64)
+  .regex(/^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$/, "service scope must be '<resource>:<action>' in lowercase");
+
 // ── プロジェクト定義 ─────────────────────────────────────────
 
 // project key は表示ラベル + URL/log に出る識別子。SQL 識別子は storage_slug が担うので
@@ -117,6 +129,8 @@ export const projectDefinitionSchema = z.object({
   data_sharing: z.array(dataShareDefinitionSchema).optional(),
   /** 開示を許可された users 側 identity 列 (管理者所有、未宣言なら開示しない) */
   identity_claims: z.array(identityClaimSchema).optional(),
+  /** service token に載せる scope (管理者所有、未宣言なら service token を発行しない) */
+  service_scopes: z.array(serviceScopeSchema).optional(),
   /** Administrator-owned service/user/field grants for common profiles. Missing means deny. */
   profile_access: profileAccessSchema.optional(),
   /** ユーザーデータのカラム定義 (各カラムの module フィールドでモジュール帰属を管理) */
