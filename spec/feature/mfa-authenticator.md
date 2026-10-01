@@ -82,6 +82,29 @@ guest WS / project WS は `auth.mfa-send-code` / `auth.mfa-verify`。
 コード用 payload は `{mfaToken, method, code?}`。composite の fingerprint は検証後の
 既存 auth_session WS で渡す。projectKey は認証済み project WS の文脈を利用する。
 
+## SPEC-MFA-ONSITE (Draft)
+
+2026-10-01、LLM 作成の設計案。neco 承認前で未実装。正本の設計は
+Ostiarius `spec/feature/onsite-mfa-factor.md`。
+
+Cr 単体では「その場に本人が居る」ことを証明できない。現地確認が要る操作に限り、
+Ostiarius の kiosk の確認結果 (顔認証・パスキー) を追加要素 `onsite` として受け取る。
+TOTP / メールを置き換えない。
+
+- challenge: SPEC-MFA-CHALLENGE と同じ管理 (32 byte 乱数・5 分・試行回数・一回消費) に
+  `onsite` を足す。利用者端末には nonce だけを QR で示し、userId や操作内容は載せない。
+- 受け取り: Ostiarius が scope 付き service token (`onsite-mfa:submit`) で attestation を直接送る。
+  利用者端末を中継させない。顔画像・テンプレート・スコアは受け取らない。
+- 検証: 登録済み gateway 公開鍵での Ed25519 署名、`purpose == "mfa"`、nonce と challenge の一致、
+  `sub` と challenge の userId の一致、`issuedAt` から 120 秒以内、要求 assurance 以上、
+  許可施設の `placeId`、challenge 発行後に `mfa_revision` が変わっていないこと。
+- 受理しない method: `staff_override` (`manual`)、`session` / `password` (`low`)。
+- 要求の宣言: どの操作に現地確認と assurance を課すかは `action-policy` に宣言する。対象の操作は未決定。
+
+判断が要る点: 対象とする操作、challenge の受け渡し方式 (端末 QR を kiosk で読むか、
+kiosk のコードを入力するか)、gateway 公開鍵の登録先 (Cr 新設か Aedilis の registry 共有か)、
+kiosk 経由の passkey を数えるか。
+
 ## 保存と反映
 
 `migrations/047_mfa_authenticator.sql` は `users.totp_last_step` と `users.mfa_revision` を追加する。

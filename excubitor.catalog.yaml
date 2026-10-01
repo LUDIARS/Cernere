@@ -13,7 +13,9 @@ services:
     repo: LUDIARS/Cernere
     runtime: node
     cwd: ${ARS_ROOT}/Cernere/server
-    command: npm run dev
+    # Keep a native Node root alive: npm.cmd as the root dies with the Windows launcher job.
+    # Node --run preserves dev's tsx watcher; this script has no pre/post lifecycle hooks.
+    command: node --run dev
     allow_hot_reload: true
     autostart: false
     env:
