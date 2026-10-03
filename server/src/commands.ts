@@ -623,7 +623,7 @@ async function edgeIdpCmd(userId: string, action: string, p?: Record<string, unk
 }
 
 // -- OIDC 署名鍵 (JWKS) の状態参照、 admin 専用 --
-// 鍵そのものは env / Infisical、 または DB (oidc_signing_keys) で管理する
+// 鍵そのものは env / Excubitor Vault、 または DB (oidc_signing_keys) で管理する
 // (解決順とローテーション手順は spec/setup/oidc-provider.md)。
 // ここでは admin GUI が現行 kid / 公開中の旧 kid を可視化するための読み取りのみ提供する。
 

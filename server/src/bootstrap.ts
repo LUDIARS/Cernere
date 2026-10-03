@@ -1,7 +1,7 @@
 /**
  * bootstrap entry — `.env` ファイル無し運用の起動口。
  *
- * 1. env-bootstrap で必要な env が揃ってることを検査 (必要なら Infisical から fetch)
+ * 1. env-bootstrap で必要な env が揃ってることを検査 (Excubitor Vault の注入値を検査。不足時は停止)
  * 2. dynamic import で `./index.js` を読み込み (top-level import で config.ts が
  *    走るのを避ける、 順序的に必須)
  *

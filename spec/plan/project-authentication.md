@@ -282,7 +282,7 @@ pjs1.<session_id>.<32-byte-random-secret>
 
 - `session_id`はUUIDまたは同等の128 bitランダムID。
 - secretはbase64url、paddingなし。
-- tokenはProject backendのmemoryにだけ置き、disk・URL・Infisicalへ保存しない。
+- tokenはProject backendのmemoryにだけ置き、disk・URL・Excubitor Vaultへ保存しない。
 - refresh tokenは発行しない。期限時は新しいClient Assertionで再認証する。
 
 ### 8.2 Redis record
@@ -773,7 +773,7 @@ Project auth用JWS/JWK検証を自前実装しない。ライブラリ側の`jwt
 - `packages/service-adapter/src/types.ts`: `clientSecret`だけでなく`privateKey/kid/clientId/scopes`設定を追加
 - `packages/service-adapter/src/testing/fake-cernere.ts`: assertion replay/scope/expiry/rotationを再現
 - `packages/service-adapter/README.md`: private key既定、secret compatibility、BFF user delegation例
-- Project側private keyはInfisical、OS secret store、workload secret volume等に保存し、repo/image/logへ含めない
+- Project側private keyはExcubitor Vault、OS secret store、workload secret volume等に保存し、repo/image/logへ含めない
 
 ### 19.3 Frontend / composite
 

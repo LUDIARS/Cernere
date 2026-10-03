@@ -6,7 +6,7 @@
  * 検証する。 HS256 共有 secret 時代の 「Hub 漏洩 = 偽造能力漏洩」 を解消。
  *
  * keypair の管理:
- *   - secret key: Cernere private (Infisical or env)
+ *   - secret key: Cernere private (Excubitor Vault or env)
  *   - public key: GET /.well-known/cernere-public-key で公開、 service が 6h ごと fetch
  *
  * keypair の生成は scripts/generate-paseto-keypair.ts を 1 回手動実行する想定。

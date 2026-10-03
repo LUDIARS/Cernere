@@ -495,7 +495,7 @@ async function requireCredentialChangeProofIfAvailable(
  * 設計意図:
  *   ・呼び出し元 (Memoria local backend など) は **自分用の long-lived secret を持たない**。
  *     ログイン中ユーザの user JWT を借りて、 各 project に対する short-lived token を都度発行する。
- *   ・返した token は呼び出し元 process の memory のみに保持される想定。 disk / Infisical
+ *   ・返した token は呼び出し元 process の memory のみに保持される想定。 disk / Excubitor Vault
  *     には残さない。 user/AI も値を見ない (HTTPS+memory 経由でのみ流通)。
  *   ・token は **PASETO Ed25519 (aud=hub_url 必須)** で署名する。 project 側 (Hub) は
  *     `/.well-known/cernere-public-key` の公開鍵でローカル検証する。 旧 HS256 共有鍵

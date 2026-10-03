@@ -1,51 +1,21 @@
-# Cernere サーバを起動するための設定
+# Cernere サーバーの起動設定
 
-Cernere バックエンド (uWebSockets.js) を起動するのに最低限必要な設定軸を扱う。秘密管理 (Infisical) は [infisical-secrets.md](infisical-secrets.md)、署名鍵は [paseto-keys.md](paseto-keys.md) を参照。
+秘密管理は [vault-secrets.md](vault-secrets.md)、署名鍵は [paseto-keys.md](paseto-keys.md) を参照。
+起動順は `server/src/bootstrap.ts` → `ensureEnv()` → `index.ts`。config や接続プールの初期化より前に Vault 注入値を検査します。
 
-## 目的
+## 必須値
 
-DB (PostgreSQL 17) と Redis (7) に接続し、HTTP/WS を listen するところまで。エントリは `server/src/bootstrap.ts` → `ensureEnv()` → `createApp()` (`server/src/app.ts`)。
-
-## 設定キー
-
-`server/src/config.ts` が実際に読むキー。フォールバックは dev 用既定値で、`required.production` (`env-cli.config.ts`) のものは production で欠けると起動が止まる。
-
-| キー | 既定 (dev) | production 必須 | 用途 |
-|---|---|---|---|
-| `DATABASE_URL` | `postgres://cernere:cernere@localhost:5432/cernere` | ✅ | PostgreSQL 接続文字列 |
-| `REDIS_URL` | `redis://127.0.0.1:6379` | ✅ | Redis 接続文字列 (セッション / レートリミット等) |
-| `JWT_SECRET` | プロセス起動毎にランダム生成 (warn) | ✅ | HS256 トークン (user / project / tool / MFA) の署名鍵 |
-| `LISTEN_PORT` | `8080` | — | HTTP/WS の listen ポート |
-| `FRONTEND_URL` | `http://localhost:5173` | — | CORS 許可 origin + `isHttps` 判定 + WebAuthn 既定 RP |
-| `CERNERE_ENV` / `APP_ENV` / `NODE_ENV` | (未指定=development) | — | `production` / `prod` で本番モード |
-
-> **注意 — `LISTEN_PORT` であって `LISTEN_ADDR` ではない**: `.env.example` / `env-cli.config.ts` には `LISTEN_ADDR=0.0.0.0:8080` があるが、`config.ts` が実際に読むのは `LISTEN_PORT` (`parseInt(env("LISTEN_PORT","8080"))`)。`docker-compose.yaml` も `LISTEN_PORT: "8080"` を渡している。port を変えたいときは `LISTEN_PORT` を設定する。
-
-OAuth / Mail / MFA / WebAuthn 等の任意キーは [config-reference.md](config-reference.md) を参照 (未設定でも起動はする)。
+全環境で `DATABASE_URL`、`REDIS_URL`、`JWT_SECRET`、`GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_REDIRECT_URI`、`GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`、`GOOGLE_REDIRECT_URI`、`FRONTEND_URL` が必要です。空文字・空白だけの値も不足と扱います。
+秘密の取得・補完・ランダム鍵生成はしません。不足エラーは変数名だけを列挙します。機能固有の鍵検証は従来どおり config / auth モジュールが行います。
 
 ## 起動手順
 
-`npm run env:*` 系はすべて Infisical から env を取得して `.env` を一時生成 → `docker compose up` → 終了後 `.env` を削除する (`package.json` の scripts)。
+1. Excubitor Vault に値を保存し、`cernere` の紐付けに必要な名前を追加します。
+2. PostgreSQL / Redis の接続先と OAuth redirect URI を設定します。
+3. Excubitor から `cernere` と `cernere-frontend` を起動します。定義の正本は `excubitor.catalog.yaml` です。
 
-| コマンド | モード | DB/Redis | compose ファイル / profile |
-|---|---|---|---|
-| `npm run env:up` | dev | 外部 (Infra) | `docker-compose.yaml` / `dev` |
-| `npm run env:up:prod` | prod | 外部 (Infra) | `docker-compose.yaml` / `prod` |
-| `npm run env:up:standalone` | standalone | 内蔵 | `+ docker-compose.standalone.yaml` / `prod` |
-| `npm run env:up:standalone:dev` | standalone-dev | 内蔵 | `+ docker-compose.standalone.yaml` / `dev` |
-| `npm run env:up:fg` | dev (前景) | 外部 | `--abort-on-container-exit` |
-
-dev モードは `infra_default` ネットワーク (external) に属して `postgres:5432` / `redis:6379` を service 名で直結する。`docker-compose.yaml` のコメント参照。
-
-### Docker なし直接起動
-
-```bash
-npm run env:gen           # Infisical → .env を生成 (削除しない)
-cd server && npm run dev   # tsx watch src/bootstrap.ts
-cd frontend && npm run dev # 別ターミナル (Vite)
-```
-
-Infisical を使わない場合は `.env` を手書きするか、host shell で env を export してから `npx tsx server/src/bootstrap.ts` を起動する。`ensureEnv()` は必須キーが揃っていれば Infisical fetch をスキップする ([infisical-secrets.md](infisical-secrets.md))。
+`npm run dev` / `dev:server` / `dev:front` は注入済み環境向けです。`.env` 生成や dotenv 経由の読み込みは行いません。サービス操作は Excubitor 経由で行います。
+`LISTEN_PORT` が待受ポート、`FRONTEND_URL` がブラウザの origin です。`LISTEN_ADDR` は config が読みません。
 
 ## 公開エンドポイント
 
@@ -67,10 +37,8 @@ Cernere は**ほぼ `/auth` (認証) 系しか開かない**。データ参照�
 
 ## トラブルシュート
 
-| 症状 | 原因 / 対処 |
+| 症状 | 対処 |
 |---|---|
-| 起動時 `JWT_SECRET must be set in production` | production モードで `JWT_SECRET` 未設定。Infisical に登録するか env で渡す。 |
-| dev で再起動するたびに既存トークンが 401 | `JWT_SECRET` 未設定時はプロセス毎にランダム鍵を生成する仕様 (`config.ts` の M-2 対策)。固定したいなら `JWT_SECRET` を設定する。 |
-| `[env-bootstrap] still missing after Infisical fetch` | Infisical に必須キー (`DATABASE_URL` 等) が未登録。`npm run env:initialize` → `env:set` で補う ([infisical-secrets.md](infisical-secrets.md))。 |
-| dev container が glibc エラーで落ちる | uWebSockets.js v20.60+ は glibc 2.38+ 必須。base image は `node:24-trixie-slim` (compose に固定済み)。 |
-| port を変えたのに 8080 のまま | `LISTEN_ADDR` ではなく `LISTEN_PORT` を設定する (上記注意)。 |
+| `[env-bootstrap] missing Vault-injected env: ...` | Vault の値と `cernere` の紐付けを確認する。値はログへ貼らない。 |
+| `JWT_SECRET must be set` | Excubitor Vault から固定の署名鍵を注入する。 |
+| port を変えても反映されない | catalog と `LISTEN_PORT` を確認する。 |

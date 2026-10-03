@@ -42,7 +42,7 @@ export function loadSessionKeyMaterial(env: NodeJS.ProcessEnv = process.env): Se
   const rawKey = env.CERNERE_AUTH_SESSION_KEY;
   if (!rawKey) {
     throw new Error(
-      "CERNERE_AUTH_SESSION_KEY must be set (no fallback). Provide it via Infisical/Excubitor inject.",
+      "CERNERE_AUTH_SESSION_KEY must be set (no fallback). Provide it via Excubitor Vault injection.",
     );
   }
   const keyId = env.CERNERE_AUTH_SESSION_KEY_ID;

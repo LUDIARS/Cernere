@@ -6,7 +6,7 @@ Google を Cr の本人認証元として使うための設定手順。
 1. Google Cloud で Web application 用 OAuth client を用意し、同意画面と利用対象を設定する。
 2. 承認済み redirect URI に Cr バックエンドの公開 callback URL を正確に登録する。
    パスは `/auth/google/callback`。公開ホストは配置先の設定を使い、ローカルの固定 port を流用しない。
-3. client ID / secret / redirect URI を Infisical または既存 Excubitor の env 注入で渡す。
+3. client ID / secret / redirect URI を Excubitor Vault または既存 Excubitor の env 注入で渡す。
    secret をソース、資料、Discord に貼り付けない。
 4. Cr フロントのログイン画面から「Google で続ける」を選ぶ。
    `/auth/google/login` を手作業で直開きする代わりに、タブの照合を準備する

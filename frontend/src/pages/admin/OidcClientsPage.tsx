@@ -285,7 +285,7 @@ export function OidcClientsPage() {
                   ))}
                 </div>
                 <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>
-                  鍵ローテーション手順は <code>spec/setup/oidc-provider.md §5</code>。 鍵は env / Infisical で管理します。
+                  鍵ローテーション手順は <code>spec/setup/oidc-provider.md §5</code>。 鍵は env / Excubitor Vault で管理します。
                 </div>
               </>
             )}

@@ -18,6 +18,7 @@ import { encryptToken, decryptToken } from "./oauth-token-crypto.js";
 import * as cache from "./user-data-cache.js";
 import { getAllProjectStatus, getProjectConnections, getProjectStatus } from "../ws/project-registry.js";
 import { issueProjectSecret } from "./credentials.js";
+import type { DeliverProjectCredentials } from "./credential-delivery.js";
 import { toUserDataParameter } from "./user-data-parameter.js";
 
 // ── Project definition helpers ───────────────────────────────
@@ -223,7 +224,7 @@ export async function exportProjectSchemaDefinitions(key?: string): Promise<Proj
     }));
 }
 
-export async function registerProject(payload: unknown, userId?: string) {
+export async function registerProject(payload: unknown, userId?: string, deliverCredentials?: DeliverProjectCredentials) {
   let definition: ProjectDefinition;
 
   const parsed = projectDefinitionSchema.safeParse(payload);
@@ -259,6 +260,9 @@ export async function registerProject(payload: unknown, userId?: string) {
   // storage slug は発行時に固定し以後変えない。key を変えても表は動かない (migration 043)。
   const storageSlug = await allocateStorageSlug(definition.project.key);
 
+  // Do not change DB state until the consuming service's Vault has accepted the credentials.
+  await deliverCredentials?.({ key: definition.project.key, clientId, clientSecret });
+
   await db.insert(dbSchema.managedProjects).values({
     key: definition.project.key,
     storageSlug,
@@ -287,7 +291,7 @@ export async function registerProject(payload: unknown, userId?: string) {
  * managed project の long-lived secret を再発行する。
  * 平文はこの戻り値で一度だけ返し、DB には bcrypt hash だけを保存する。
  */
-export async function rotateProjectSecret(key: string) {
+export async function rotateProjectSecret(key: string, deliverCredentials?: DeliverProjectCredentials) {
   const rows = await db.select({
     key: dbSchema.managedProjects.key,
     clientId: dbSchema.managedProjects.clientId,
@@ -296,6 +300,7 @@ export async function rotateProjectSecret(key: string) {
   if (rows.length === 0) throw AppError.notFound("Project not found");
 
   const { clientSecret, clientSecretHash } = await issueProjectSecret();
+  await deliverCredentials?.({ key, clientId: rows[0].clientId, clientSecret });
   await db.update(dbSchema.managedProjects).set({
     clientSecretHash,
     updatedAt: new Date(),

@@ -1,3 +1,7 @@
+# 旧 secret-agent 計画 (履歴)
+
+> 2026-10-03: 現行運用は [Excubitor Vault](../setup/vault-secrets.md)。以下は旧方式の設計履歴であり、現在の起動・取得手順には使わない。
+
 # シークレットのランタイム取得（env 廃止 / env-cli の lib+daemon 化）
 
 > サービス起動時に Infisical からシークレットを取得し、`.env` を一切使わない。

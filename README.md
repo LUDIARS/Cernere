@@ -8,7 +8,7 @@
 
 設定・起動手順は用途別に [`spec/setup/`](spec/setup/) にまとめてある:
 
-- [サーバを起動する](spec/setup/server-bootstrap.md) / [Infisical 秘密管理](spec/setup/infisical-secrets.md) / [PASETO 署名鍵](spec/setup/paseto-keys.md) / [サービス登録](spec/setup/service-registration.md)
+- [サーバを起動する](spec/setup/server-bootstrap.md) / [Excubitor Vault 秘密管理](spec/setup/vault-secrets.md) / [PASETO 署名鍵](spec/setup/paseto-keys.md) / [サービス登録](spec/setup/service-registration.md)
 - 全設定キー: [spec/setup/config-reference.md](spec/setup/config-reference.md)
 
 ## セキュリティ思想
@@ -63,12 +63,11 @@ Layer 4: リソース所有権・ロールチェック (403)
 │   ├── id-service/        # 汎用 Identity Service SDK
 │   ├── id-cache/          # Id Service 用キャッシュレイヤー
 │   ├── service-adapter/   # 外部サービス用 WebSocket 認証アダプタ
-│   └── env-cli/           # Infisical シークレット管理 CLI
+│   └── env-cli/           # 他リポ向け互換 CLI
 ├── frontend/              # React フロントエンド
 ├── migrations/            # SQL マイグレーション
 ├── docs/                  # 設計ドキュメント
 ├── spec/                  # セキュリティ仕様
-├── env-cli.config.ts      # env-cli プロジェクト設定
 ├── docker-compose.yaml           # 本番 + dev profile (DB 外部)
 └── docker-compose.standalone.yaml # All-in-One 用 (DB 内蔵)
 ```
@@ -101,92 +100,20 @@ cd frontend && npm install
 
 ### 環境変数
 
-`.env` をプロジェクトルートに作成（`.env.example` を参照）。
-[Infisical](https://infisical.com) を使用する場合は `env-cli` で管理可能。
-
-```bash
-npm run env:setup        # Infisical 初回設定
-npm run env:initialize   # デフォルト値を Infisical に登録
-```
+Cernere の秘密情報は Excubitor の共有 Vault / プロジェクト Vault に保存し、`cernere` の紐付けから起動プロセスへ注入します。`.env.example` は設定名の参考資料です。
+Cernere は `.env` の生成・読み込みや外部 secret store への直接取得を行いません。必須値が不足すると変数名だけを示して起動を停止します。
 
 ## 起動方法
 
-すべて `npm run env:up` 経由で起動できます。Infisical から環境変数を取得し、`.env` を一時生成して `docker compose up` を実行、終了後に `.env` を自動削除します。
+Excubitor のサービス操作で `cernere` と `cernere-frontend` を起動します。定義は `excubitor.catalog.yaml`、PostgreSQL / Redis は既存インフラを利用します。
+`dev` / `dev:server` / `dev:front` は注入済み環境向けの内部コマンドです。`env:gen` や `dotenv-cli` を起動前に呼びません。
 
-| コマンド | モード | DB/Redis | 説明 |
-|---------|--------|----------|------|
-| `npm run env:up` | dev | 外部 (Infra) | ホットリロード開発 |
-| `npm run env:up:prod` | prod | 外部 (Infra) | ビルド済みイメージで本番起動 |
-| `npm run env:up:standalone` | standalone | 内蔵 | DB 込み All-in-One 本番 |
-| `npm run env:up:standalone:dev` | standalone-dev | 内蔵 | DB 込み All-in-One 開発 |
-| `npm run env:up:fg` | dev (フォアグラウンド) | 外部 | ログ表示、Ctrl+C で停止 |
+- [起動設定](spec/setup/server-bootstrap.md)
+- [Vault の保存・紐付けと project secret CLI](spec/setup/vault-secrets.md)
+- [OAuth・署名鍵等の設定一覧](spec/setup/config-reference.md)
 
-### 1. 開発 (ホットリロード) — Infra の DB を使用
-
-[LUDIARS Infra](https://github.com/LUDIARS/Infra) が起動済みの前提。
-
-```bash
-npm run env:up
-```
-
-| サービス | 説明 | ポート |
-|---------|------|--------|
-| backend-dev | Node.js (tsx watch) | 8080 |
-| frontend-dev | Vite dev server (HMR) | 5173 |
-
-### 2. 本番 — Infra の DB を使用
-
-```bash
-npm run env:up:prod
-```
-
-| サービス | 説明 | ポート |
-|---------|------|--------|
-| backend | Node.js (dist/index.js) | 8080 |
-| frontend | nginx (静的配信 + API/WS プロキシ) | 80 |
-
-### 3. All-in-One — 単体運用 (DB 内蔵)
-
-Infra なしで Cernere 単体で動かしたい場合。
-
-```bash
-# 本番
-npm run env:up:standalone
-
-# 開発
-npm run env:up:standalone:dev
-```
-
-| サービス | 説明 | ポート |
-|---------|------|--------|
-| postgres | PostgreSQL 17 | 5432 |
-| redis | Redis 7 | 6379 |
-| backend / backend-dev | 上記と同じ | 8080 |
-| frontend / frontend-dev | 上記と同じ | 5173 |
-
-### 4. ローカル直接起動 (Docker なし)
-
-```bash
-# 環境変数を生成
-npm run env:gen
-
-# バックエンド
-cd server && npm run dev
-
-# フロントエンド (別ターミナル)
-cd frontend && npm run dev
-```
-
-### docker compose を直接使う場合
-
-`env:up` を使わず手動で起動することも可能。
-
-```bash
-docker compose --profile dev up                # dev
-docker compose up -d                           # prod
-docker compose -f docker-compose.yaml -f docker-compose.standalone.yaml up -d           # standalone
-docker compose -f docker-compose.yaml -f docker-compose.standalone.yaml --profile dev up # standalone-dev
-```
+`packages/env-cli`、`dotenv-cli` と互換 `env:*` コマンドは他リポの利用のために保持しています。利用時は対象リポ自身の設定を使います。Cernere 固有の `env-cli.config.ts` は廃止しました。
+従来の compose ファイルも互換資産として残しますが、自動の secret 取得元ではありません。
 
 ## API
 

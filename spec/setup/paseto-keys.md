@@ -32,7 +32,7 @@ HS256 共有 secret 時代は「Hub が secret を持つ = Hub 漏洩で偽造�
 npx tsx scripts/generate-paseto-keypair.ts
 ```
 
-出力例 (そのまま env / Infisical に貼れる形式):
+出力例 (そのまま env / Excubitor Vault に貼れる形式):
 
 ```
 CERNERE_PASETO_SECRET_KEY=<base64 of 32-byte seed>
@@ -40,17 +40,10 @@ CERNERE_PASETO_PUBLIC_KEY=<base64 of 32-byte raw>
 CERNERE_PASETO_KID=v1
 ```
 
-### 2. Infisical / env に登録
+### 2. Vault に登録
 
-`CERNERE_PASETO_SECRET_KEY` は Cernere の secret store にのみ置く。Infisical を使うなら:
-
-```bash
-npm run env:set CERNERE_PASETO_SECRET_KEY <base64>
-npm run env:set CERNERE_PASETO_PUBLIC_KEY <base64>
-npm run env:set CERNERE_PASETO_KID v1
-```
-
-(これらは `env-cli.config.ts` の `infraKeys` には含まれないが、`ensureEnv()` が同 workspace の全 secret を注入するため反映される。詳細は [infisical-secrets.md](infisical-secrets.md)。)
+`CERNERE_PASETO_SECRET_KEY` / `CERNERE_PASETO_PUBLIC_KEY` / `CERNERE_PASETO_KID` を Cernere 用の Excubitor Vault に保存し、`cernere` の紐付けに追加します。秘密鍵は Cernere だけに渡します。
+`ensureEnv()` は取得せず、Excubitor が注入した値を検証します。詳細は [vault-secrets.md](vault-secrets.md)。
 
 ### 3. 起動確認
 

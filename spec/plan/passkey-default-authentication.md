@@ -124,7 +124,7 @@ Cr のブラウザ user WS は既存サーバーが対応する bearer subprotoc
 ## 10. 有効化と運用
 
 - CERNERE_DEVICE_SESSIONS_ENABLED は初期値 false。既存認証だけで稼働できる。
-- 有効化前に上記 migration の適用履歴、HTTPS origin/RP ID、CERNERE_AUTH_SESSION_KEY（32 byte の base64url）と CERNERE_AUTH_SESSION_KEY_ID の登録を確認する。鍵は Infisical 等の secret store から注入する。
+- 有効化前に上記 migration の適用履歴、HTTPS origin/RP ID、CERNERE_AUTH_SESSION_KEY（32 byte の base64url）と CERNERE_AUTH_SESSION_KEY_ID の登録を確認する。鍵は Excubitor Vault 等の secret store から注入する。
 - enabled=true で鍵が未設定・不正なら起動前検証で失敗する。稼働中の発行失敗を既存 refresh 方式へ暗黙に切り替えない。
 - master key を変えるときは key ID も変更する。旧 ID の Device 由来 JWT と Cookie は拒否される。全通常セッションも止める必要がある事故対応では、別途全端末失効を実施する。secret をログや PR に記載しない。
 - enabled=false に戻すと Device 認証は拒否する。利用者は既存のパスキー等で再ログインする。

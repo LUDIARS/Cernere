@@ -4,12 +4,12 @@ Cernere が実際に読む環境変数の正本テーブル。各キーは下記
 
 - `server/src/config.ts` — アプリ設定の中心
 - `server/src/auth/paseto.ts` — project-token 署名鍵
-- `server/src/lib/env-bootstrap.ts` — 起動時 Infisical 注入
+- `server/src/lib/env-bootstrap.ts` — 起動時 Vault 注入値の検証
 - `server/src/logging/*` — ログ出力先
 - `server/src/ws/handler.ts` — `NODE_ENV` 分岐
 - `docker-compose*.yaml` / `frontend` (Vite) — インフラ / フロント
 
-> 既定値・宣言は `../../.env.example` と `../../env-cli.config.ts`。`env-cli.config.ts` の `infraKeys` に載るキーは Infisical 優先・無ければ既定値。`required.production` (`JWT_SECRET` / `DATABASE_URL` / `REDIS_URL`) は production で placeholder のままだと `.env` 生成を中止する。
+> 設定名は .env.example、既定値と検証は各実装を参照。起動時の必須値は server-bootstrap.md。秘密情報は Excubitor Vault から注入する。
 
 ## アプリケーション (config.ts)
 
@@ -117,20 +117,16 @@ Cernere は顔テンプレート・顔写真を保存しないので、生体情
 | `LOG_AUTH_FILE` | `true` | `false` で認証ログのファイル出力を無効化 |
 | `CERNERE_DEV_LOG` | (未指定=isDevelopment に従う) | `true`/`1` で devLog 強制有効、`false`/`0` で無効 |
 
-## Infisical bootstrap (env-bootstrap.ts / .env.secrets)
+## Excubitor Vault
+
+Cernere 起動時は [vault-secrets.md](vault-secrets.md) の紐付けを使う。`ensureEnv()` は注入された必須値を検査し、不足時は名前だけで失敗する。
 
 | キー | 既定 | 用途 |
 |---|---|---|
-| `SECRETS_PROVIDER` | (なし) | `infisical` 指定 (.env 内の宣言用) |
-| `INFISICAL_SITE_URL` | (なし) | Infisical ベース URL |
-| `INFISICAL_PROJECT_ID` | (なし) | workspace ID |
-| `INFISICAL_ENVIRONMENT` | `dev` | 取得環境 |
-| `INFISICAL_CLIENT_ID` | (なし) | universal-auth client id |
-| `INFISICAL_CLIENT_SECRET` | (なし) | universal-auth client secret |
+| `EXCUBITOR_URL` | なし | project secret CLI の loopback 管理 API。URL 指定を優先 |
+| `EXCUBITOR_PORT` | なし | URL 未指定時の loopback ポート。未注入なら失敗 |
 
-`ensureEnv()` は必須キー (`DATABASE_URL`/`REDIS_URL`/`JWT_SECRET`/`GITHUB_*`/`GOOGLE_*`/`FRONTEND_URL`) が env に欠けている場合のみ上記で Infisical fetch する。詳細は [infisical-secrets.md](infisical-secrets.md)。
-
-## インフラ / Docker / フロント (compose / env-cli.config.ts / Vite)
+## インフラ / Docker / フロント (互換 compose / Vite)
 
 | キー | 既定 | 用途 |
 |---|---|---|
@@ -142,4 +138,4 @@ Cernere は顔テンプレート・顔写真を保存しないので、生体情
 | `VITE_ALLOWED_HOSTS` | `""` | Vite 許可ホスト (例: 公開ドメイン) |
 | `CI` | (compose で `true`) | dev container フラグ |
 
-> `LISTEN_ADDR` は `.env.example` / `env-cli.config.ts` の `infraKeys` に存在するが、**`config.ts` は読まない** (port は `LISTEN_PORT`)。歴史的な残骸キーであり、port 変更時は `LISTEN_PORT` を設定すること。
+> `LISTEN_ADDR` は `.env.example` に存在するが、**`config.ts` は読まない** (port は `LISTEN_PORT`)。歴史的な残骸キーであり、port 変更時は `LISTEN_PORT` を設定すること。

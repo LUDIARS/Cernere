@@ -78,7 +78,7 @@ export const config = {
   get jwtSecret(): string {
     const secret = process.env.JWT_SECRET;
     if (secret) return secret;
-    throw new Error("JWT_SECRET must be set (no fallback). Provide it via env or Infisical/Excubitor inject.");
+    throw new Error("JWT_SECRET must be set (no fallback). Provide it via env or Excubitor Vault injection.");
   },
 
   // AWS MFA

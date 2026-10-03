@@ -47,12 +47,12 @@ DB に保存する private key は `CERNERE_SECRET_KEY` で AES-256-GCM 暗号�
 
 ```bash
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out oidc.pem
-# env / Infisical に貼る (1 行 base64)
+# env / Excubitor Vault に貼る (1 行 base64)
 echo "CERNERE_OIDC_PRIVATE_KEY=$(base64 -w0 oidc.pem)"
 ```
 
 raw PEM をそのまま env に入れても良い (`-----BEGIN` を含めば PEM、 含まなければ
-base64 とみなしてデコードする)。 Infisical / OS キーチェーンでの保管を推奨。
+base64 とみなしてデコードする)。 Excubitor Vault / OS キーチェーンでの保管を推奨。
 
 `oidc.pem` 自体はコミット・配布しない (秘密鍵)。
 

@@ -4,6 +4,33 @@
   "importFrom": "@ludiars/log-weaver",
   "contracts": [
     {
+      "id": "C-4",
+      "criterion": "C-4 ensureEnv(): Vault 注入の必須値が揃う場合だけ起動を許可し、不足時は変数名だけで失敗する",
+      "symbol": "ensureEnv",
+      "file": "server/src/lib/env-bootstrap.ts",
+      "module": "contracts/vault-env.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-5",
+      "criterion": "C-5 mergeVaultBindingNames(existing, added): 既存の紐付け名を落とさず必要名を重複なく追記する",
+      "symbol": "mergeVaultBindingNames",
+      "file": "server/src/project/vault-bindings.ts",
+      "module": "contracts/vault-bindings.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-6",
+      "criterion": "C-6 saveProjectCredentials(credentials, target): Vault への保存完了後だけ戻り、返却値と失敗内容に資格情報を含めない",
+      "symbol": "saveProjectCredentials",
+      "file": "server/src/project/vault-credentials.ts",
+      "module": "contracts/vault-credentials.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
       "id": "C-1",
       "criterion": "C-1 issueServiceToken(request): sub / aud は呼出元・呼出先の storage_slug、scope は呼出元の service_scopes 宣言からのみ導出し、宣言が空なら発行しない",
       "symbol": "issueServiceToken",

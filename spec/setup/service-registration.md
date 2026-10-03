@@ -19,19 +19,20 @@
 
 登録は admin による DB 直挿入、またはシード migration (例: `017_memoria_managed_project_seed.sql` / `020_legatus_managed_project_seed.sql`) で行う。`client_secret` は bcrypt ハッシュにして `client_secret_hash` に格納する。
 
-シード migration が作った project の初回secret取得、またはsecret紛失時の再発行は、
-対象DBの `DATABASE_URL` を設定して `server/` から次を実行する。旧secretは即時無効になり、
-新しい平文secretはこの出力で一度だけ表示される。
+シード済み project の再発行には `DATABASE_URL` と `EXCUBITOR_URL` または `EXCUBITOR_PORT` を注入し、`server/` から CLI を使います。新規登録も同じ Vault 配送経路です。値は出力しません。
 
 ```bash
-npx tsx scripts/rotate-project-secret.ts --project EducationLab
+npx tsx scripts/register-project.ts --file ./aedilis-schema.json --service excubitor --vault-project <id>
+npx tsx scripts/rotate-project-secret.ts --project aedilis --service excubitor --vault-project <id>
 ```
+
+`--vault-project` 省略時は共有 Vault。`--service` は紐付け先の catalog code で必須です。`--env-prefix` で既存の接頭辞を指定できます。aedilis の既定は EXCUBITOR、それ以外は project key の大文字化です。Vault 失敗時に DB を変更しません。詳細と部分失敗の扱いは [vault-secrets.md](vault-secrets.md) を参照。
 
 ログイン済みsystem adminはWSの `managed_project.rotate_secret { key }` でも同じ操作を行える。
 
 ### Excubitorによる起動時credential
 
-Excubitor自身は一度だけproject secretを発行し、Cernere用Infisical projectへ
+Excubitor自身は一度だけproject secretを発行し、Excubitor Vault へ
 `EXCUBITOR_CERNERE_CLIENT_ID` / `EXCUBITOR_CERNERE_CLIENT_SECRET`として保存する。
 以後、EducationLab起動時はExが次の認証endpointを呼び、EducationLab用credentialを毎回rotateする。
 
@@ -92,7 +93,7 @@ POST /api/auth/project-token
 
 > **注 (§2 との切り分け)**: サーバ自己認証の project token (§2、`grant_type=project_credentials` → `/ws/project`) は引き続き HS256 (`JWT_SECRET` 共有) を**正当に**使う。撤去したのは本 §3 の user×project フォールバックのみ。
 
-> **設計意図 — secret は per-user / memory-only**: 呼び出し元 (Memoria local backend 等) は**自分用の long-lived secret を持たない**。ログイン中ユーザの user JWT を借りて project ごとの短命トークンを都度発行し、**呼び出し元 process の memory のみ**に保持する (disk / Infisical に残さない、user/AI も値を見ない)。共有 long-lived な service_credential を配るのは NG。
+> **設計意図 — secret は per-user / memory-only**: 呼び出し元 (Memoria local backend 等) は**自分用の long-lived secret を持たない**。ログイン中ユーザの user JWT を借りて project ごとの短命トークンを都度発行し、**呼び出し元 process の memory のみ**に保持する (disk / Vault に残さない、user/AI も値を見ない)。共有 long-lived な service_credential を配るのは NG。
 
 ## 4. OAuth プロバイダ登録 (任意)
 

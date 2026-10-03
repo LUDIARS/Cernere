@@ -25,10 +25,7 @@ services:
       type: http
       url: http://localhost:8080/health
       interval_sec: 30
-    infisical:
-      project_id: 19c9e77d-646c-4a0e-a091-b494234953ea
-      environment: dev
-      inject: true
+    # Secret env is injected from Excubitor's shared/project Vault bindings.
     # 全サービスへ配る Cernere の接続先 (URL/port は Excubitor が特定可能 → 各サービスの個別設定不要)。
     provides:
       CERNERE_URL: http://${host}:${port}
