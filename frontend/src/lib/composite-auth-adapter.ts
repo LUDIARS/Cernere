@@ -14,6 +14,7 @@ import type {
   CompositeAuthApi,
   CompositeAuthResponse,
   DeviceFingerprint,
+  OnsiteMfaStartResult,
   PasskeyLoginBeginResult,
   PasskeySignupBeginResult,
 } from "@ludiars/cernere-composite/ui";
@@ -96,6 +97,12 @@ export class CernereCompositeAuthAdapter implements CompositeAuthApi {
 
   async mfaSendCode(params: { mfaToken: string; method: string }): Promise<void> {
     await postJson(`${this.apiBase}/api/auth/composite/mfa-send-code`, params, "MFA code delivery failed");
+  }
+
+  /** 現地確認 (onsite) の nonce と kiosk 一覧。 ticket だけで呼べる (SPEC-MFA-ONSITE)。 */
+  async mfaOnsiteStart(params: { mfaToken: string }): Promise<OnsiteMfaStartResult> {
+    return postJson<OnsiteMfaStartResult>(`${this.apiBase}/api/auth/mfa/onsite/start`, { mfaToken: params.mfaToken },
+      "Onsite verification could not start");
   }
 
   async mfaVerify(params: { mfaToken: string; method: string; code: string; device?: DeviceFingerprint }): Promise<CompositeAuthResponse> {

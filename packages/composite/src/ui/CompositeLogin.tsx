@@ -43,6 +43,7 @@ import {
   primaryButtonStyle,
   subtleLinkStyle,
 } from "./login-styles.js";
+import { OnsiteMfaSection } from "./OnsiteMfaSection.js";
 import { PasskeyLoginSection } from "./PasskeyLoginSection.js";
 import { runPasskeySignup } from "./passkey-signup.js";
 import { isPasskeyUserAbort, usePasskeyLogin } from "./usePasskeyLogin.js";
@@ -292,7 +293,8 @@ export function CompositeLogin(props: CompositeLoginProps): ReactElement {
   const isAuthTab = mode === "login" || mode === "register";
   const busy = loading || passkeyBusy;
   // passkey 専用の register / login はパスワード送信ボタンを持たない。
-  const showSubmit = !isAuthTab || showPasswordFields;
+  // Onsite completes by polling, not by submitting a code.
+  const showSubmit = (!isAuthTab || showPasswordFields) && !(mode === "mfa" && mfaMethod === "onsite");
   const submitLabel = loading
     ? l.processing
     : mode === "login"
@@ -489,7 +491,7 @@ export function CompositeLogin(props: CompositeLoginProps): ReactElement {
             <p style={{ fontSize: "0.9rem", marginBottom: "0.5rem" }}>{l.mfaTitle}</p>
             <label style={labelStyle}>{l.mfaMethod}
               <select value={mfaMethod} disabled={loading} style={inputStyle} onChange={(event) => { setMfaMethod(event.target.value); setMfaCode(""); setInfo(""); setError(""); }}>
-                {mfaMethods.map((method) => <option key={method} value={method}>{method === "totp" ? l.mfaTotp : method === "email" ? l.mfaEmail : method}</option>)}
+                {mfaMethods.map((method) => <option key={method} value={method}>{method === "totp" ? l.mfaTotp : method === "email" ? l.mfaEmail : method === "onsite" ? l.mfaOnsite : method}</option>)}
               </select>
             </label>
             {mfaMethod === "email" && <button type="button" disabled={loading || !authApi.mfaSendCode} onClick={async () => {
@@ -499,6 +501,9 @@ export function CompositeLogin(props: CompositeLoginProps): ReactElement {
               catch (err) { setError(err instanceof Error ? err.message : "MFA code delivery failed"); }
               finally { setLoading(false); }
             }}>{l.mfaSend}</button>}
+            {mfaMethod === "onsite" ? (
+              <OnsiteMfaSection mfaToken={mfaToken} authApi={authApi} labels={l} device={fingerprint ?? undefined} onResponse={handleResponse} />
+            ) : (<>
             <p style={hintStyle}>{l.mfaHint}</p>
             <label style={labelStyle}>{l.mfaCode}</label>
             <input
@@ -515,6 +520,7 @@ export function CompositeLogin(props: CompositeLoginProps): ReactElement {
               style={inputStyle}
               autoFocus
             />
+            </>)}
             <button type="button" disabled={loading} onClick={() => switchMode("login")}>{l.mfaCancel}</button>
           </div>
         )}

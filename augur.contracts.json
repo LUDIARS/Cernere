@@ -74,6 +74,51 @@
       "module": "contracts/service-token-verify.contract.ts",
       "mode": "observe",
       "sample": 1
+    },
+    {
+      "id": "C-9",
+      "criterion": "C-9 checkOnsiteAttestation(token, deps): 署名・purpose=mfa・nonce と sub の束縛・120 秒鮮度・assurance・施設・mfa_revision の §4.2 検証をすべて通った attestation だけを充足として返す",
+      "symbol": "checkOnsiteAttestation",
+      "file": "server/src/auth/onsite-attestation.ts",
+      "module": "contracts/onsite-attestation.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-10",
+      "criterion": "C-10 meetsOnsiteAssurance(method, assurance, minimum): staff_override / session / password と manual / low は常に不充足、passkey(medium) は要求値 medium 以下でのみ充足",
+      "symbol": "meetsOnsiteAssurance",
+      "file": "server/src/auth/onsite-assurance.ts",
+      "module": "contracts/onsite-assurance.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-11",
+      "criterion": "C-11 onsiteRequirementOf(definition): schema_definition.onsite_mfa.required=true のときだけ要求 (min_assurance と allowed_place_ids) を返す",
+      "symbol": "onsiteRequirementOf",
+      "file": "server/src/project/onsite-mfa.ts",
+      "module": "contracts/onsite-requirement.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-12",
+      "criterion": "C-12 splitAdminOwnedSchemaFields(payload): project client の update_schema から onsite_mfa を含む管理者所有フィールドを保存対象に残さない",
+      "symbol": "splitAdminOwnedSchemaFields",
+      "file": "server/src/project/admin-owned-fields.ts",
+      "module": "contracts/admin-owned-schema.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-13",
+      "criterion": "C-13 registerOnsiteKiosk(input): lanId をキーに active な kiosk を https の lanUrl と SPKI PEM で登録し、revoked の lanId は再登録で戻さない",
+      "symbol": "registerOnsiteKiosk",
+      "file": "server/src/auth/onsite-kiosk-registry.ts",
+      "module": "contracts/onsite-kiosk-registration.contract.ts",
+      "mode": "observe",
+      "sample": 1
     }
   ]
 }

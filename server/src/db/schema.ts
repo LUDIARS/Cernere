@@ -251,6 +251,25 @@ export const faceRevocations = pgTable("face_revocations", {
   index("idx_face_revocations_facility_time").on(t.facilityId, t.at),
 ]);
 
+// ── Onsite MFA kiosks (migration 057) ───────────────────────
+//
+// 現地確認 MFA の attestation を署名する kiosk (Ostiarius) の Ed25519 公開鍵。
+// lan_id が一意キー。失効は status='revoked' で表し、行は削除しない。
+export const onsiteKiosks = pgTable("onsite_kiosks", {
+  lanId: text("lan_id").primaryKey(),
+  placeId: text("place_id").notNull(),
+  publicKeyPem: text("public_key_pem").notNull(),
+  lanUrl: text("lan_url").notNull(),
+  label: text("label"),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+}, (t) => [
+  index("idx_onsite_kiosks_status_place").on(t.status, t.placeId),
+  check("onsite_kiosks_status_check", sql`${t.status} IN ('active', 'revoked')`),
+]);
+
 export const organizationMembers = pgTable("organization_members", {
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),

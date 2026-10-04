@@ -76,34 +76,92 @@ status だけ GET、それ以外は POST。設定 API は user Bearer 必須。
 | totp/enable / email/enable | managementToken・code | 登録を確認して有効化 |
 | totp/disable / email/disable | managementToken | 確認済みの本人操作として解除 |
 | send-code / verify | REST login から得た mfaToken・method、検証時は code | 送信 / REST の通常ログイン結果 |
+| onsite/start | onsite 要求付き ticket の mfaToken (用途を問わない) | nonce・期限・kiosk 一覧 (SPEC-MFA-ONSITE) |
 
 composite は `/api/auth/composite/mfa-send-code` / `mfa-verify` を利用する。
 guest WS / project WS は `auth.mfa-send-code` / `auth.mfa-verify`。
 コード用 payload は `{mfaToken, method, code?}`。composite の fingerprint は検証後の
 既存 auth_session WS で渡す。projectKey は認証済み project WS の文脈を利用する。
 
-## SPEC-MFA-ONSITE (Draft)
+## SPEC-MFA-ONSITE
 
-2026-10-01、LLM 作成の設計案。neco 承認前で未実装。正本の設計は
-Ostiarius `spec/feature/onsite-mfa-factor.md`。
+2026-10-04 実装 (C1 + C2)。正本の設計は Ostiarius `spec/feature/onsite-mfa-factor.md`
+(§0 の neco 決定 2026-10-01 を含む)。Actio タスク: `actio:cd51d109-b32b-4acb-b756-664825681573`。
 
-Cr 単体では「その場に本人が居る」ことを証明できない。現地確認が要る操作に限り、
+Cr 単体では「その場に本人が居る」ことを証明できない。現地確認を要求するサービスへのログインに限り、
 Ostiarius の kiosk の確認結果 (顔認証・パスキー) を追加要素 `onsite` として受け取る。
-TOTP / メールを置き換えない。
+TOTP / メールを置き換えない。顔画像・テンプレート・スコアは送らず、受け取らない。
 
-- challenge: SPEC-MFA-CHALLENGE と同じ管理 (32 byte 乱数・5 分・試行回数・一回消費) に
-  `onsite` を足す。利用者端末には nonce だけを QR で示し、userId や操作内容は載せない。
-- 受け取り: Ostiarius が scope 付き service token (`onsite-mfa:submit`) で attestation を直接送る。
-  利用者端末を中継させない。顔画像・テンプレート・スコアは受け取らない。
-- 検証: 登録済み gateway 公開鍵での Ed25519 署名、`purpose == "mfa"`、nonce と challenge の一致、
-  `sub` と challenge の userId の一致、`issuedAt` から 120 秒以内、要求 assurance 以上、
-  許可施設の `placeId`、challenge 発行後に `mfa_revision` が変わっていないこと。
-- 受理しない method: `staff_override` (`manual`)、`session` / `password` (`low`)。
-- 要求の宣言: どの操作に現地確認と assurance を課すかは `action-policy` に宣言する。対象の操作は未決定。
+### 要求の決め方 (C2)
 
-判断が要る点: 対象とする操作、challenge の受け渡し方式 (端末 QR を kiosk で読むか、
-kiosk のコードを入力するか)、gateway 公開鍵の登録先 (Cr 新設か Aedilis の registry 共有か)、
-kiosk 経由の passkey を数えるか。
+- `managed_projects.schema_definition.onsite_mfa` = `{ required, min_assurance: "high" | "medium", allowed_place_ids? }`。
+  `service_scopes` / `identity_claims` と同じ管理者所有フィールドで、project client の
+  `update_schema` では保存しない (`project/admin-owned-fields.ts`)。auto-sync で既存値を消さない。
+- project 束縛のパスワードログイン (project WS の `auth.login` → composite) で `required=true` なら、
+  利用者の MFA 設定有無にかかわらず challenge を返す。`mfaMethods` は `["onsite"]` だけで、
+  この ticket は TOTP / メールでは満たせない。`allowed_place_ids` 未指定は全 active kiosk。
+- `required=true` で定義が壊れている場合は要求を外さず 503 にする (fail closed)。
+
+### kiosk 公開鍵レジストリ (C1)
+
+kiosk (Ostiarius gateway) の Ed25519 公開鍵は Cr が持つ (`onsite_kiosks`、migration 057)。
+Aedilis の gateway registry とは共有しない。列は lanId (一意キー) / placeId / publicKeyPem (SPKI PEM) /
+lanUrl (施設 LAN 上の Ostiarius の https URL) / label / status (active | revoked) / 作成・更新・失効時刻。
+
+| 操作 | 認可 | 結果 |
+|---|---|---|
+| `POST /api/admin/onsite-kiosks` `{ lanId, placeId, publicKeyPem, lanUrl, label? }` | admin の user access token | upsert。revoked の lanId は 409 (新しい lanId を要求) |
+| `GET /api/admin/onsite-kiosks` | 同上 | 一覧 |
+| `POST /api/admin/onsite-kiosks/:lanId/revoke` | 同上 | 失効 (冪等、行は削除しない) |
+
+Ostiarius からの自己登録はしない。運用者が Ostiarius の `GET /gateway-public-key` の値を登録する。
+管理画面は `/onsite-kiosks` (admin のみ)。
+
+### challenge と受け渡し
+
+challenge は SPEC-MFA-CHALLENGE の ticket (`mfaToken`) をそのまま使う。ticket に onsite 要求と
+発行時の `mfa_revision` を記録する。QR は使わず、利用者端末と kiosk の LAN 内通信で nonce を渡す。
+
+1. 端末 → Cr `POST /api/auth/mfa/onsite/start` `{ mfaToken }` →
+   `200 { nonce, expiresAt, kiosks: [{ lanId, placeId, lanUrl, label }] }`。
+   nonce は 32 byte 乱数 base64url、ticket に束縛、期限は ticket と同じ、一回消費。
+   再度 start すると前の nonce は無効になる。kiosks は active かつ許可施設のみ (無ければ 503)。
+2. 端末 → kiosk の LAN URL `POST /api/mfa/onsite/sessions` `{ nonce }` (Ostiarius 側、契約 E)。
+   端末は nonce 以外を送らない。
+3. Ostiarius → Cr `POST /api/mfa/onsite/attestations` `{ attestation }`。
+   Bearer は Ostiarius の project client credentials から得た project token。
+   呼出元 project の `service_scopes` に `onsite-mfa:submit` が宣言されていなければ 403、
+   token 無し / 不正 / rotate 済みは 401。200 `{ accepted: true }`、4xx `{ error: <code> }`。
+4. 端末 → 既存の MFA verify に `method: "onsite"` (code は空)。REST / guest WS / composite /
+   project WS の 3 経路で同じ `verifyMfaChallenge` を通る。未充足なら 409 `onsite_pending`
+   (端末は約 2 秒間隔でポーリングする)。充足済みなら既存と同じ一回消費でセッション / authCode を発行する。
+   ポーリングは推測可能な秘密を持たないので、コード用の試行回数 (5 回) ではなく ticket あたり 300 回で縛る。
+
+attestation を受理しても ticket は消費しない。ticket に「onsite 充足 (method, assurance, placeId, lanId)」を
+記録するだけで、verify の一回消費がその記録ごと ticket を消す。
+
+### attestation の検証 (Os spec §4.2 の順)
+
+形式: `base64url(JSON payload) + "." + base64url(Ed25519 署名)`。payload は
+`{ sub, placeId, lanId, nonce, issuedAt, method, assurance, purpose }` (purpose 欠落 = attendance)。
+
+1. 署名: 登録済み・active の kiosk 公開鍵で検証 (`unknown_kiosk` / `revoked_kiosk` / `invalid_signature`)。
+2. 用途: `purpose == "mfa"` (`purpose_mismatch`)。
+3. 束縛: nonce が有効な onsite challenge に一致し (`nonce_unknown` / `nonce_used`)、`sub` が challenge の
+   userId と一致する (`subject_mismatch`)。
+4. 鮮度: `issuedAt` が 120 秒以内 (`stale`)。nonce は受理時に原子的に used へ遷移する。
+5. 確度: 要求値以上 (`assurance_insufficient`)。`staff_override` (`manual`)・`session` / `password` (`low`) は
+   常に不受理。kiosk 経由の `passkey` (`medium`) は要求値が `medium` のとき受理する。
+6. 場所: `placeId` が kiosk の登録施設と一致し、`allowed_place_ids` 指定時はその中にある (`place_not_allowed`)。
+7. 設定状態: challenge 発行後に `mfa_revision` が変わっていない (`mfa_revision_changed`)。
+
+その他の不正な形式は `invalid_format`。
+
+### 範囲外
+
+- passkey / Google / GitHub / Cloudflare edge assertion など、パスワード以外の project 束縛ログイン経路への
+  onsite 自動要求は本実装に含めない (既存の MFA もパスワード経路だけが対象)。
+- 個別の操作 (action-policy) 単位での現地確認要求は持たない。要求はサービス設定だけで決まる。
 
 ## 保存と反映
 
@@ -112,6 +170,9 @@ kiosk 経由の passkey を数えるか。
 `CERNERE_SECRET_KEY` と、メール利用時の SES / SMTP 設定は既存の秘密管理から投入する。
 Google / GitHub / passkey は既存の別認証経路を維持する。この MFA の適用対象はパスワード経路。
 Cloudflare 向け `amr` / `auth_time` の発行をこの変更で完了扱いしない。
+
+`migrations/057_onsite_kiosks.sql` は kiosk 公開鍵レジストリ `onsite_kiosks` を追加する。
+onsite で完了したログインの `amr` は `["pwd", "mfa"]`。
 
 ## 確認
 

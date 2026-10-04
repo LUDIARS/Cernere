@@ -11,6 +11,7 @@ const navItems = [
   { path: "/data-optout", label: "Data" },
   { path: "/oidc-clients", label: "OIDC", adminOnly: true },
   { path: "/enterprise", label: "Cloudflare", adminOnly: true },
+  { path: "/onsite-kiosks", label: "Kiosk", adminOnly: true },
 ];
 
 export function AppLayout() {

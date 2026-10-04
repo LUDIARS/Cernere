@@ -18,6 +18,7 @@ import { OAuthCallbackPage } from "./pages/OAuthCallbackPage";
 import { DeviceSessionsPage } from "./pages/DeviceSessionsPage";
 import { PasskeyRecoveryPage } from "./pages/PasskeyRecoveryPage";
 import { AccountRecoveryPage } from "./pages/admin/AccountRecoveryPage";
+import { OnsiteKiosksPage } from "./pages/admin/OnsiteKiosksPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -72,6 +73,7 @@ function AppRoutes() {
         <Route path="/organizations" element={<OrganizationsPage />} />
         <Route path="/oidc-clients" element={<OidcClientsPage />} />
         <Route path="/enterprise" element={<EnterpriseConnectionsPage />} />
+        <Route path="/onsite-kiosks" element={<OnsiteKiosksPage />} />
       </Route>
     </Routes>
   );

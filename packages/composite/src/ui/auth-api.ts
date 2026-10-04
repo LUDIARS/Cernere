@@ -45,6 +45,22 @@ export interface CompositeAuthResponse {
   error?: string;
 }
 
+/** 現地確認で nonce を送れる kiosk (施設 LAN 上の Ostiarius)。 */
+export interface OnsiteKiosk {
+  lanId: string;
+  placeId: string;
+  lanUrl: string;
+  label: string | null;
+}
+
+/** `POST /api/auth/mfa/onsite/start` の応答 */
+export interface OnsiteMfaStartResult {
+  nonce: string;
+  /** ISO 8601。 ticket (mfaToken) と同じ期限 */
+  expiresAt: string;
+  kiosks: OnsiteKiosk[];
+}
+
 /** `passkey-login-begin` の応答 (Cernere REST / project WS 共通の形) */
 export interface PasskeyLoginBeginResult {
   options: PublicKeyCredentialRequestOptionsJSON;
@@ -89,6 +105,11 @@ export interface CompositeAuthApi extends Partial<CompositePasskeyApi> {
   mfaVerify?(params: { mfaToken: string; method: string; code: string; device?: DeviceFingerprint }): Promise<CompositeAuthResponse>;
   /** 登録済みメールへ MFA コードを送信・再送する。 */
   mfaSendCode?(params: { mfaToken: string; method: string }): Promise<void>;
+  /**
+   * 現地確認 (method "onsite") の開始。 Cernere `POST /api/auth/mfa/onsite/start` を呼び、
+   * nonce と施設 LAN 上の kiosk 一覧を返す。 未実装なら onsite challenge は完了できない。
+   */
+  mfaOnsiteStart?(params: { mfaToken: string }): Promise<OnsiteMfaStartResult>;
   /** デバイス本人確認: 確認コードを検証し authCode を取得する */
   deviceVerify?(params: { deviceToken: string; code: string }): Promise<CompositeAuthResponse>;
   /** 確認コードを再送する */

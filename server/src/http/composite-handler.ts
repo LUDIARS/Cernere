@@ -23,6 +23,7 @@ import {
 } from "../logging/auth-logger.js";
 import { devLog } from "../logging/dev-logger.js";
 import { createAuthSession } from "../auth/auth-session.js";
+import { projectOnsiteRequirement } from "../project/onsite-mfa-policy.js";
 import { completedAuthentication, type AuthenticationEvidence } from "../lib/authentication-evidence.js";
 
 interface RouteResult {
@@ -142,12 +143,15 @@ async function compositeLogin(p: Record<string, unknown>, ctx: CompositeCtx): Pr
     throw new Error("Unauthorized: Invalid email or password");
   }
 
-  if (user.mfaEnabled) {
-    devLog("composite.login.mfaRequired", { userId: user.id });
+  // A project that declares onsite_mfa.required gets an onsite challenge whether or not the
+  // user enrolled MFA (SPEC-MFA-ONSITE / C2).
+  const onsite = await projectOnsiteRequirement(ctx.projectKey);
+  if (user.mfaEnabled || onsite) {
+    devLog("composite.login.mfaRequired", { userId: user.id, onsite: onsite !== null });
     logAuthEvent({ event: "user.mfa.challenge", userId: user.id, email: user.email ?? undefined, provider: "composite", ip: ctx.ip, userAgent: ctx.userAgent });
     return {
       status: "200 OK",
-      data: await beginMfaChallenge(user, { purpose: "composite", projectKey: ctx.projectKey }),
+      data: await beginMfaChallenge(user, { purpose: "composite", projectKey: ctx.projectKey }, onsite),
     };
   }
 

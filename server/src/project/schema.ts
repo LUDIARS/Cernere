@@ -5,6 +5,7 @@
 import { z } from "zod";
 import { serializeColumnDefault } from "./column-default.js";
 import { profileAccessSchema } from "./profile-access.js";
+import { onsiteMfaDefinitionSchema } from "./onsite-mfa.js";
 
 // ── カラム型 ─────────────────────────────────────────────────
 
@@ -131,6 +132,8 @@ export const projectDefinitionSchema = z.object({
   identity_claims: z.array(identityClaimSchema).optional(),
   /** service token に載せる scope (管理者所有、未宣言なら service token を発行しない) */
   service_scopes: z.array(serviceScopeSchema).optional(),
+  /** 現地確認 MFA の要求 (管理者所有、未宣言なら要求しない)。 project/onsite-mfa.ts */
+  onsite_mfa: onsiteMfaDefinitionSchema.optional(),
   /** Administrator-owned service/user/field grants for common profiles. Missing means deny. */
   profile_access: profileAccessSchema.optional(),
   /** ユーザーデータのカラム定義 (各カラムの module フィールドでモジュール帰属を管理) */

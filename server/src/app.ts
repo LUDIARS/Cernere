@@ -9,6 +9,7 @@ import uWS from "uWebSockets.js";
 import { config } from "./config.js";
 import { handleAuthRoute } from "./http/auth-handler.js";
 import { registerMfaRoutes } from "./http/mfa-routes.js";
+import { registerOnsiteRoutes } from "./http/onsite-routes.js";
 import { handlePasskeyRoute } from "./http/passkey-handler.js";
 import { handleDeviceRoute } from "./http/device-handler.js";
 import { handleFaceConsentRoute } from "./http/face-consent-handler.js";
@@ -237,6 +238,7 @@ function classifyError(err: unknown): { status: string; message: string; code?: 
 export function createApp() {
   const app = uWS.App();
   registerMfaRoutes(app, { readBody, jsonResponse, getRemoteIp, classifyError });
+  registerOnsiteRoutes(app, { readBody, jsonResponse, getRemoteIp, classifyError });
 
   // ── CORS preflight ──────────────────────────────────────
   app.options("/*", (res) => {

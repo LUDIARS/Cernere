@@ -40,7 +40,7 @@ export function registerMfaRoutes(app: uWS.TemplatedApp, http: HttpHelpers): voi
     }
   };
   app.get("/api/auth/mfa/status", endpoint("status", false));
-  for (const action of ["send-code", "verify", "manage/begin", "manage/verify", "manage/send-code",
+  for (const action of ["send-code", "verify", "onsite/start", "manage/begin", "manage/verify", "manage/send-code",
     "totp/setup", "totp/enable", "totp/disable", "email/setup", "email/enable", "email/disable"]) {
     app.post(`/api/auth/mfa/${action}`, endpoint(action, true));
   }

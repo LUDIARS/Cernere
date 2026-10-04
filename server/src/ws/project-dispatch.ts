@@ -156,12 +156,9 @@ export async function dispatchProjectCommand(
       // identity_claims を自己付与できると、プロジェクトが users の identity 列を
       // 勝手に開示対象にできてしまうため data_sharing と同じ扱いにする。
       // service_scopes も同様 (自己申告で service token の scope を広げさせない)。
-      const adminOwnedFields = ["data_sharing", "identity_claims", "service_scopes", "profile_access"] as const;
-      const submittedAdminOwned = adminOwnedFields.filter(
-        (f) => Object.prototype.hasOwnProperty.call(payload, f),
-      );
-      const projectOwnedPayload = { ...payload };
-      for (const field of adminOwnedFields) delete projectOwnedPayload[field];
+      // onsite_mfa も同様 (自己申告で現地確認 MFA を外させない)。
+      const { splitAdminOwnedSchemaFields } = await import("../project/admin-owned-fields.js");
+      const { projectOwned: projectOwnedPayload, submittedAdminOwned } = splitAdminOwnedSchemaFields(payload);
       const protectedDef = {
         ...projectOwnedPayload,
         project: { ...(projectOwnedPayload.project as object ?? {}), key: projectKey },

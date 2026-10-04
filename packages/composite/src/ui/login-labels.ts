@@ -37,6 +37,15 @@ export interface CompositeLoginLabels {
   mfaSent: string;
   mfaHint: string;
   mfaCancel: string;
+  mfaOnsite: string;
+  onsiteIntro: string;
+  onsiteChooseKiosk: string;
+  onsiteWaiting: string;
+  onsiteBusy: string;
+  onsiteRejected: string;
+  onsiteExpired: string;
+  onsiteUnreachable: string;
+  onsiteUnsupported: string;
   // ── パスキー ──────────────────
   passkeyLogin: string;
   passkeyRetry: string;
@@ -97,6 +106,15 @@ export const DEFAULT_LABELS: CompositeLoginLabels = {
   mfaSent: "Code sent to your registered email. Wait 60 seconds before resending.",
   mfaHint: "Enter the 6-digit code within 5 minutes. Each Authenticator code can be used only once.",
   mfaCancel: "Start again",
+  mfaOnsite: "Onsite verification",
+  onsiteIntro: "This service requires onsite verification. Choose a kiosk near you on the facility network.",
+  onsiteChooseKiosk: "Verify at this kiosk",
+  onsiteWaiting: "Stand in front of the kiosk and verify with your face or passkey. Waiting for the kiosk...",
+  onsiteBusy: "This kiosk is busy. Choose another kiosk or try again shortly.",
+  onsiteRejected: "The kiosk could not verify you. Choose a kiosk to try again.",
+  onsiteExpired: "The verification expired. Start again.",
+  onsiteUnreachable: "Could not reach the kiosk. Connect to the facility network and try again.",
+  onsiteUnsupported: "Onsite verification is not available in this app.",
   passkeyLogin: "🔐 Sign in with passkey (biometrics / Windows Hello PIN / security key)",
   passkeyRetry: "🔐 Try passkey again",
   passkeyRunning: "Waiting for your authenticator...",

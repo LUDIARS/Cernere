@@ -4,6 +4,7 @@ import { extractBearerToken, verifyToken } from "../auth/jwt.js";
 import { httpActionBinding } from "../auth/action-proof.js";
 import { parseMfaInput, requireMfaMethod } from "../auth/mfa-contract.js";
 import { sendMfaChallengeCode, verifyMfaChallenge, issueMfaLogin } from "../auth/mfa-challenge.js";
+import { startOnsiteChallenge } from "../auth/onsite-challenge.js";
 import { mfaStatus, beginMfaManagement, verifyMfaManagement, setupTotp, setupEmailMfa, changeMfaFactor,
   type MfaActor } from "../auth/mfa-settings.js";
 
@@ -19,6 +20,8 @@ export async function handleMfaRoute(action: string, body: unknown, authHeader: 
     await sendMfaChallengeCode(p.mfaToken ?? "", requireMfaMethod(p.method), { purpose: "rest" });
     return { sent: true };
   }
+  // The device holds only the ticket; any purpose's onsite ticket may start (SPEC-MFA-ONSITE).
+  if (action === "onsite/start") return startOnsiteChallenge(p.mfaToken ?? "");
   if (action === "verify") return verifyMfaChallenge(p.mfaToken ?? "", requireMfaMethod(p.method), p.code ?? "", { purpose: "rest" }, issueMfaLogin);
   const actor = await requireActor(authHeader, actionProof);
   switch (action) {

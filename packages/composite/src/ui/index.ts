@@ -8,6 +8,8 @@ export type {
   CompositeAuthApi,
   CompositeAuthResponse,
   CompositePasskeyApi,
+  OnsiteKiosk,
+  OnsiteMfaStartResult,
   DeviceAnomaly,
   PasskeyLoginBeginResult,
   PasskeySignupBeginResult,
@@ -42,3 +44,5 @@ export {
   CompositePasskeyPopup,
 } from "./CompositePasskeyPopup.js";
 export type { CompositePasskeyPopupProps } from "./CompositePasskeyPopup.js";
+export { OnsiteMfaSection } from "./OnsiteMfaSection.js";
+export type { OnsiteMfaSectionProps } from "./OnsiteMfaSection.js";

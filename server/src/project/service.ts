@@ -356,7 +356,7 @@ export function withExistingProjectMeta(
 
 /**
  * partial update で省略された既存フィールドを保持する。
- * data_sharing / identity_claims / service_scopes / profile_access は管理者所有なので、project auto-sync で消さない。
+ * data_sharing / identity_claims / service_scopes / profile_access / onsite_mfa は管理者所有なので、project auto-sync で消さない。
  */
 export function preserveExistingDefinitionFields(
   definition: ProjectDefinition,
@@ -386,6 +386,9 @@ export function preserveExistingDefinitionFields(
       : {}),
     ...(definition.service_scopes === undefined && existing.service_scopes !== undefined
       ? { service_scopes: existing.service_scopes }
+      : {}),
+    ...(definition.onsite_mfa === undefined && existing.onsite_mfa !== undefined
+      ? { onsite_mfa: existing.onsite_mfa }
       : {}),
   };
 }
