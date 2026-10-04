@@ -1,0 +1,13 @@
+{
+  "service": "cernere",
+  "include": ["server/scripts/env/**/*.ts"],
+  "exclude": ["**/*.test.ts", "dist/**"],
+  "runtime": { "autoImport": false, "entrypoints": [] },
+  "rules": {
+    "silent-catch": false,
+    "spawn-watch": false,
+    "interval-guard": false,
+    "listener-guard": false
+  },
+  "importFrom": "@ludiars/log-weaver"
+}

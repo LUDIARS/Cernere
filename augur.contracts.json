@@ -4,6 +4,24 @@
   "importFrom": "@ludiars/log-weaver",
   "contracts": [
     {
+      "id": "C-7",
+      "criterion": "C-7 missingScriptEnv(existing, received): 既存値を保持し、妥当な応答から未定義の環境変数だけを補う",
+      "symbol": "missingScriptEnv",
+      "file": "server/scripts/env/missing-script-env.ts",
+      "module": "contracts/script-env-merge.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-8",
+      "criterion": "C-8 ensureScriptEnv(required, options): 必須環境変数の充足後だけ成功し、失敗は固定分類と既知キー名だけで報告する",
+      "symbol": "ensureScriptEnv",
+      "file": "server/scripts/env/script-env.ts",
+      "module": "contracts/script-env-bootstrap.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
       "id": "C-4",
       "criterion": "C-4 ensureEnv(): Vault 注入の必須値が揃う場合だけ起動を許可し、不足時は変数名だけで失敗する",
       "symbol": "ensureEnv",

@@ -10,10 +10,11 @@
  *
  *   複数 redirect は --redirect を繰り返す。 --scopes "openid email profile" で上書き可。
  *
- * 環境変数 DATABASE_URL が server と同じ DB を指している必要がある。
+ * DATABASE_URL が未定義なら、同じ PC の Excubitor secret-agent から補完する。
  */
 
-import { registerClient } from "../src/oidc/clients.js";
+import { ensureScriptEnv, DATABASE_SCRIPT_ENV } from "./env/script-env.js";
+import { scriptFailureMessage } from "./env/script-env-error.js";
 
 function parseArgs(argv: string[]): { name: string; redirectUris: string[]; scopes?: string[] } {
   let name = "";
@@ -35,6 +36,9 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  await ensureScriptEnv(DATABASE_SCRIPT_ENV);
+  process.env.CERNERE_DEV_LOG = "false";
+  const { registerClient } = await import("../src/oidc/clients.js");
   const { client, clientSecret } = await registerClient({ name, redirectUris, scopes }, null);
 
   console.log("\nOIDC client registered:\n");
@@ -48,22 +52,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error("registration failed:", err instanceof Error ? err.message : err);
-  // postgres ドライバは実際の理由 (relation does not exist / 認証失敗 等) を cause に
-  // 入れる。 message だけ出すと 「失敗した SQL」 しか見えず、 DATABASE_URL が
-  // Cernere とは別の DB を指しているのか、 schema が古いのかを切り分けられない。
-  const printedCauses = new Set<unknown>();
-  for (
-    let cause = (err as { cause?: unknown }).cause;
-    cause && !printedCauses.has(cause);
-    cause = (cause as { cause?: unknown }).cause
-  ) {
-    printedCauses.add(cause);
-    console.error("  caused by:", cause instanceof Error ? cause.message : cause);
-  }
-  console.error(
-    "\nDATABASE_URL が Cernere 本体と同じ DB を指しているか確認してください"
-      + " (既定値は空の localhost DB を指すことがあります)。",
-  );
+  console.error(scriptFailureMessage(err));
   process.exit(1);
 });

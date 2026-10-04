@@ -1,12 +1,37 @@
 # Excubitor Vault による秘密情報の管理
 
 Cernere の秘密情報は Excubitor の共有 Vault / プロジェクト Vault に保存します。Excubitor が `cernere` の紐付け名から値を起動プロセスへ注入します。
-Cernere は secret store へ直接取得せず、`.env` も生成・読み込みません。`ensureEnv()` は必須値を検証し、不足時は変数名だけで起動を止めます。
+Cernere サーバは secret store へ直接取得せず、`.env` も生成・読み込みません。`ensureEnv()` は必須値を検証し、不足時は変数名だけで起動を止めます。
 署名鍵などの機能固有検証は config / auth の責務です。
+
+## 運用スクリプトの環境補完
+
+運用スクリプトは Excubitor が動いている PC で、そのまま実行できます。起動前に管理 endpoint の `EXCUBITOR_URL`、または既存互換の明示 `EXCUBITOR_PORT` を設定します。番号の既定値は持たず、URL が優先です。
+Actio の現行 endpoint 実装も URL の注入を必須としており、自動のポート探索は行いません。
+
+| CLI | 必須環境変数 |
+| --- | --- |
+| register-project / rotate-project-secret | DATABASE_URL, REDIS_URL |
+| grant-project-data-sharing | DATABASE_URL, REDIS_URL |
+| register-oidc-client | DATABASE_URL |
+
+必須値が不足すると、config / DB / Redis を import する前に `POST /api/v1/secrets/resolve` へ `{ "service": "cernere" }` を送ります。Bearer agent token は次の順序で解決します。
+
+1. `EXCUBITOR_AGENT_TOKEN` の値。
+2. `EXCUBITOR_AGENT_TOKEN_PATH` が指定する UTF-8 ファイル。
+3. `%APPDATA%/Excubitor/secret-agent.token`。APPDATA がなければ `<homedir>/.config/Excubitor/secret-agent.token`。
+
+指定ファイルが読めない場合は失敗し、別ファイルへフォールバックしません。トークンファイルは Excubitor が管理します。
+応答の `source: vault` と全エントリの形式を検証し、必須値が揃う場合だけ未定義の env を補います。取得した値やトークンは表示・保存しません。既存の値は空文字も含めて保持するため、明示した空の必須変数は削除するか修正してください。
+必要な値がすでに注入済みなら HTTP 要求もトークン読み取りも行いません（project credential CLI の保存先 endpoint は別途必要です）。
+
+要求は10秒でタイムアウトし、redirect は追いません。401 は `unauthorized`、403 は `keys_not_bound`、404 は `no_mapping`、502 は `fetch_failed`、その他は `http_error`。接続失敗は `unreachable`、応答不正は `invalid_response`、不足が残れば `missing_env` です。未設定 endpoint / token は `no_endpoint` / `no_token` で停止します。エラーには固定分類と既知の必須キー名だけを出し、応答本文・ネストした例外を出しません。
+
+この補完は運用 CLI 専用です。サーバ本体の `server/src/bootstrap.ts` の起動経路と Vault 注入要件は変更しません。
 
 ## project credential CLI
 
-対象 DB の `DATABASE_URL` と、管理 API の `EXCUBITOR_URL` または `EXCUBITOR_PORT` を注入してから、`server/` で使います。
+管理 API の `EXCUBITOR_URL` または `EXCUBITOR_PORT` を設定し、`server/` で使います。対象 DB / Redis の接続値が未定義なら上記 secret-agent で補います。
 URL 指定が優先です。loopback の HTTP origin のみを許容し、未指定時はポートを推測せず失敗します。redirect は追いません。
 
 ```bash

@@ -17,6 +17,8 @@ const { runCredentialCommand } = await import("../../scripts/project-credential-
 beforeEach(() => {
   vi.stubEnv("EXCUBITOR_URL", "http://127.0.0.1:23456");
   vi.stubEnv("DATABASE_URL", "postgres://test/test");
+  vi.stubEnv("REDIS_URL", "redis://test");
+  vi.stubEnv("CERNERE_DEV_LOG", "false");
   vi.stubGlobal("fetch", vi.fn(async (_url: unknown, init?: RequestInit) => Response.json(
     init?.method === "GET" ? { bindings: {}, projects: [] } : { ok: true })));
   register.mockClear(); rotate.mockClear();
@@ -54,6 +56,33 @@ describe.each(["register", "rotate"] as const)("%s CLI", (operation) => {
     expect((await runCredentialCommand(operation, argv)).exitCode).toBe(1);
     expect(register).not.toHaveBeenCalled(); expect(rotate).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("hydrates the shell environment before invoking project operations", async () => {
+    vi.stubEnv("DATABASE_URL", undefined);
+    vi.stubEnv("REDIS_URL", undefined);
+    vi.stubEnv("EXCUBITOR_AGENT_TOKEN", "fixture-agent-token");
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ source: "vault", secrets: {
+      DATABASE_URL: "postgres://resolved/db", REDIS_URL: "redis://resolved",
+    } }));
+    const selected = operation === "register" ? register : rotate;
+    selected.mockImplementationOnce(async () => {
+      expect(process.env.DATABASE_URL).toBe("postgres://resolved/db");
+      expect(process.env.REDIS_URL).toBe("redis://resolved");
+      return credentials;
+    });
+    expect((await runCredentialCommand(operation, argv)).exitCode).toBe(0);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not invoke project operations after secret-agent failure", async () => {
+    vi.stubEnv("DATABASE_URL", undefined);
+    vi.stubEnv("EXCUBITOR_AGENT_TOKEN", "fixture-agent-token");
+    vi.mocked(fetch).mockResolvedValueOnce(new Response("private-response", { status: 403 }));
+    expect(await runCredentialCommand(operation, argv)).toEqual({
+      exitCode: 1, message: "script-env: keys_not_bound [DATABASE_URL]",
+    });
+    expect(register).not.toHaveBeenCalled(); expect(rotate).not.toHaveBeenCalled();
   });
 });
 

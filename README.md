@@ -101,7 +101,9 @@ cd frontend && npm install
 ### 環境変数
 
 Cernere の秘密情報は Excubitor の共有 Vault / プロジェクト Vault に保存し、`cernere` の紐付けから起動プロセスへ注入します。`.env.example` は設定名の参考資料です。
-Cernere は `.env` の生成・読み込みや外部 secret store への直接取得を行いません。必須値が不足すると変数名だけを示して起動を停止します。
+Cernere サーバは `.env` の生成・読み込みや外部 secret store への直接取得を行いません。必須値が不足すると変数名だけを示して起動を停止します。
+
+運用スクリプトは Excubitor が動いている PC で、そのまま実行できます。管理 endpoint の `EXCUBITOR_URL`（または明示 `EXCUBITOR_PORT`）を設定すると、secret-agent 経由で不足する環境変数を補います。既存値は保持し、`.env` は不要です。agent token の解決順序と対象 CLI は [運用手順](spec/setup/vault-secrets.md#運用スクリプトの環境補完) を参照してください。
 
 ## 起動方法
 

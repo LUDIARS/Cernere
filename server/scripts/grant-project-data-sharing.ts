@@ -12,7 +12,7 @@
  * (managed_project.update_schema, requireSystemAdmin) に対応する操作を
  * 対話セッション無しで一回限り実行するためのもの。
  *
- * 使い方 (server/ で実行、環境変数 DATABASE_URL が対象 DB を指している必要あり):
+ * 使い方 (server/ で実行、不足する DB / Redis env は secret-agent から補完):
  *   tsx scripts/grant-project-data-sharing.ts \
  *     --project vantan_user \
  *     --grant-to aedilis \
@@ -33,9 +33,8 @@
  */
 
 import { eq } from "drizzle-orm";
-import { db } from "../src/db/connection.js";
-import * as dbSchema from "../src/db/schema.js";
-import { updateProjectSchema } from "../src/project/service.js";
+import { ensureScriptEnv, PROJECT_SCRIPT_ENV } from "./env/script-env.js";
+import { scriptFailureMessage } from "./env/script-env-error.js";
 import type { DataShareDefinition, ProjectDefinition } from "../src/project/schema.js";
 
 interface Args {
@@ -95,6 +94,11 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  await ensureScriptEnv(PROJECT_SCRIPT_ENV);
+  process.env.CERNERE_DEV_LOG = "false";
+  const { db } = await import("../src/db/connection.js");
+  const dbSchema = await import("../src/db/schema.js");
+  const { updateProjectSchema } = await import("../src/project/service.js");
   const rows = await db.select().from(dbSchema.managedProjects)
     .where(eq(dbSchema.managedProjects.key, project)).limit(1);
   if (rows.length === 0) {
@@ -131,6 +135,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error("grant failed:", err instanceof Error ? err.message : err);
+  console.error(scriptFailureMessage(err));
   process.exit(1);
 });
