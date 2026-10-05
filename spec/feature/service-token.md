@@ -65,11 +65,35 @@ POST /api/auth/service-token
   face 系 audit は `actorUserId` (人) を必須としており、service principal を記録する形を
   決めてから載せ替える。現行の tool token / admin 経路は変更していない。
 
-## 判断が要る点
+## 決定事項 (P4 で確定)
 
-- **service token の TTL。** 現状は user 版と同じ 15 分 (`SERVICE_TOKEN_TTL_SEC`)。
-  選択肢: (a) 15 分のまま (呼出元が期限前に取り直す)、(b) 常駐 scheduler 向けに 60 分
-  (tool / project HS256 token と同じ)、(c) project ごとに宣言で上書き可能にする。
-- **P4 移行中に受け側が新旧両方を受理する期間を設けるか。** 選択肢: (a) 設ける
-  (受け側を先に両受理にし、送信側を切り替えた後に固定トークンを撤去)、(b) 設けない
-  (送信側と受信側を同時にデプロイ)。Cernere 側はどちらでも追加変更は不要。
+P4 委託 (`actio:3ba0e56c-d5c8-4984-aee8-1cc942f57380`) で次のとおり決定した。
+
+- **service token の TTL は 15 分のまま** (`SERVICE_TOKEN_TTL_SEC`)。呼出元は `exp - 60 秒` まで
+  process memory にキャッシュし、期限前に取り直す。token をディスクやログへ書かない。
+- **P4 移行中は受け側が新旧両方を受理する。** 受け側は Cernere service token と従来の固定トークンの
+  どちらでも通す。固定トークンの撤去は P5 (別 PR)。Cernere 側の追加変更は不要。
+  - 送り側は service token を **いま固定トークンを載せているのと同じヘッダ** で送る
+    (例: GLAB external API は `X-Glab-Service-Token`、Calliope `/api` は `Authorization: Bearer`)。
+    `Authorization` を一律に使わないのは、ユーザ token を `Authorization` で受ける経路
+    (Corpus `requireAuth` 等) と取り合いになるため。
+  - 受け側は値が `v4.public.` で始まれば service token として検証する (`kind` / `exp` / `aud` /
+    scope。不正なら 401、scope 不足なら 403)。それ以外は従来の固定トークン照合へ進む
+    (どちらも無ければ従来どおり拒否)。
+  - 送り側は発行失敗時 (credentials 未設定 / 401 / 403 / 404 / ネットワーク) に限り固定トークンへ
+    フォールバックする。
+
+## P4 の宣言と登録 (migration 058)
+
+`migrations/058_p4_service_scopes.sql` で次を冪等に入れる。既存の `service_scopes` は和集合でマージする。
+
+| 呼出元 key | service_scopes | 呼出先 (`target_project_key`) |
+|---|---|---|
+| `EducationLab` | `glab-external:write`, `calliope-api:access` | `EducationLab` / `calliope` |
+| `calliope` | `glab-external:write` | `EducationLab` |
+| `volputas` | `persona-bridge:write` | `discutere` |
+| `discutere` | `persona-export:read` | `volputas` |
+
+- `calliope` / `discutere` は未登録だったため、`storage_slug` 同名で最小登録する (登録済みなら上書きしない)。
+- 送り側になる `calliope` / `discutere` に excubitor の launch credential 発行許可を足す
+  (`EducationLab` は 044、`volputas` は 036 で既存)。
