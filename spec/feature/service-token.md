@@ -97,3 +97,16 @@ P4 委託 (`actio:3ba0e56c-d5c8-4984-aee8-1cc942f57380`) で次のとおり決�
 - `calliope` / `discutere` は未登録だったため、`storage_slug` 同名で最小登録する (登録済みなら上書きしない)。
 - 送り側になる `calliope` / `discutere` に excubitor の launch credential 発行許可を足す
   (`EducationLab` は 044、`volputas` は 036 で既存)。
+
+## GLAB bot の呼出元 project (migration 059)
+
+GLAB の Discord bot (相談通知の巡回) は hub (`EducationLab`) の launch credential を共有できない
+(Excubitor が起動ごとに client secret を再発行するため片方が失効する)。そこで bot 専用の project を作り、
+GLAB の Excubitor catalog で `cernere_launch_credentials.target_project=glab-bot` として注入する (2026-10-05 決定)。
+
+| 呼出元 key | storage_slug | service_scopes | 呼出先 (`target_project_key`) |
+|---|---|---|---|
+| `glab-bot` | `glab_bot` | `glab-external:write` | `EducationLab` |
+
+- 058 で `EducationLab` に宣言した `glab-external:write` は、bot が hub の credential を共有する前提だった。
+  hub が自分自身を呼ぶ経路は無いので P5 で外す。
