@@ -6,6 +6,7 @@ import { assertRuntimeSecrets, config } from "./config.js";
 import { createApp, httpHelpers } from "./app.js";
 import { workloadListenerConfig } from "./http/workload-listener-config.js";
 import { startWorkloadListener } from "./http/workload-listener.js";
+import { displayHost, readListenHost } from "./http/listen-host.js";
 import { redis } from "./redis.js";
 import { runMigrations } from "./db/migrate.js";
 import { initOidcKeys } from "./auth/oidc-keys.js";
@@ -26,6 +27,8 @@ async function main() {
   assertRuntimeSecrets();
   // workload TLS の片側設定も I/O 前に構成エラーとして止める。
   const workloadListener = workloadListenerConfig(process.env, config.listenPort);
+  // 未設定なら全インターフェース。 本社のテスト用 Cernere は 127.0.0.1 (spec/setup/hq-test-instance.md)。
+  const listenHost = readListenHost(process.env);
 
   await runMigrations();
   await purgeExpiredFaceConsents();
@@ -35,17 +38,20 @@ async function main() {
 
   const app = createApp();
 
-  app.listen(config.listenPort, (listenSocket) => {
+  const onListen = (listenSocket: unknown) => {
     if (listenSocket) {
-      console.log(`[server] Listening on http://localhost:${config.listenPort}`);
-      console.log(`[server] WebSocket: ws://localhost:${config.listenPort}/auth`);
+      const host = displayHost(listenHost);
+      console.log(`[server] Listening on http://${host}:${config.listenPort}`);
+      console.log(`[server] WebSocket: ws://${host}:${config.listenPort}/auth`);
       console.log(`[server] Frontend URL: ${config.frontendUrl}`);
     } else {
       console.error(`[server] Failed to listen on port ${config.listenPort}`);
       process.exit(1);
     }
-  });
-  if (workloadListener) startWorkloadListener(workloadListener, httpHelpers);
+  };
+  if (listenHost) app.listen(listenHost, config.listenPort, onListen);
+  else app.listen(config.listenPort, onListen);
+  if (workloadListener) startWorkloadListener(workloadListener, httpHelpers, listenHost);
 }
 
 main().catch((err) => {

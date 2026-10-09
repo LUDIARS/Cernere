@@ -1,6 +1,7 @@
 import uWS from 'uWebSockets.js';
 import { registerWorkloadRoutes, type WorkloadHttpHelpers } from './workload-routes.js';
 import type { WorkloadListenerConfig } from './workload-listener-config.js';
+import { displayHost } from './listen-host.js';
 
 /**
  * workload 専用の TLS app。 SSLApp を作るのはこのモジュールだけで、
@@ -18,15 +19,20 @@ export function createWorkloadApp(
   return app;
 }
 
-export function startWorkloadListener(config: WorkloadListenerConfig, http: WorkloadHttpHelpers): uWS.TemplatedApp {
+/** host は一般待受と同じ LISTEN_HOST (null = 全インターフェース)。 */
+export function startWorkloadListener(
+  config: WorkloadListenerConfig, http: WorkloadHttpHelpers, host: string | null = null,
+): uWS.TemplatedApp {
   const app = createWorkloadApp(config.tls, http);
-  app.listen(config.port, (listenSocket) => {
+  const onListen = (listenSocket: uWS.us_listen_socket | false) => {
     if (listenSocket) {
-      console.log(`[server] Workload TLS: https://localhost:${config.port}/api/workload/*`);
+      console.log(`[server] Workload TLS: https://${displayHost(host)}:${config.port}/api/workload/*`);
     } else {
       console.error(`[server] Failed to listen for workload TLS on port ${config.port}`);
       process.exit(1);
     }
-  });
+  };
+  if (host) app.listen(host, config.port, onListen);
+  else app.listen(config.port, onListen);
   return app;
 }

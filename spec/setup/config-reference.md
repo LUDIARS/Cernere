@@ -18,6 +18,7 @@ Cernere が実際に読む環境変数の正本テーブル。各キーは下記
 | `DATABASE_URL` | `postgres://cernere:cernere@localhost:5432/cernere` | config.ts | PostgreSQL 接続文字列 (prod 必須) |
 | `REDIS_URL` | `redis://127.0.0.1:6379` | config.ts | Redis 接続文字列 (prod 必須) |
 | `LISTEN_PORT` | `8080` | config.ts / compose | HTTP/WS listen ポート (※ `LISTEN_ADDR` は読まれない) |
+| `LISTEN_HOST` | なし (全インターフェース) | http/listen-host.ts | 一般待受と workload 待受の bind アドレス (IPv4/IPv6 リテラルか `localhost`)。本社のテスト用 Cernere は `127.0.0.1` ([hq-test-instance.md](hq-test-instance.md)) |
 | `FRONTEND_URL` | `http://localhost:5173` | config.ts | CORS origin + `isHttps` 判定 + WebAuthn 既定 RP/origin |
 | `JWT_SECRET` | 起動毎ランダム生成 (dev、warn) | config.ts | HS256 署名鍵 (user/project/tool/MFA token) (prod 必須) |
 | `CERNERE_PUBLIC_URL` | `http://localhost:<LISTEN_PORT>` | config.ts | 外部到達 URL。 OIDC エンドポイント/issuer の基準 (proxy 配下は公開ホストを指定) |
@@ -140,4 +141,4 @@ Cernere 起動時は [vault-secrets.md](vault-secrets.md) の紐付けを使う�
 | `VITE_ALLOWED_HOSTS` | `""` | Vite 許可ホスト (例: 公開ドメイン) |
 | `CI` | (compose で `true`) | dev container フラグ |
 
-> `LISTEN_ADDR` は `.env.example` に存在するが、**`config.ts` は読まない** (port は `LISTEN_PORT`)。歴史的な残骸キーであり、port 変更時は `LISTEN_PORT` を設定すること。
+> `LISTEN_ADDR` は `.env.example` に存在するが、**`config.ts` は読まない** (port は `LISTEN_PORT`)。歴史的な残骸キーであり、port 変更時は `LISTEN_PORT`、bind アドレスは `LISTEN_HOST` を設定すること。
