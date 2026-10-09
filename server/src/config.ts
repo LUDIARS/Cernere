@@ -3,6 +3,7 @@
  */
 
 import { loadSessionKeyMaterial } from "./auth/session-keys.js";
+import { readRedisDb } from "./redis-db.js";
 
 function env(key: string, fallback?: string): string {
   const val = process.env[key];
@@ -33,6 +34,7 @@ export const config = {
   deviceSessionsEnabled: envBool("CERNERE_DEVICE_SESSIONS_ENABLED"),
   databaseUrl: env("DATABASE_URL", "postgres://cernere:cernere@localhost:5432/cernere"),
   redisUrl: env("REDIS_URL", "redis://127.0.0.1:6379"),
+  redisDb: readRedisDb(process.env),
   listenPort: parseInt(env("LISTEN_PORT", "8080"), 10),
   frontendUrl: env("FRONTEND_URL", "http://localhost:5173"),
 

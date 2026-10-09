@@ -29,7 +29,7 @@ Excubitor の runtime config は `EXCUBITOR_SERVICE_CONFIG_JSON` という JSON 
 | GLAB | `glab-test` (GLAB カタログ、`:5188`) | `glab` (AWS) |
 | Cernere DB | 共有 Postgres の `cernere_test` (空から作る) | `cernere` |
 | GLAB DB | 共有 Postgres の `glab_test` | `glab` |
-| Redis | 本番と別の DB 番号 | 既定 |
+| Redis | 本番と同じ `REDIS_URL` + `REDIS_DB` で別の DB 番号 | `REDIS_URL` のまま |
 | 秘密 | テスト用に新しく作った値 (JWT・secret box 鍵・発行元の client) | 本番の値 |
 
 値はすべて本社 Excubitor Vault のテスト用 project (`CernereTest`) に置き、`cernere-test` と `glab-test` だけを紐付ける。
@@ -40,8 +40,10 @@ Excubitor の runtime config は `EXCUBITOR_SERVICE_CONFIG_JSON` という JSON 
 1. 共有 Postgres に `cernere_test` と `glab_test` を作る。所有者はそれぞれ本番の `cernere` / `glab` と同じ role にする
    (superuser で作ると migration 後にサービス role から触れなくなる)。
 2. Vault にテスト用 project `CernereTest` を作り、次を入れる。
-   - `cernere-test`: `DATABASE_URL` (cernere_test)、`REDIS_URL` (別 DB 番号)、`LISTEN_HOST=127.0.0.1`、
+   - `cernere-test`: `DATABASE_URL` (cernere_test)、`REDIS_DB` (本番と別の番号)、`LISTEN_HOST=127.0.0.1`、
      `JWT_SECRET` と `CERNERE_SECRET_KEY` (新しい乱数)
+   - `cernere-test` の共有 binding に `REDIS_URL` を入れる (共有 Redis は認証が要り、パスワードは本番の
+     `REDIS_URL` にしか無い。`cernere-test` を取得する拠点は無いので本社の外へは出ない)
    - `glab-test`: `CERNERE_BASE_URL=http://127.0.0.1:8090`、`CERNERE_FRONTEND_URL=http://127.0.0.1:5174`、
      `GLAB_DATABASE_URL` (glab_test)、`EXCUBITOR_CERNERE_CLIENT_ID` / `EXCUBITOR_CERNERE_CLIENT_SECRET` (新しい乱数)
 3. Excubitor で `cernere-test` を起動する。起動時に migration が `cernere_test` へ流れる。

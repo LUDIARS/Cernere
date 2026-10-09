@@ -13,6 +13,8 @@ import { AppError } from "./error.js";
 export const redis = new Redis(config.redisUrl, {
   maxRetriesPerRequest: 3,
   lazyConnect: true,
+  // REDIS_DB があれば URL の DB 番号より優先する (本社テスト用の分離)。
+  ...(config.redisDb !== undefined ? { db: config.redisDb } : {}),
 });
 
 redis.on("connect", () => console.log("[redis] Connected"));
