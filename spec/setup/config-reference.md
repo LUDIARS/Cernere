@@ -22,6 +22,8 @@ Cernere が実際に読む環境変数の正本テーブル。各キーは下記
 | `JWT_SECRET` | 起動毎ランダム生成 (dev、warn) | config.ts | HS256 署名鍵 (user/project/tool/MFA token) (prod 必須) |
 | `CERNERE_PUBLIC_URL` | `http://localhost:<LISTEN_PORT>` | config.ts | 外部到達 URL。 OIDC エンドポイント/issuer の基準 (proxy 配下は公開ホストを指定) |
 | `CERNERE_OIDC_ISSUER` | `CERNERE_PUBLIC_URL` | config.ts | OIDC discovery の `issuer` / id_token の `iss` |
+| `CERNERE_TLS_CERT_FILE` / `CERNERE_TLS_KEY_FILE` | なし | http/workload-listener-config.ts | workload 専用 HTTPS 待受の証明書・鍵ファイル。一般待受 (`LISTEN_PORT`) には効かない |
+| `CERNERE_WORKLOAD_TLS_PORT` | なし | http/workload-listener-config.ts | workload 専用 HTTPS 待受のポート。上記 2 つと揃えて指定し、`LISTEN_PORT` と別にする ([workload-deploy.md](workload-deploy.md)) |
 | `CERNERE_ENV` / `APP_ENV` / `NODE_ENV` | `""` (=development) | config.ts / ws/handler.ts | `production`/`prod` で本番モード |
 
 ## 環境判定の補足

@@ -33,6 +33,8 @@ Cernere は**ほぼ `/auth` (認証) 系しか開かない**。データ参照�
 | GET | `/.well-known/cernere-public-key` | PASETO 公開鍵 (認証不要・キャッシュ可) |
 | GET | `/health` | ヘルスチェック |
 
+workload 認証局の `POST /api/workload/*` は別ポートの HTTPS 待受だけで受け付け、上記の平文待受では 403 を返す ([workload-deploy.md](workload-deploy.md))。
+
 > `/oauth/*` や `/ws/service` といったパスは**存在しない**。OAuth は `/auth/github/*` `/auth/google/*` のコールバックのみ、サービス WS は `/ws/project`。連携実装で経路を誤らないこと。
 
 ## トラブルシュート
@@ -42,3 +44,5 @@ Cernere は**ほぼ `/auth` (認証) 系しか開かない**。データ参照�
 | `[env-bootstrap] missing Vault-injected env: ...` | Vault の値と `cernere` の紐付けを確認する。値はログへ貼らない。 |
 | `JWT_SECRET must be set` | Excubitor Vault から固定の署名鍵を注入する。 |
 | port を変えても反映されない | catalog と `LISTEN_PORT` を確認する。 |
+| `Workload TLS listener requires ...` | workload TLS の 3 設定を全て揃えるか全て外す ([workload-deploy.md](workload-deploy.md))。 |
+| 起動時に `[migrate] Failed to apply` | 直前 build に戻し、`npm --prefix server run migrate:dry-run` で再現する ([workload-deploy.md](workload-deploy.md))。 |

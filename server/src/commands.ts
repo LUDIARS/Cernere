@@ -74,7 +74,8 @@ export async function dispatch(
         sessionId,
         method,
         // 機密値 (token/secret/password 等) はキー名ベースでマスクしてから記録する。
-        params: redactSensitive(params),
+        // Rejected workload input may hide a private key in a nominally public field.
+        params: module === "workload_authority" ? { redacted: true } : redactSensitive(params),
         status,
         error: error ?? null,
       });
@@ -95,6 +96,11 @@ async function execute(
   payload?: Record<string, unknown>,
 ): Promise<unknown> {
   switch (module) {
+    case "workload_authority": {
+      await requireSystemAdmin(userId);
+      const { workloadAdminCommand } = await import("./workload/admin-command.js");
+      return workloadAdminCommand(action, payload);
+    }
     case "device_session": return deviceSessionCommand(userId, sessionId, action, payload);
     case "account_recovery": return recoveryCommand(userId, action, payload);
     case "enterprise": {

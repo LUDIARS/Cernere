@@ -17,7 +17,8 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** install が必要な npm パッケージ (vestigium ビルド後に処理する)。 */
-const INSTALL_DIRECTORIES = [".", "server", "frontend", "packages/env-cli", "packages/id-cache"];
+const INSTALL_DIRECTORIES = process.argv.includes("--server-only")
+  ? ["server"] : [".", "server", "frontend", "packages/env-cli", "packages/id-cache"];
 
 // NODE_ENV=production のシェルでは npm ci が devDependencies を落とし、
 // typescript が入らないまま build に進んで失敗する。 bootstrap は開発用の
@@ -51,7 +52,14 @@ function buildVestigium() {
 
 function installPackages() {
   for (const directory of INSTALL_DIRECTORIES) {
-    run("npm", CI_ARGS, join(root, directory));
+    if (directory === "server") {
+      // File dependency prepare cannot resolve the consumer's compiler before install.
+      // Build pinned log-weaver explicitly with server dev dependencies afterwards.
+      run("npm", [...CI_ARGS, "--ignore-scripts"], join(root, directory));
+      run("npm", ["run", "build"], join(root, directory));
+    } else {
+      run("npm", CI_ARGS, join(root, directory));
+    }
   }
 }
 

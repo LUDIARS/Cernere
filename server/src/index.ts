@@ -3,7 +3,9 @@
  */
 
 import { assertRuntimeSecrets, config } from "./config.js";
-import { createApp } from "./app.js";
+import { createApp, httpHelpers } from "./app.js";
+import { workloadListenerConfig } from "./http/workload-listener-config.js";
+import { startWorkloadListener } from "./http/workload-listener.js";
 import { redis } from "./redis.js";
 import { runMigrations } from "./db/migrate.js";
 import { initOidcKeys } from "./auth/oidc-keys.js";
@@ -22,6 +24,8 @@ async function main() {
   // 遅延評価にした secret の起動時 fail-fast。 listen 後に初回ログインで落ちる、
   // という壊れ方を避けるため、 I/O を始める前に検査する。
   assertRuntimeSecrets();
+  // workload TLS の片側設定も I/O 前に構成エラーとして止める。
+  const workloadListener = workloadListenerConfig(process.env, config.listenPort);
 
   await runMigrations();
   await purgeExpiredFaceConsents();
@@ -41,6 +45,7 @@ async function main() {
       process.exit(1);
     }
   });
+  if (workloadListener) startWorkloadListener(workloadListener, httpHelpers);
 }
 
 main().catch((err) => {

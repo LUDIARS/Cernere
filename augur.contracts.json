@@ -4,6 +4,51 @@
   "importFrom": "@ludiars/log-weaver",
   "contracts": [
     {
+      "id": "C-14",
+      "criterion": "C-14 workloadClaims(snapshot, now): 有効な主体・宛先・双方の鍵・完全一致 grant・token の期限と失効を満たす場合だけ Ex wire claims を返す",
+      "symbol": "workloadClaims",
+      "file": "server/src/workload/claims.ts",
+      "module": "server/src/workload/contracts/claims.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-15",
+      "criterion": "C-15 parseWorkloadRegistration(input): site/workload ID と Ed25519 SPKI 公開鍵だけを受け付け秘密鍵・自己権限指定を拒否する",
+      "symbol": "parseWorkloadRegistration",
+      "file": "server/src/workload/input.ts",
+      "module": "server/src/workload/contracts/registration.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-16",
+      "criterion": "C-16 parseWorkloadGrant(input): 操作と資源の組合せを検証し vault keys を管理者の完全一致 allowlist に限定する",
+      "symbol": "parseWorkloadGrant",
+      "file": "server/src/workload/input.ts",
+      "module": "server/src/workload/contracts/grant.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-17",
+      "criterion": "C-17 workloadListenerConfig(env, listenPort): TLS 証明書・鍵・workload ポートが全て揃うときだけ一般待受と別ポートの workload TLS 待受を返し、全て未設定なら null、片側設定は起動構成エラーにする",
+      "symbol": "workloadListenerConfig",
+      "file": "server/src/http/workload-listener-config.ts",
+      "module": "server/src/http/contracts/workload-listener-config.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-18",
+      "criterion": "C-18 concludeMigrationDryRun(result): 未適用 migration の dry-run 結果は COMMIT せず、トランザクションを開いた場合は必ず ROLLBACK 済みで、トランザクション不可の文があれば何も実行せず blocked で停止したものに限る",
+      "symbol": "concludeMigrationDryRun",
+      "file": "server/src/db/migration-dry-run.ts",
+      "module": "server/src/db/contracts/migration-dry-run.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
       "id": "C-7",
       "criterion": "C-7 missingScriptEnv(existing, received): 既存値を保持し、妥当な応答から未定義の環境変数だけを補う",
       "symbol": "missingScriptEnv",

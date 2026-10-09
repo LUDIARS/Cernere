@@ -9,6 +9,7 @@ import {
   primaryKey, uniqueIndex, index, check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+export * from './workload-schema.js';
 
 // drizzle 標準には bytea 型がないので簡易 custom type で代用 (= raw Buffer / Uint8Array)
 const bytea = customType<{ data: Buffer; default: false }>({

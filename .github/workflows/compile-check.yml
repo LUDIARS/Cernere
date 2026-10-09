@@ -37,7 +37,10 @@ jobs:
           npm run build
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --include=dev --ignore-scripts
+
+      - name: Build contract runtime and server
+        run: npm run build
 
       - name: Type check
         run: npx tsc --noEmit

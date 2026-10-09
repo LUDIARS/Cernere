@@ -10,6 +10,7 @@ import { config } from "./config.js";
 import { handleAuthRoute } from "./http/auth-handler.js";
 import { registerMfaRoutes } from "./http/mfa-routes.js";
 import { registerOnsiteRoutes } from "./http/onsite-routes.js";
+import { registerWorkloadRoutes } from './http/workload-routes.js';
 import { handlePasskeyRoute } from "./http/passkey-handler.js";
 import { handleDeviceRoute } from "./http/device-handler.js";
 import { handleFaceConsentRoute } from "./http/face-consent-handler.js";
@@ -235,8 +236,17 @@ function classifyError(err: unknown): { status: string; message: string; code?: 
 
 // ── App 生成 ──────────────────────────────────────────────
 
+/** 一般 app と workload TLS app が共有する HTTP 補助関数。 */
+export const httpHelpers = { readBody, jsonResponse, getRemoteIp, classifyError };
+
+/**
+ * 一般認証の app。 TLS 設定の有無にかかわらず常に平文 (uWS.App) で、
+ * workload ルートは tls=false として拒否する。 workload の TLS 待受は
+ * http/workload-listener.ts が別ポートで立てる。
+ */
 export function createApp() {
   const app = uWS.App();
+  registerWorkloadRoutes(app, httpHelpers, false);
   registerMfaRoutes(app, { readBody, jsonResponse, getRemoteIp, classifyError });
   registerOnsiteRoutes(app, { readBody, jsonResponse, getRemoteIp, classifyError });
 

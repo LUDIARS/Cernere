@@ -9,6 +9,7 @@
 | サービスを登録する | [service-registration.md](service-registration.md) |
 | OIDC provider を設定する | [oidc-provider.md](oidc-provider.md) |
 | Google OIDC を設定する | [google-oidc.md](google-oidc.md) |
+| workload 認証局を配備する・戻す | [workload-deploy.md](workload-deploy.md) |
 
 PostgreSQL / Redis が利用でき、Excubitor の共有・プロジェクト Vault に必要値が登録されていることを前提にします。
 `cernere` に紐付いた名前の値を Excubitor が起動時に注入します。Cernere 自身は secret store へ取得しに行きません。不足時は起動を止めます。
