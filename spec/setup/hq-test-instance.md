@@ -27,13 +27,16 @@ AWS の GLAB が `project.login.failed / invalid credentials` (HTTP 401) にな�
    (superuser で作ると migration 後にサービス role から触れなくなる)。
 2. 本社の Excubitor Vault で、Cernere の `DATABASE_URL` を `cernere_test` へ、`REDIS_URL` を別の DB 番号へ向ける。
    Vault は catalog / runtime config より優先されるので、拠点 (本社) の Vault だけを変える。
-3. 本社の Excubitor の Cernere の runtime config に `LISTEN_HOST=127.0.0.1` を入れる。catalog は全拠点共有なので書かない。
+3. 本社の Excubitor Vault に `LISTEN_HOST` (値 `127.0.0.1`) を足し、Cernere の binding に加える。
+   catalog は全拠点共有なので書かない。Excubitor の runtime config は `EXCUBITOR_SERVICE_CONFIG_JSON` という
+   JSON 1 本で渡るため個別の env にならず、この用途には使えない (2026-10-09 に試して効かなかった)。
 4. Excubitor で Cernere を再起動する。起動時に migration が `cernere_test` へ流れる。
 5. 起動用資格情報の発行元 (`excubitor` project) の client_id / secret を、本社の Excubitor が持つ
    `EXCUBITOR_CERNERE_CLIENT_ID` / `EXCUBITOR_CERNERE_CLIENT_SECRET` と一致させる。
    空の DB では migration 028 がランダム値で作るため、そのままでは発行が 401 になる。
-6. 本社のテスト用 GLAB の runtime config で `CERNERE_BASE_URL` を `http://127.0.0.1:8080` に上書きする
-   (topology は本番の Mac を配るため)。
+6. 本社のテスト用 GLAB の `CERNERE_BASE_URL` を `http://127.0.0.1:8080` にする。GLAB の値は本社 Vault の
+   binding から入っており (topology より優先)、Vault の entry は他サービスと共有されうるので、GLAB 用の別 entry を
+   作って binding を差し替える。
 
 ## 確認
 
