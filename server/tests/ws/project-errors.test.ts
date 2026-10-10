@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 import { publicProjectCommandError } from "../../src/ws/project-errors.js";
 
 describe("project command public errors", () => {
-  it("never reflects a Volputas survey answer from an internal error", () => {
+  it("never reflects a Voluptas survey answer from an internal error", () => {
     const canary = "private-answer-canary";
     const message = publicProjectCommandError(
-      "volputas_survey",
+      "voluptas_survey",
       new Error(`database rejected ${canary}`),
     );
 
-    expect(message).toBe("Volputas survey command failed");
+    expect(message).toBe("Voluptas survey command failed");
     expect(message).not.toContain(canary);
   });
 

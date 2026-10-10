@@ -11,7 +11,8 @@ import { AppError } from "../error.js";
 import { findConnection } from "../enterprise/connections.js";
 import { enterpriseProjectCommand } from "../enterprise/sessions.js";
 
-const VOLPUTAS_PROJECT_KEY = "volputas";
+// managed project key は 063 で volputas → voluptas に改名した (storage_slug は volputas のまま)。
+const VOLUPTAS_PROJECT_KEY = "voluptas";
 
 function requireStr(obj: Record<string, unknown>, key: string): string {
   const v = obj[key];
@@ -222,21 +223,21 @@ export async function dispatchProjectCommand(
         return { valid: false };
       }
     }
-    // ─── Volputas survey responses ────────────────────────────────────────
+    // ─── Voluptas survey responses ────────────────────────────────────────
     // The project key is bound to the authenticated WS connection. Only the
-    // Volputas service may access the response store it delegates to Cernere.
-    case "volputas_survey.list_response_statuses": {
-      requireVolputasProject(projectKey);
+    // Voluptas service may access the response store it delegates to Cernere.
+    case "voluptas_survey.list_response_statuses": {
+      requireVoluptasProject(projectKey);
       const service = await import("../project/volputas-survey-response.js");
       return service.listResponseStatuses(payload);
     }
-    case "volputas_survey.get_response": {
-      requireVolputasProject(projectKey);
+    case "voluptas_survey.get_response": {
+      requireVoluptasProject(projectKey);
       const service = await import("../project/volputas-survey-response.js");
       return service.getResponse(payload);
     }
-    case "volputas_survey.save_response": {
-      requireVolputasProject(projectKey);
+    case "voluptas_survey.save_response": {
+      requireVoluptasProject(projectKey);
       const service = await import("../project/volputas-survey-response.js");
       return service.saveResponse(payload);
     }
@@ -304,8 +305,8 @@ export async function dispatchProjectCommand(
   }
 }
 
-function requireVolputasProject(projectKey: string): void {
-  if (projectKey !== VOLPUTAS_PROJECT_KEY) {
-    throw new Error("Volputas survey commands require the Volputas project");
+function requireVoluptasProject(projectKey: string): void {
+  if (projectKey !== VOLUPTAS_PROJECT_KEY) {
+    throw new Error("Voluptas survey commands require the Voluptas project");
   }
 }

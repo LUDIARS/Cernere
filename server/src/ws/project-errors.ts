@@ -1,11 +1,11 @@
-const VOLPUTAS_SURVEY_MODULE = "volputas_survey";
+const VOLUPTAS_SURVEY_MODULE = "voluptas_survey";
 
 export function publicProjectCommandError(
   module: string,
   error: unknown,
 ): string {
-  if (module === VOLPUTAS_SURVEY_MODULE) {
-    return "Volputas survey command failed";
+  if (module === VOLUPTAS_SURVEY_MODULE) {
+    return "Voluptas survey command failed";
   }
   if (error instanceof Error && error.message) return error.message;
   return "Project command failed";
