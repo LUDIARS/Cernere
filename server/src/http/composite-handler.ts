@@ -4,7 +4,7 @@
  * 他サービスに組み込む用の認証フロー。
  *
  * 資格情報検証後に auth_session (Redis, 10分 TTL) を作成し
- * `{ ticket, wsPath }` を返却。クライアントは WS 経由で fingerprint を
+ * `{ ticket, wsPath, wsUrl }` を返却。クライアントは WS 経由で fingerprint を
  * 送信し、本人確認フローを完結させる。詳細は `server/src/ws/composite-auth.ts`。
  */
 
@@ -25,6 +25,8 @@ import { devLog } from "../logging/dev-logger.js";
 import { createAuthSession } from "../auth/auth-session.js";
 import { projectOnsiteRequirement } from "../project/onsite-mfa-policy.js";
 import { completedAuthentication, type AuthenticationEvidence } from "../lib/authentication-evidence.js";
+import { compositeWsPath, compositeWsUrl } from "../auth/composite-ws-url.js";
+import { config } from "../config.js";
 
 interface RouteResult {
   status: string;
@@ -106,7 +108,12 @@ async function openAuthSession(
     data: {
       deviceVerificationRequired: true,
       ticket: session.ticket,
-      wsPath: `/auth/composite-ws?ticket=${session.ticket}`,
+      wsPath: compositeWsPath(session.ticket),
+      // サービスの画面 (埋め込み SDK) が直接つなぐ公開 URL。 FRONTEND_URL が不正なら省く
+      ...(() => {
+        const wsUrl = compositeWsUrl(session.ticket, config.frontendUrl);
+        return wsUrl ? { wsUrl } : {};
+      })(),
     },
   };
 }

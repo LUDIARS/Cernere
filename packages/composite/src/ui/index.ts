@@ -46,3 +46,15 @@ export {
 export type { CompositePasskeyPopupProps } from "./CompositePasskeyPopup.js";
 export { OnsiteMfaSection } from "./OnsiteMfaSection.js";
 export type { OnsiteMfaSectionProps } from "./OnsiteMfaSection.js";
+export {
+  CompositeWsSession,
+  buildWsUrl,
+  compositeWsTarget,
+  outcomeToResponse,
+  WS_BOUND_DEVICE_TOKEN,
+} from "./composite-ws-session.js";
+export type {
+  CompositeAnomaly,
+  CompositeChallengeInfo,
+  CompositeWsOutcome,
+} from "./composite-ws-session.js";

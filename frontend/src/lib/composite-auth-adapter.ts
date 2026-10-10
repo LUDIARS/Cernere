@@ -22,7 +22,7 @@ import type {
   AuthenticationResponseJSON,
   RegistrationResponseJSON,
 } from "@simplewebauthn/browser";
-import { CompositeWsSession, type CompositeWsOutcome } from "./composite-ws-session";
+import { CompositeWsSession, outcomeToResponse } from "@ludiars/cernere-composite/ui";
 
 interface CompositeLoginResponse {
   ticket?: string;
@@ -33,13 +33,6 @@ interface CompositeLoginResponse {
   error?: string;
 }
 
-/**
- * composite WS の本人確認はセッション (WS 接続) に紐づき、 SDK が持ち回る
- * deviceToken は使わない。 SDK は deviceToken が truthy のときだけ device 画面へ
- * 遷移するため、 接続識別のプレースホルダを入れる。
- */
-const WS_BOUND_DEVICE_TOKEN = "composite-ws";
-
 async function postJson<T>(url: string, body: unknown, fallbackError: string): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
@@ -49,21 +42,6 @@ async function postJson<T>(url: string, body: unknown, fallbackError: string): P
   const data = await res.json().catch(() => ({})) as T & { error?: string };
   if (!res.ok) throw new Error(data.error ?? fallbackError);
   return data;
-}
-
-function outcomeToResponse(outcome: CompositeWsOutcome): CompositeAuthResponse {
-  if (outcome.kind === "authenticated") return { authCode: outcome.authCode };
-  const d = outcome.data;
-  return {
-    deviceVerificationRequired: true,
-    deviceToken: d.deviceToken ?? WS_BOUND_DEVICE_TOKEN,
-    emailMasked: d.emailMasked,
-    anomalies: d.anomalies,
-    codeChannel: d.codeChannel,
-    deviceLabel: d.deviceLabel,
-    error: d.error,
-    remainingAttempts: d.remainingAttempts,
-  };
 }
 
 export class CernereCompositeAuthAdapter implements CompositeAuthApi {

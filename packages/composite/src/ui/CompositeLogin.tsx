@@ -19,6 +19,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type FormEvent,
@@ -32,6 +33,7 @@ import {
   type DeviceAnomaly,
 } from "./auth-api.js";
 import { collectDeviceFingerprint, type DeviceFingerprint } from "./device-fingerprint.js";
+import { CompositeWsSession, compositeWsTarget, outcomeToResponse } from "./composite-ws-session.js";
 import { LoginDivider } from "./LoginDivider.js";
 import { DEFAULT_LABELS, type CompositeLoginLabels } from "./login-labels.js";
 import {
@@ -171,6 +173,34 @@ export function CompositeLogin(props: CompositeLoginProps): ReactElement {
     }
   }, [passkeyOnly]);
 
+  // ── composite WS (端末の本人確認) ──
+  // authApi が Cernere の { ticket, wsUrl | wsPath } をそのまま返したら、 カードが自分で接続して
+  // fingerprint → 確認コード → authCode まで進める。 利用側は WS を実装しなくてよい。
+  const wsSessionRef = useRef<CompositeWsSession | null>(null);
+  const closeWsSession = () => {
+    const s = wsSessionRef.current;
+    wsSessionRef.current = null;
+    s?.close();
+  };
+  useEffect(() => closeWsSession, []);
+
+  /** WS で続ける応答なら接続して最初の決着まで待ち、 それ以外はそのまま返す。 */
+  const continueOverWs = async (r: CompositeAuthResponse): Promise<CompositeAuthResponse> => {
+    const target = compositeWsTarget(r);
+    if (!target) return r;
+    closeWsSession(); // やり直しは前回の WS を閉じてから張り直す
+    const session = new CompositeWsSession(fingerprint ?? undefined);
+    wsSessionRef.current = session;
+    try {
+      const next = outcomeToResponse(await session.open(target));
+      if (next.authCode) closeWsSession();
+      return next;
+    } catch (err) {
+      closeWsSession();
+      throw err;
+    }
+  };
+
   const handleResponse = (r: CompositeAuthResponse) => {
     setInfo("");
     if (r.mfaRequired) {
@@ -197,7 +227,10 @@ export function CompositeLogin(props: CompositeLoginProps): ReactElement {
     }
     if (r.authCode) {
       onAuthCode(r.authCode);
+      return;
     }
+    // 何も進まない応答で黙って止まらない (「ボタンを押しても反応が無い」 になる)
+    throw new Error("Unexpected authentication response");
   };
 
   // ── login タブを開いた直後に認証器ダイアログを開く (1 マウント 1 回) ──
@@ -210,10 +243,17 @@ export function CompositeLogin(props: CompositeLoginProps): ReactElement {
   const passkeyBusy = passkey.phase === "running";
 
   const submitDeviceVerify = async () => {
-    if (!authApi.deviceVerify || !device) {
+    if (!device) throw new Error("Device verification is not supported");
+    const ws = wsSessionRef.current;
+    let r: CompositeAuthResponse;
+    if (ws) {
+      r = outcomeToResponse(await ws.verifyCode(deviceCode.trim()));
+      if (r.authCode) closeWsSession();
+    } else if (authApi.deviceVerify) {
+      r = await authApi.deviceVerify({ deviceToken: device.deviceToken, code: deviceCode.trim() });
+    } else {
       throw new Error("Device verification is not supported");
     }
-    const r = await authApi.deviceVerify({ deviceToken: device.deviceToken, code: deviceCode.trim() });
     if (r.error) {
       const remaining = typeof r.remainingAttempts === "number"
         ? l.remainingAttempts.replace("{n}", String(r.remainingAttempts))
@@ -224,12 +264,14 @@ export function CompositeLogin(props: CompositeLoginProps): ReactElement {
   };
 
   const handleResend = async () => {
-    if (!authApi.deviceResend || !device) return;
+    const ws = wsSessionRef.current;
+    if ((!ws && !authApi.deviceResend) || !device) return;
     setError("");
     setInfo("");
     setLoading(true);
     try {
-      await authApi.deviceResend({ deviceToken: device.deviceToken });
+      if (ws) await ws.resend();
+      else await authApi.deviceResend?.({ deviceToken: device.deviceToken });
       setInfo(l.deviceResent);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Resend failed");
@@ -274,12 +316,12 @@ export function CompositeLogin(props: CompositeLoginProps): ReactElement {
     try {
       const fp = fingerprint ?? undefined;
       if (mode === "login") {
-        handleResponse(await authApi.login({ email, password, device: fp }));
+        handleResponse(await continueOverWs(await authApi.login({ email, password, device: fp })));
       } else if (mode === "register") {
-        handleResponse(await authApi.register({ name, email, password, device: fp }));
+        handleResponse(await continueOverWs(await authApi.register({ name, email, password, device: fp })));
       } else if (mode === "mfa") {
         if (!authApi.mfaVerify) throw new Error("MFA is not supported");
-        handleResponse(await authApi.mfaVerify({ mfaToken, method: mfaMethod, code: mfaCode, device: fp }));
+        handleResponse(await continueOverWs(await authApi.mfaVerify({ mfaToken, method: mfaMethod, code: mfaCode, device: fp })));
       } else if (mode === "device") {
         await submitDeviceVerify();
       }
@@ -502,7 +544,12 @@ export function CompositeLogin(props: CompositeLoginProps): ReactElement {
               finally { setLoading(false); }
             }}>{l.mfaSend}</button>}
             {mfaMethod === "onsite" ? (
-              <OnsiteMfaSection mfaToken={mfaToken} authApi={authApi} labels={l} device={fingerprint ?? undefined} onResponse={handleResponse} />
+              <OnsiteMfaSection mfaToken={mfaToken} authApi={authApi} labels={l} device={fingerprint ?? undefined} onResponse={(r) => {
+                // onsite の完了応答も mfa-verify と同じく composite WS で続くことがある
+                continueOverWs(r).then(handleResponse).catch((err: unknown) => {
+                  setError(err instanceof Error ? err.message : "Authentication failed");
+                });
+              }} />
             ) : (<>
             <p style={hintStyle}>{l.mfaHint}</p>
             <label style={labelStyle}>{l.mfaCode}</label>

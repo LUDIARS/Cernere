@@ -177,8 +177,8 @@ sequenceDiagram
     SS->>CS: WS module_request<br/>{ module:"auth", action:"login",<br/>  payload:{email,password} }
     Note over CS: projectKey は WS セッションから自動付与
     CS->>CS: composite auth_session 発行<br/>(projectKey も session に保存)
-    CS-->>SS: { ticket, wsPath }
-    SS-->>SF: { ticket, wsPath }
+    CS-->>SS: { ticket, wsPath, wsUrl }
+    SS-->>SF: { ticket, wsPath, wsUrl } (そのまま返す)
     end
 
     rect rgba(255,240,220,0.5)
@@ -208,6 +208,12 @@ sequenceDiagram
     Note over CW,CS: authCode 発行と同時に projectKey が判明していれば<br/>ensureUserProjectRow → project_data_<key> に user 行確保
 ```
 
+- 以降の WS は埋め込み SDK が担う。 `<CompositeLogin>` は authApi の応答に authCode / MFA が無く
+  `wsUrl` (無ければ `wsPath`) があれば、 自分で `CompositeWsSession` を開いて fingerprint 送信 →
+  確認コード画面 → authCode まで進める。 サービスの authApi は Cernere の応答をそのまま返すだけでよく、
+  WS の実装・中継をサービス側に持たない。 `wsUrl` は `FRONTEND_URL` を基点にした絶対 URL
+  (`server/src/auth/composite-ws-url.ts`)、 `wsPath` は Cernere と同じ host の画面向けの相対パス。
+  どれにも当たらない応答はカードがエラーとして出す (黙って止まらない)。 SDK 0.5.0 から。
 - `auth_session` Redis TTL: 10 分
 - `device_challenge` Redis TTL: 10 分、最大 5 回試行
 - `authCode` 発行 → `/api/auth/exchange` で one-time 交換 → `accessToken`/`refreshToken`

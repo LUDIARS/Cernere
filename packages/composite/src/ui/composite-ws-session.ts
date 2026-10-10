@@ -4,13 +4,14 @@
  * password ログイン / 登録は REST で資格情報を検証したあと、 この WS で
  * fingerprint 送信 → 本人確認コード → authCode の順に進む
  * (server/src/ws/composite-auth.ts)。 ここではその状態機械を Promise に畳み、
- * <CompositeLogin> の authApi (login → deviceVerify → ...) から呼べる形にする。
+ * <CompositeLogin> が authApi の応答 ({ ticket, wsPath | wsUrl }) を受けて自分で開く。
+ * 利用側 (サービスの authApi) は Cernere の応答をそのまま返すだけでよい。
  *
  * 1 セッション = 1 WS。 open / verifyCode / resend は「次の決着」 を待つ。
  */
 
-import type { DeviceFingerprint } from "@ludiars/cernere-composite/ui";
-import { collectDeviceFingerprint } from "./device-fingerprint";
+import { collectDeviceFingerprint, type DeviceFingerprint } from "./device-fingerprint.js";
+import type { CompositeAuthResponse } from "./auth-api.js";
 
 export type CompositeAnomaly =
   | "new_device"
@@ -51,10 +52,20 @@ interface Waiter {
 const FINGERPRINT_RETRY_DELAY_MS = 500;
 const MAX_FINGERPRINT_RETRIES = 3;
 
-/** WS の URL を構築する (HTTPS → wss, HTTP → ws)。 開発時は Vite proxy 下で動くため location.host。 */
-function buildWsUrl(wsPath: string): string {
-  const proto = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${window.location.host}${wsPath}`;
+/**
+ * WS の URL を構築する (HTTPS → wss, HTTP → ws)。
+ * - 絶対 URL (Cernere が返す wsUrl): そのまま使う。 サービスの画面から Cernere の公開 URL へ直接つなぐ。
+ * - 相対パス (wsPath): ページと同じ host。 Cernere 自身の画面と Vite proxy 下の開発時。
+ */
+export function buildWsUrl(target: string, loc: Pick<Location, "protocol" | "host"> = window.location): string {
+  if (/^(wss?|https?):\/\//i.test(target)) {
+    const url = new URL(target);
+    if (url.protocol === "https:") url.protocol = "wss:";
+    else if (url.protocol === "http:") url.protocol = "ws:";
+    return url.toString();
+  }
+  const proto = loc.protocol === "https:" ? "wss" : "ws";
+  return `${proto}://${loc.host}${target}`;
 }
 
 export class CompositeWsSession {
@@ -70,11 +81,11 @@ export class CompositeWsSession {
   constructor(private readonly fingerprint: DeviceFingerprint | undefined) {}
 
   /** 接続し、 最初の決着 (本人確認コード要求 or 認証完了) を待つ。 */
-  open(wsPath: string): Promise<CompositeWsOutcome> {
+  open(target: string): Promise<CompositeWsOutcome> {
     if (this.ws) throw new Error("composite WS session is already open");
     return new Promise<CompositeWsOutcome>((resolve, reject) => {
       this.waiter = { resolve, reject };
-      const ws = new WebSocket(buildWsUrl(wsPath));
+      const ws = new WebSocket(buildWsUrl(target));
       this.ws = ws;
       ws.onmessage = (ev) => {
         let msg: ServerMessage;
@@ -212,4 +223,33 @@ export class CompositeWsSession {
         return;
     }
   }
+}
+
+/**
+ * composite WS の本人確認はセッション (WS 接続) に紐づき deviceToken を使わない。
+ * <CompositeLogin> の device 画面は deviceToken が truthy のときだけ出るので、 接続識別の
+ * プレースホルダを入れる。
+ */
+export const WS_BOUND_DEVICE_TOKEN = "composite-ws";
+
+/** WS の決着を <CompositeLogin> が扱う応答の形にする。 */
+export function outcomeToResponse(outcome: CompositeWsOutcome): CompositeAuthResponse {
+  if (outcome.kind === "authenticated") return { authCode: outcome.authCode };
+  const d = outcome.data;
+  return {
+    deviceVerificationRequired: true,
+    deviceToken: d.deviceToken ?? WS_BOUND_DEVICE_TOKEN,
+    emailMasked: d.emailMasked,
+    anomalies: d.anomalies,
+    codeChannel: d.codeChannel,
+    deviceLabel: d.deviceLabel,
+    error: d.error,
+    remainingAttempts: d.remainingAttempts,
+  };
+}
+
+/** 応答が「composite WS で続ける」 形 (authCode も MFA も無く、 接続先がある) なら接続先を返す。 */
+export function compositeWsTarget(r: CompositeAuthResponse): string | null {
+  if (r.authCode || r.mfaRequired) return null;
+  return r.wsUrl || r.wsPath || null;
 }

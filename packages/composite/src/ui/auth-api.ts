@@ -29,6 +29,16 @@ export interface CompositeAuthResponse {
   mfaRequired?: boolean;
   mfaMethods?: string[];
   mfaToken?: string;
+  /**
+   * パスワードは通り、端末の本人確認を composite WS で続ける (Cernere の login / register /
+   * mfa-verify の通常応答)。 authApi はこれをそのまま返せばよく、 <CompositeLogin> が
+   * wsUrl (無ければ wsPath) へ接続して fingerprint 送信 → 確認コード → authCode まで進める。
+   */
+  ticket?: string;
+  /** `/auth/composite-ws?ticket=...` (Cernere と同じ host のときに使う相対パス) */
+  wsPath?: string;
+  /** Cernere の公開 URL を含む絶対 URL。 サービスの画面からはこちらにつなぐ */
+  wsUrl?: string;
   /** 本人確認 (デバイス検証) が必要 */
   deviceVerificationRequired?: boolean;
   deviceToken?: string;

@@ -1,6 +1,6 @@
 {
   "name": "@ludiars/cernere-composite",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Cernere composite auth — backend SDK + embeddable React login UI",
   "type": "module",
   "main": "dist/index.js",
