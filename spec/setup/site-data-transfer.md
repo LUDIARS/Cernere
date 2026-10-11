@@ -40,7 +40,8 @@ CERNERE-DATA-BUNDLE\n
 2. ヘッダの `service=cernere`・`formatVersion=1` を検証し、dump 部分の sha256 / bytes をヘッダと照合する。
    ここまでで DB には触れない。
 3. 復元先 (`DATABASE_URL` の DB 名) が既にあれば `<db>_backup_<UTC YYYYMMDD_HHMMSS>` へ rename して保全する。
-4. 新しい DB を作り `pg_restore --no-owner --role=<接続 role> --exit-on-error` で復元する。
+4. 新しい DB を作り `pg_restore --no-owner --no-privileges --role=<接続 role> --exit-on-error` で復元する。
+   移行元にしか無い role への GRANT は復元しない (移行先では接続 role が所有者になる)。
 5. 表ごとの行数をヘッダと照合する。
 6. 4〜5 で失敗したら新 DB を DROP し、退避した DB を元の名前へ戻す。戻せない場合は `rollback_failed`
    と退避名を出して止まる (退避 DB は消さない)。成功時も退避 DB は残る。消すのは確認後に人が行う。

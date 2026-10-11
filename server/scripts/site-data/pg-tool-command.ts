@@ -19,8 +19,9 @@ function toolArgs(tool: PgTool, target: DatabaseTarget, host: string, port: numb
   const connection = connectionArgs(host, port, target.user, database);
   return tool === "pg_dump"
     ? ["--format=custom", ...connection]
-    // The importing site's role owns the restored objects; source ownership is not replicated.
-    : ["--format=custom", "--no-owner", `--role=${target.user}`, "--exit-on-error", ...connection];
+    // The importing site's role owns the restored objects; source ownership and grants (roles that
+    // exist only on the source site) are not replicated.
+    : ["--format=custom", "--no-owner", "--no-privileges", `--role=${target.user}`, "--exit-on-error", ...connection];
 }
 
 /** pg_dump writes the archive to stdout; pg_restore reads it from stdin. Both run without a shell. */

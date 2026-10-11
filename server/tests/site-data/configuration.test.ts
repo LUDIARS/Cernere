@@ -66,7 +66,7 @@ describe("pg tool configuration", () => {
       { mode: "docker", docker: "docker", container: "cernere-postgres", port: 5432 }, target, "cernere");
     expect(docker.command).toBe("docker");
     expect(docker.args).toEqual(["exec", "-i", "-e", "PGPASSWORD", "-e", "PGSSLMODE", "cernere-postgres", "pg_restore",
-      "--format=custom", "--no-owner", "--role=cernere", "--exit-on-error",
+      "--format=custom", "--no-owner", "--no-privileges", "--role=cernere", "--exit-on-error",
       "--host", "127.0.0.1", "--port", "5432", "--username", "cernere", "--dbname", "cernere", "--no-password"]);
     expect(JSON.stringify([host.args, docker.args])).not.toContain("fixture-pass");
   });
