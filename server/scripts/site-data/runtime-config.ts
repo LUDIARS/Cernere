@@ -57,7 +57,10 @@ function optionalPort(value: unknown): number | undefined {
 /** Environment variables (`CERNERE_PG_*`) override the per-site runtime config field by field. */
 export function resolvePgToolsConfig(env: NodeJS.ProcessEnv): PgToolsConfig {
   const raw = readRuntimeConfig(env);
-  const mode = pick(env, "CERNERE_PG_TOOLS", raw, "pgTools") ?? "host";
+  // Excubitor runs data hooks without the catalog env or runtime config, so the default must fit the
+  // canonical site (AWS: pg tools only inside the cernere-postgres container). A bin dir alone means host.
+  const mode = pick(env, "CERNERE_PG_TOOLS", raw, "pgTools")
+    ?? (pick(env, "CERNERE_PG_BIN_DIR", raw, "pgBinDir") ? "host" : "docker");
   if (mode === "host") {
     const binDir = optionalString(pick(env, "CERNERE_PG_BIN_DIR", raw, "pgBinDir"), "pgBinDir", isAbsolute);
     return binDir ? { mode, binDir } : { mode };

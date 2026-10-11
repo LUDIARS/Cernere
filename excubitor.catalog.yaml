@@ -13,10 +13,11 @@ services:
     port: 8086
     repo: LUDIARS/Cernere
     runtime: node
-    cwd: ${ARS_ROOT}/Cernere/server
+    # Excubitor の bootstrap は cwd = 本体 checkout の最上位を要求する (Excubitor src/bootstrap/catalog.ts)。
+    cwd: ${ARS_ROOT}/Cernere
     # Keep a native Node root alive: npm.cmd as the root dies with the Windows launcher job.
-    # Node --run preserves dev's tsx watcher; this script has no pre/post lifecycle hooks.
-    command: node --run dev
+    # root の dev:server は server を cwd にして server の dev (tsx watch) を起動する。
+    command: node --run dev:server
     allow_hot_reload: true
     autostart: false
     env:

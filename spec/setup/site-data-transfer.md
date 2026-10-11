@@ -55,7 +55,7 @@ Excubitor の runtime config (`EXCUBITOR_SERVICE_CONFIG_JSON`) の `dataTransfer
 
 | `dataTransfer` | env | 既定 | 意味 |
 |---|---|---|---|
-| `pgTools` | `CERNERE_PG_TOOLS` | `host` | `host` = ホストの pg_dump / pg_restore、`docker` = `docker exec -i <container>` |
+| `pgTools` | `CERNERE_PG_TOOLS` | `docker` (`pgBinDir` だけ指定時は `host`) | `host` = ホストの pg_dump / pg_restore、`docker` = `docker exec -i <container>` |
 | `pgBinDir` | `CERNERE_PG_BIN_DIR` | (PATH) | host のときのツールのディレクトリ (絶対パス) |
 | `docker` | `CERNERE_PG_DOCKER` | `docker` | docker の実行ファイル (名前か絶対パス) |
 | `container` | `CERNERE_PG_CONTAINER` | `cernere-postgres` | docker のときのコンテナ名 |
@@ -63,7 +63,10 @@ Excubitor の runtime config (`EXCUBITOR_SERVICE_CONFIG_JSON`) の `dataTransfer
 
 password は argv に載せず、`PGPASSWORD` 環境変数で渡す (docker は `-e PGPASSWORD` で転送)。
 
-例: AWS (`cernere-postgres` コンテナに pg 17 がある) は `{"dataTransfer":{"pgTools":"docker","container":"cernere-postgres"}}`。
+Excubitor は data-export / data-import の入口を catalog の `env` も runtime config も渡さずに起動する
+(Excubitor `src/bootstrap/hook.ts`)。DATABASE_URL は Vault から取れるが、ここの設定は既定値で決まるため、
+既定を正本拠点 AWS の構成 (`cernere-postgres` コンテナに pg 17 がある) に合わせている。
+例: AWS は設定不要 (= `{"dataTransfer":{"pgTools":"docker","container":"cernere-postgres"}}`)。
 GROMAC (OrbStack の `infra-postgres-1`) は `{"dataTransfer":{"pgTools":"docker","docker":"<docker の絶対パス>","container":"infra-postgres-1"}}`。
 pg_restore は dump を作った pg_dump 以上の版を使う。
 

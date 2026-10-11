@@ -29,8 +29,9 @@ describe("database url", () => {
 });
 
 describe("pg tool configuration", () => {
-  it("defaults to host tools on PATH", () => {
-    expect(resolvePgToolsConfig({})).toEqual({ mode: "host" });
+  it("defaults to the canonical site's cernere-postgres container", () => {
+    expect(resolvePgToolsConfig({})).toEqual({ mode: "docker", docker: "docker", container: "cernere-postgres" });
+    expect(resolvePgToolsConfig({ CERNERE_PG_TOOLS: "host" })).toEqual({ mode: "host" });
   });
 
   it("reads the Excubitor runtime config and lets env override per field", () => {
