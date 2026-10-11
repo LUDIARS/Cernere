@@ -17,6 +17,16 @@
 `npm run dev` / `dev:server` / `dev:front` は注入済み環境向けです。`.env` 生成や dotenv 経由の読み込みは行いません。サービス操作は Excubitor 経由で行います。
 `LISTEN_PORT` が待受ポート、`FRONTEND_URL` がブラウザの origin です。`LISTEN_ADDR` は config が読みません。
 
+## 拠点への導入 (Excubitor bootstrap)
+
+別拠点へは Excubitor の `action=bootstrap` で clone・セットアップします (契約の正本は Castra の `.agents/skills/service-bootstrap/SKILL.md`)。
+リポ直下の `excubitor.bootstrap.json` が入口です。
+
+- `scripts/site/setup.mjs` — 引数なし・非対話。既存の `scripts/bootstrap.mjs --server-only` (submodule 取得 → vestigium ビルド → server の install と build) を、実行中の Node と同じ場所の npm を PATH の先頭に置いて呼びます。migration は流しません (server 起動時に走る従来どおり)。
+- `scripts/site/data-unavailable.mjs` — data-export / data-import は未対応です。個人データの単一情報源なので no-op の成功にはせず、非 0 で止まります。
+
+起動前に、その拠点の Vault 紐付けで上の必須値を揃えます。`DATABASE_URL` / `REDIS_URL` は拠点内の Postgres / Redis を指します。
+
 ## 公開エンドポイント
 
 Cernere は**ほぼ `/auth` (認証) 系しか開かない**。データ参照・変更は認証済み WS セッション経由。`server/src/app.ts` で定義されているもの:
