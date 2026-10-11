@@ -1,14 +1,15 @@
 // Excubitor の拠点導入 (bootstrap) が呼ぶセットアップ入口。
-// 引数なし・非対話で、 Cernere backend を起動可能な状態にする (常駐起動は Excubitor が行う)。
+// 引数なし・非対話で、 Cernere backend と login frontend を起動可能な状態にする (常駐起動は Excubitor が行う)。
 //
-// 実処理は既存の scripts/bootstrap.mjs --server-only (submodule 取得 → vestigium ビルド →
-// server install + build) に任せる。 migration は従来どおり server 起動時に走るので、 ここでは流さない。
+// 1. scripts/bootstrap.mjs --server-only (submodule 取得 → vestigium ビルド → server install + build)。
+//    migration は従来どおり server 起動時に走るので、 ここでは流さない。
+// 2. scripts/site/build-frontend.mjs (frontend install + 静的ビルド)。 cernere-frontend は vite preview で配る。
 // Excubitor は shell 無しで起動し、 拠点の非対話環境では PATH に npm が無いことがあるため、
 // 実行中の Node と同じディレクトリ (npm の同梱先) を PATH の先頭に置いて呼ぶ。
 
-import { spawn } from "node:child_process";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runProcess } from "./lib/run-process.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
@@ -20,19 +21,15 @@ const env = {
   npm_config_yes: "true",
 };
 
-const code = await new Promise((resolve, reject) => {
-  const child = spawn(process.execPath, [join(root, "scripts", "bootstrap.mjs"), "--server-only"], {
-    cwd: root,
-    env,
-    shell: false,
-    windowsHide: true,
-    stdio: ["ignore", "inherit", "inherit"],
-  });
-  child.once("error", reject);
-  child.once("close", (exitCode, signal) => resolve(signal ? 1 : exitCode ?? 1));
-});
+const steps = [
+  [join(root, "scripts", "bootstrap.mjs"), "--server-only"],
+  [join(root, "scripts", "site", "build-frontend.mjs")],
+];
 
-if (code !== 0) {
-  console.error(`[site-setup] scripts/bootstrap.mjs --server-only failed (${code})`);
-  process.exit(code);
+for (const step of steps) {
+  const code = await runProcess(process.execPath, step, { cwd: root, env });
+  if (code !== 0) {
+    console.error(`[site-setup] ${step.slice(0, 1).map((p) => p.slice(root.length)).join("")} failed (${code})`);
+    process.exit(code);
+  }
 }

@@ -1,7 +1,7 @@
 # 本社のテスト用 Cernere
 
 本社 (DESKTOP-3HFT33B) のテスト用 Cernere は、ループバックからの接続だけを受ける (neco 2026-10-09)。
-本番の Cernere は Mac (GROMAC、`100.84.227.24:8080`) で、AWS など他拠点のサービスはそちらを使う。
+本番の Cernere は AWS 拠点 (`:8086`) へ移す (2026-10-11、[../plan/2026-10-11-aws-site-migration.md](../plan/2026-10-11-aws-site-migration.md))。それまでは Mac (GROMAC、`100.84.227.24:8080`) だった。
 
 ## なぜ分けるか
 
@@ -24,7 +24,7 @@ Excubitor の runtime config は `EXCUBITOR_SERVICE_CONFIG_JSON` という JSON 
 
 | 項目 | 本社のテスト用 | 本番 |
 |---|---|---|
-| Cernere | `cernere-test` (`127.0.0.1:8090`) | `cernere` (Mac、`:8080`) |
+| Cernere | `cernere-test` (`127.0.0.1:8090`) | `cernere` (AWS、`:8086`) |
 | ログイン画面 | `cernere-frontend-test` (`127.0.0.1:5174`) | `cernere-frontend` |
 | GLAB | `glab-test` (GLAB カタログ、`:5188`) | `glab` (AWS) |
 | Cernere DB | 共有 Postgres の `cernere_test` (空から作る) | `cernere` |

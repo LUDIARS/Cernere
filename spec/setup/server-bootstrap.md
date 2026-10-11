@@ -22,8 +22,21 @@
 別拠点へは Excubitor の `action=bootstrap` で clone・セットアップします (契約の正本は Castra の `.agents/skills/service-bootstrap/SKILL.md`)。
 リポ直下の `excubitor.bootstrap.json` が入口です。
 
-- `scripts/site/setup.mjs` — 引数なし・非対話。既存の `scripts/bootstrap.mjs --server-only` (submodule 取得 → vestigium ビルド → server の install と build) を、実行中の Node と同じ場所の npm を PATH の先頭に置いて呼びます。migration は流しません (server 起動時に走る従来どおり)。
-- `scripts/site/data-unavailable.mjs` — data-export / data-import は未対応です。個人データの単一情報源なので no-op の成功にはせず、非 0 で止まります。
+- `scripts/site/setup.mjs` — 引数なし・非対話。実行中の Node と同じ場所の npm を PATH の先頭に置いて、次の 2 段を順に流します。migration は流しません (server 起動時に走る従来どおり)。
+  1. `scripts/bootstrap.mjs --server-only` (submodule 取得 → vestigium ビルド → server の install と build)
+  2. `scripts/site/build-frontend.mjs` (frontend の `npm ci --include=dev` → `npm run build` で `frontend/dist` を作る)
+- `scripts/site/export-data.mjs` / `scripts/site/import-data.mjs` — 停止中の Postgres の論理ダンプと、退避付きの復元。手順・形式・拠点ごとの設定は [site-data-transfer.md](site-data-transfer.md)。
+
+### ポートと frontend の配信
+
+- backend (`cernere`) の catalog port は **8086** (正本拠点の AWS で 8080 を synergos-relay が使うため。2026-10-11)。
+  `LISTEN_PORT`・health・`provides` (`CERNERE_URL` 等) は catalog の port に追随します。
+  server の `LISTEN_PORT` 既定値 (8080) と docker compose は変えていません。catalog 経由の起動は env で 8086 が入ります。
+- frontend (`cernere-frontend`) は catalog の command を **`vite preview`** にしています。拠点ではメモリの小さい
+  Vite dev server を常駐させず、setup がビルドした `frontend/dist` を配ります。`/api`・`/auth`・`/ws/project`・
+  `/.well-known` は `vite.config.ts` の preview proxy で `VITE_BACKEND_URL` (8086) へ渡します。
+  ソースを変えたら setup (または `npm run build --prefix frontend`) で再ビルドしてから再起動します (hot reload しません)。
+- dev で使う場合は従来どおり `npm run dev --prefix frontend`、本社のテスト用は `cernere-frontend-test` (dev server) です。
 
 起動前に、その拠点の Vault 紐付けで上の必須値を揃えます。`DATABASE_URL` / `REDIS_URL` は拠点内の Postgres / Redis を指します。
 

@@ -10,6 +10,7 @@
 | OIDC provider を設定する | [oidc-provider.md](oidc-provider.md) |
 | Google OIDC を設定する | [google-oidc.md](google-oidc.md) |
 | workload 認証局を配備する・戻す | [workload-deploy.md](workload-deploy.md) |
+| 拠点へ導入する・データを移す (Excubitor bootstrap / data-export / data-import) | [server-bootstrap.md](server-bootstrap.md#拠点への導入-excubitor-bootstrap) / [site-data-transfer.md](site-data-transfer.md) |
 | 本社のテスト用 Cernere (ループバック限定・別 DB) | [hq-test-instance.md](hq-test-instance.md) |
 
 PostgreSQL / Redis が利用でき、Excubitor の共有・プロジェクト Vault に必要値が登録されていることを前提にします。

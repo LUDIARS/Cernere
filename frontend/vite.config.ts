@@ -22,6 +22,30 @@ const hmr = publicHost
   ? { host: publicHost, clientPort: 443, protocol: "wss" as const }
   : undefined;
 
+// backend への経路。dev server と preview (拠点の静的配信) で同じものを使う。
+const proxy = {
+  "/api": {
+    target: backendUrl,
+    changeOrigin: true,
+  },
+  "/auth": {
+    target: backendUrl,
+    changeOrigin: true,
+    ws: true,
+  },
+  "/ws/project": {
+    target: backendUrl,
+    changeOrigin: true,
+    ws: true,
+  },
+  // PASETO V4 公開鍵配布 endpoint (= 各 LUDIARS サービスが起動時に fetch する)。
+  // proxy が無いと Vite の SPA fallback で index.html が返り、 サービス側 JSON parse 失敗
+  "/.well-known": {
+    target: backendUrl,
+    changeOrigin: true,
+  },
+};
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -37,27 +61,14 @@ export default defineConfig({
     host: "0.0.0.0",
     allowedHosts: [...extraHosts],
     hmr,
-    proxy: {
-      "/api": {
-        target: backendUrl,
-        changeOrigin: true,
-      },
-      "/auth": {
-        target: backendUrl,
-        changeOrigin: true,
-        ws: true,
-      },
-      "/ws/project": {
-        target: backendUrl,
-        changeOrigin: true,
-        ws: true,
-      },
-      // PASETO V4 公開鍵配布 endpoint (= 各 LUDIARS サービスが起動時に fetch する)。
-      // proxy が無いと Vite の SPA fallback で index.html が返り、 サービス側 JSON parse 失敗
-      "/.well-known": {
-        target: backendUrl,
-        changeOrigin: true,
-      },
-    },
+    proxy,
+  },
+  // 拠点の cernere-frontend は setup でビルドした dist を `vite preview` で配る
+  // (excubitor.catalog.yaml)。port と許可 host は dev と揃える。
+  preview: {
+    port: 5173,
+    host: "0.0.0.0",
+    allowedHosts: [...extraHosts],
+    proxy,
   },
 });

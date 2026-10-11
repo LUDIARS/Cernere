@@ -9,7 +9,8 @@ services:
     tier: saas
     project_code: cernere
     component: backend
-    port: 8080
+    # 正本拠点は AWS (spec/plan/2026-10-11-aws-site-migration.md)。AWS の 8080 は synergos-relay が使うため 8086。
+    port: 8086
     repo: LUDIARS/Cernere
     runtime: node
     cwd: ${ARS_ROOT}/Cernere/server
@@ -19,12 +20,12 @@ services:
     allow_hot_reload: true
     autostart: false
     env:
-      LISTEN_PORT: "8080"
+      LISTEN_PORT: "8086"
       # Keep the active GLab recipients and allow Aedilis's Composite auth-code handoff.
       CERNERE_COMPOSITE_ALLOWED_ORIGINS: http://localhost:5187,https://glm.ai-run-do.com,https://glab.ai-run-do.com,https://ae.ai-run-do.com
     health:
       type: http
-      url: http://localhost:8080/health
+      url: http://localhost:8086/health
       interval_sec: 30
     # Secret env is injected from Excubitor's shared/project Vault bindings.
     # 全サービスへ配る Cernere の接続先 (URL/port は Excubitor が特定可能 → 各サービスの個別設定不要)。
@@ -49,12 +50,14 @@ services:
     repo: LUDIARS/Cernere
     runtime: node
     cwd: ${ARS_ROOT}/Cernere/frontend
-    command: npm run dev -- --host 0.0.0.0
-    allow_hot_reload: true
+    # setup (scripts/site/setup.mjs) がビルドした frontend/dist を vite preview で配る。
+    # /api 等は preview proxy で backend へ。dev server で使う場合は cernere-frontend-test か npm run dev。
+    command: npm run preview -- --host 0.0.0.0 --port 5173 --strictPort
+    allow_hot_reload: false
     depends_on: [cernere]
     autostart: false
     env:
-      VITE_BACKEND_URL: http://localhost:8080
+      VITE_BACKEND_URL: http://localhost:8086
     health:
       type: http
       url: http://localhost:5173/

@@ -164,6 +164,42 @@
       "module": "contracts/onsite-kiosk-registration.contract.ts",
       "mode": "observe",
       "sample": 1
+    },
+    {
+      "id": "C-19",
+      "criterion": "C-19 buildBundleHeader(input): service=cernere・formatVersion=1・Redis 除外の明記・64 桁 hex の dump sha256・非負整数の表別行数を満たすヘッダだけを返す",
+      "symbol": "buildBundleHeader",
+      "file": "server/scripts/site-data/bundle-header.ts",
+      "module": "server/scripts/site-data/contracts/bundle-header.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-20",
+      "criterion": "C-20 validateBundleHeader(value): service が cernere で formatVersion が 1 の完全なヘッダだけを受け付け、他サービス・未知の版・欠損は拒否する",
+      "symbol": "validateBundleHeader",
+      "file": "server/scripts/site-data/bundle-header.ts",
+      "module": "server/scripts/site-data/contracts/bundle-header-validate.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-21",
+      "criterion": "C-21 compareRowCounts(expected, actual): 表の集合と行数が完全一致するときだけ空を返し、欠落・余分・行数差を全て列挙する",
+      "symbol": "compareRowCounts",
+      "file": "server/scripts/site-data/row-counts.ts",
+      "module": "server/scripts/site-data/contracts/row-counts.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-22",
+      "criterion": "C-22 backupDatabaseName(database, now): <database>_backup_<UTC YYYYMMDD_HHMMSS> 形式で 63 文字以内の安全な識別子だけを返す",
+      "symbol": "backupDatabaseName",
+      "file": "server/scripts/site-data/backup-name.ts",
+      "module": "server/scripts/site-data/contracts/backup-name.contract.ts",
+      "mode": "observe",
+      "sample": 1
     }
   ]
 }
