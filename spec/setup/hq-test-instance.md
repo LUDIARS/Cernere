@@ -41,7 +41,12 @@ Excubitor の runtime config は `EXCUBITOR_SERVICE_CONFIG_JSON` という JSON 
    (superuser で作ると migration 後にサービス role から触れなくなる)。
 2. Vault にテスト用 project `CernereTest` を作り、次を入れる。
    - `cernere-test`: `DATABASE_URL` (cernere_test)、`REDIS_DB` (本番と別の番号)、`LISTEN_HOST=127.0.0.1`、
-     `JWT_SECRET` と `CERNERE_SECRET_KEY` (新しい乱数)
+     `JWT_SECRET` と `CERNERE_SECRET_KEY` (新しい乱数)、
+     `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` / `GITHUB_REDIRECT_URI` /
+     `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI`。OAuth の 6 個は
+     `server/src/lib/env-bootstrap.ts` が空を拒否するので必須。テストではパスワードでログインし OAuth を
+     使わないため、本番の値は入れずダミー (例 `unused-hq-test`、REDIRECT は
+     `http://127.0.0.1:8090/auth/<github|google>/callback`) にする (2026-10-12 本社で投入済み)
    - `cernere-test` の共有 binding に `REDIS_URL` を入れる (共有 Redis は認証が要り、パスワードは本番の
      `REDIS_URL` にしか無い。`cernere-test` を取得する拠点は無いので本社の外へは出ない)
    - `glab-test`: `CERNERE_BASE_URL=http://127.0.0.1:8090`、`CERNERE_FRONTEND_URL=http://127.0.0.1:5174`、
