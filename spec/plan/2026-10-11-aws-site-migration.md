@@ -75,7 +75,11 @@ Vault の `DATABASE_URL` / `REDIS_URL` を AWS のコンテナ (127.0.0.1:5432 /
 2. GROMAC の Cernere は停止中のまま、GROMAC Ex に data-export を依頼 → sha256 を控える。
 3. Taildrop で AWS へ送り、AWS Ex に data-import を依頼。
 4. Vault の DATABASE_URL / REDIS_URL、本社 topology、CF ルートを AWS へ。
+   AWS Ex の `EXCUBITOR_TOPOLOGY_HOSTS` に `cernere=` / `cernere-frontend=` が残っていれば消す
+   (AWS では Cernere は同居なので localhost が正しい。残すと GLAB 等が他拠点を指す。2026-10-12 の problem log)。
 5. AWS Ex から cernere → cernere-frontend を start。health と cr.ai-run-do.com のログインを確認。
+   その後、`CERNERE_BASE_URL` / `CERNERE_FRONTEND_URL` を spawn 時に読む依存サービス (GLAB) を再起動し、
+   glab.ai-run-do.com のログインも確認する。
 6. GROMAC 側の Cernere は autostart を外し停止のまま。元データと受信ファイルは確認完了まで消さない。
 
 ## 受入条件

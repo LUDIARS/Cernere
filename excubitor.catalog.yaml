@@ -63,8 +63,12 @@ services:
       type: http
       url: http://localhost:5173/
       interval_sec: 30
+    # CERNERE_FRONTEND_URL はブラウザが開く URL (GLAB の passkey popup / redirect 先。WebAuthn の
+    # RP ID もこの origin)。拠点内の http://${host}:${port} を配ると利用者の端末から届かず RP ID も
+    # 合わない。本番 Cernere は AWS の 1 拠点だけなので公開 URL を配る
+    # (spec/plan/problem_logs/2026-10-12-glab-cernere-connection-after-aws-move.md)。
     provides:
-      CERNERE_FRONTEND_URL: http://${host}:${port}
+      CERNERE_FRONTEND_URL: https://cr.ai-run-do.com
 
   # 本社のテスト用 Cernere (spec/setup/hq-test-instance.md)。本番 (cernere) と別の service code にして、
   # Vault の値 (別 DB・別 Redis・新しく作った秘密) を本社だけに閉じる。Vault は service code 単位で
