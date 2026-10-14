@@ -23,14 +23,19 @@ Cr の初回ログインを同じ Cloudflare Access / Cr OIDC で囲むと循環
 4. Cloudflare Generic OIDC に client ID / secret と Cr の discovery が示す authorization / token / JWKS URL を登録する。
    PKCE を有効にし、対象アプリが利用する IdP をこの Cr の登録に限定する。
    他の IdP やメール PIN で企業用 claim を代替しない。
+   **Email claim は `cr_access_email` を指定する** (2026-10-15)。パスキーのみのユーザーはメールを持たないため、
+   Cr は `<userId>@users.<Cr issuer のホスト>` を出す (実在しないアドレスで配送には使わない)。
+   メールを持つユーザーには従来どおり `email` を出し、`cr_access_email` は出さない。
+   Access のポリシーでメールのドメインを条件にする場合は `users.<Cr issuer のホスト>` を使う。
 5. custom claim の転送名を **amr, auth_time, cr_user_id, cr_auth_revision, cr_connection_revision** とする。
    amr は文字列の配列、auth_time / cr_auth_revision は数値を保つ。文字列への変換は行わない。
    MFA 必須の運用は Cloudflare の認証方法条件にも mfa を指定する。
 6. Cr `/enterprise` で組織、project、専用 client、team、AUD、期間を設定して保存する。
    設定が揃った時点で有効化する。保存のたびに既存 Cloudflare ログインも再認証が必要になる。
-7. Cloudflare で Cr 経由のログインを行い、Cloudflare のユーザー subject UUID を確認する。
-   Cr 管理画面で対応する組織メンバーへ割り当てる。OIDC 同意では組織所属を確認するが、
-   Access の subject 対応は初回ログイン後に登録できる。割り当てるまでは企業アプリのセッションを発行しない。
+7. Cloudflare で Cr 経由のログインを行う。対応付けが無い組織メンバーのログインは、署名付き JWT の
+   `cr_user_id` で **対応付けの提案** として記録される (2026-10-15)。Cr `/enterprise` の「対応付けの提案」で
+   本人であることを確かめて「確定する」を押す (save_identity と同じパスキー確認)。subject UUID の手入力も引き続き使える。
+   確定するまでは企業アプリのセッションを発行しない。管理者が無効化した対応付けがある subject には提案しない。
 
 custom claims は Access のサイズ制約により欠落し得るため、転送する項目を必要分に絞る。
 欠落時は Cr が拒否する。登録時に実際の署名付き claim の型と存在を確認する。

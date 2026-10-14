@@ -816,3 +816,12 @@ export const enterpriseIdentities = pgTable("enterprise_identities", {
   revision: uuid("revision").notNull(),
   isActive: boolean("is_active").notNull().default(true),
 }, (t) => [primaryKey({ columns: [t.projectKey, t.subjectHash] }), uniqueIndex("uq_enterprise_identity_user").on(t.projectKey, t.userId)]);
+
+/** 企業認証の対応付けの提案。管理者が確定するまでセッションは出さない。subject は digest のみ。 */
+export const enterpriseIdentitySuggestions = pgTable("enterprise_identity_suggestions", {
+  projectKey: text("project_key").notNull().references(() => enterpriseConnections.projectKey, { onDelete: "cascade" }),
+  subjectHash: text("subject_hash").notNull(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.projectKey, t.subjectHash] })]);

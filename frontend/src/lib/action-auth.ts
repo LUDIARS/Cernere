@@ -72,9 +72,12 @@ export function resolveBrowserActionTarget(
   currentUserId: string | undefined,
 ): { action: ProtectedAction; resource: string } | null {
   // login_alert の start / remove は宛先の追加・削除で、サーバーは login_alert.manage を求める。
+  // enterprise の accept_suggestion は対応付けの保存なので save_identity と同じ proof を取る。
   const name = (module === "login_alert" && (action === "start" || action === "remove")
     ? "login_alert.manage"
-    : `${module}.${action}`) as ProtectedAction;
+    : module === "enterprise" && action === "accept_suggestion"
+      ? "enterprise.save_identity"
+      : `${module}.${action}`) as ProtectedAction;
   const p = asObject(payload);
   switch (name) {
     case "login_alert.manage": return { action: name, resource: requiredString(p, "channel") };

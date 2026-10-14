@@ -6,6 +6,7 @@ import { checkRateLimit, redis } from "../redis.js";
 import { AppError } from "../error.js";
 import { logAuthEvent } from "../logging/auth-logger.js";
 import { requireConnection, requireMembership, subjectHash, revokeEnterpriseUser } from "./connections.js";
+import { recordIdentitySuggestion } from "./identity-suggestions.js";
 import { verifyCloudflareAuthentication } from "./cloudflare-assertion.js";
 import { issueEnterpriseSession, readEnterpriseSession, deleteEnterpriseSession, enterpriseSessionKey, type EnterpriseSession } from "./session-store.js";
 
@@ -17,8 +18,12 @@ export function publicEnterpriseSession(session: EnterpriseSession): EnterpriseS
     organizationRole: session.organizationRole, authTime: session.authTime, amr: session.amr, expiresAt: session.expiresAt };
 }
 
+async function findIdentity(projectKey: string, digest: string) {
+  return (await db.select().from(enterpriseIdentities).where(and(eq(enterpriseIdentities.projectKey, projectKey), eq(enterpriseIdentities.subjectHash, digest))).limit(1))[0];
+}
+
 async function identity(projectKey: string, digest: string) {
-  const row = (await db.select().from(enterpriseIdentities).where(and(eq(enterpriseIdentities.projectKey, projectKey), eq(enterpriseIdentities.subjectHash, digest))).limit(1))[0];
+  const row = await findIdentity(projectKey, digest);
   if (!row?.isActive) throw AppError.forbidden("Cloudflare identity has not been assigned to an active organization member");
   return row;
 }
@@ -28,6 +33,9 @@ export async function enterpriseLogin(projectKey: string, assertion: string): Pr
   const connection = await requireConnection(projectKey);
   const authentication = await verifyCloudflareAuthentication(connection, assertion);
   const digest = subjectHash(authentication.subject);
+  // 対応付けがまだ無ければ、署名付きの cr_user_id を管理者向けの提案として残す (確定までは拒否のまま)。
+  // 管理者が無効化した対応付けがある subject には提案しない。
+  if (!await findIdentity(projectKey, digest)) await recordIdentitySuggestion(projectKey, digest, authentication.userId);
   const linked = await identity(projectKey, digest);
   const member = await requireMembership(connection, linked.userId);
   if (authentication.userId !== linked.userId || authentication.authenticationRevision !== member.authenticationRevision

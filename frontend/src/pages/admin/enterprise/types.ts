@@ -11,5 +11,7 @@ export interface EnterpriseConfiguration {
   projects: Array<{ key: string; name: string; isActive: boolean }>;
   clients: Array<{ clientId: string; name: string; redirectUris: string[]; isActive: boolean }>;
   members: Array<{ organizationId: string; userId: string; name: string; role: string }>;
+  /** Cloudflare 経由のログインで記録された対応付けの提案 (subject は digest のみ) */
+  suggestions?: Array<{ projectKey: string; subjectHash: string; userId: string; name: string; firstSeenAt: string; lastSeenAt: string }>;
 }
 export type EnterpriseMutation = (action: string, payload: Record<string, unknown>) => Promise<void>;

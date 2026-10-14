@@ -86,3 +86,29 @@ describe("discoveryDocument", () => {
     expect(d.jwks_uri).toBe(`${issuer}/.well-known/jwks.json`);
   });
 });
+
+describe("cr_access_email for users without an email (Cloudflare Access identification)", () => {
+  const passkeyOnly: ClaimSourceUser = { ...baseUser, email: null, hasVerifiedIdentity: false };
+
+  it("emits a synthetic address under users.<issuer host> instead of email", () => {
+    const claims = buildClaims(passkeyOnly, ["openid", "email"], "https://cernere.example.com");
+    expect(claims.cr_access_email).toBe("user-123@users.cernere.example.com");
+    expect(claims.email).toBeUndefined();
+    expect(claims.email_verified).toBeUndefined();
+  });
+
+  it("keeps the real email for users who have one and does not add the synthetic claim", () => {
+    const claims = buildClaims(baseUser, ["openid", "email"], "https://cernere.example.com");
+    expect(claims.email).toBe("a@example.com");
+    expect(claims.cr_access_email).toBeUndefined();
+  });
+
+  it("emits nothing email-like without the email scope", () => {
+    const claims = buildClaims(passkeyOnly, ["openid"], "https://cernere.example.com");
+    expect(claims.cr_access_email).toBeUndefined();
+  });
+
+  it("advertises the claim in discovery", () => {
+    expect(discoveryDocument().claims_supported).toContain("cr_access_email");
+  });
+});

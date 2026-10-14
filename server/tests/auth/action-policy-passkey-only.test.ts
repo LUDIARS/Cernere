@@ -13,3 +13,11 @@ describe("login_alert action proofs", () => {
     expect(resolveWsActionTarget(user, "login_alert", action, { channel: "google", code: "000000" })).toBeNull();
   });
 });
+
+describe("enterprise identity suggestions", () => {
+  it("requires the same proof as saving an identity, bound to project and user", () => {
+    expect(resolveWsActionTarget(user, "enterprise", "accept_suggestion", {
+      projectKey: "concordia", userId: "7a0c9a8e-1111-4222-8333-944445555666", subjectHash: "a".repeat(64),
+    })).toEqual({ action: "enterprise.save_identity", resource: "concordia:7a0c9a8e-1111-4222-8333-944445555666" });
+  });
+});

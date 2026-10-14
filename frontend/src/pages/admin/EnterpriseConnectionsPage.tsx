@@ -5,6 +5,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { wsClient } from "../../lib/ws-client";
 import { ConnectionForm } from "./enterprise/ConnectionForm";
 import { IdentityForm } from "./enterprise/IdentityForm";
+import { SuggestionList } from "./enterprise/SuggestionList";
 import type { EnterpriseConfiguration } from "./enterprise/types";
 
 export function EnterpriseConnectionsPage() {
@@ -48,6 +49,7 @@ export function EnterpriseConnectionsPage() {
         {configuration.connections.map((item) => <option key={item.projectKey} value={item.projectKey}>{item.projectKey} — {item.isActive ? "有効" : "無効"}</option>)}
       </select></label>
       <ConnectionForm key={connection?.revision ?? "new"} connection={connection} configuration={configuration} busy={busy || !wsConnected} save={save} />
+      {connection && <SuggestionList connection={connection} configuration={configuration} busy={busy || !wsConnected} save={save} />}
       {connection && <IdentityForm key={connection.revision} connection={connection} configuration={configuration} busy={busy || !wsConnected} save={save} />}
     </>}
   </main>;

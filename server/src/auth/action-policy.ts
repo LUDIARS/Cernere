@@ -93,9 +93,12 @@ export function resolveWsActionTarget(
   payload: unknown,
 ): ActionTarget | null {
   // login_alert の start / remove は宛先の追加・削除なので同じ proof (login_alert.manage) を要求する。
+  // enterprise の accept_suggestion は対応付けの保存なので save_identity と同じ proof を要求する。
   const action = module === "login_alert" && (actionName === "start" || actionName === "remove")
     ? "login_alert.manage"
-    : `${module}.${actionName}`;
+    : module === "enterprise" && actionName === "accept_suggestion"
+      ? "enterprise.save_identity"
+      : `${module}.${actionName}`;
   const parsedAction = protectedActionSchema.safeParse(action);
   if (!parsedAction.success || !protectedWsActions.has(parsedAction.data)) return null;
 

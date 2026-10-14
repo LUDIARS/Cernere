@@ -26,13 +26,25 @@ export interface ClaimSourceUser {
   hasVerifiedIdentity: boolean; // google / github 連携済みなら true
 }
 
+/**
+ * メールの無いユーザー (パスキーのみ) の識別用アドレスのドメイン。
+ * Cloudflare Access の Generic OIDC は利用者をメールで識別するため、Email claim に cr_access_email を指定して使う
+ * (Concordia spec/plan/2026-10-15-cf-cernere-sso.md)。実在しないアドレスなので配送には使わない。
+ */
+export function accessEmailDomain(issuer: string = config.oidcIssuer): string {
+  return `users.${new URL(issuer).hostname}`;
+}
+
 /** scope に応じて claims を組み立てる。 sub は常に含む。 */
-export function buildClaims(user: ClaimSourceUser, scope: string[]): Record<string, unknown> {
+export function buildClaims(user: ClaimSourceUser, scope: string[], issuer: string = config.oidcIssuer): Record<string, unknown> {
   const claims: Record<string, unknown> = { sub: user.id };
 
   if (scope.includes("email") && user.email) {
     claims.email = user.email;
     claims.email_verified = user.hasVerifiedIdentity;
+  } else if (scope.includes("email")) {
+    // 本物のメールと混同させないよう email ではなく別名の claim にする。
+    claims.cr_access_email = `${user.id}@${accessEmailDomain(issuer)}`;
   }
 
   if (scope.includes("profile")) {
@@ -88,7 +100,7 @@ export function discoveryDocument(): Record<string, unknown> {
       "sub", "iss", "aud", "exp", "iat", "nonce",
       "auth_time", "amr", "cr_user_id", "cr_auth_revision", "cr_connection_revision",
       "cr_project", "cr_organization", "cr_organization_role",
-      "email", "email_verified", "name", "preferred_username", "picture",
+      "email", "email_verified", "cr_access_email", "name", "preferred_username", "picture",
     ],
   };
 }
