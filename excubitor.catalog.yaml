@@ -22,8 +22,8 @@ services:
     autostart: false
     env:
       LISTEN_PORT: "8086"
-      # Keep the active GLab recipients and allow Aedilis's Composite auth-code handoff.
-      CERNERE_COMPOSITE_ALLOWED_ORIGINS: http://localhost:5187,https://glm.ai-run-do.com,https://glab.ai-run-do.com,https://ae.ai-run-do.com
+      # Keep the active GLab recipients and allow Aedilis's and Tendentia's Composite auth-code handoff.
+      CERNERE_COMPOSITE_ALLOWED_ORIGINS: http://localhost:5187,https://glm.ai-run-do.com,https://glab.ai-run-do.com,https://ae.ai-run-do.com,https://tendentia.ai-run-do.com
     health:
       type: http
       url: http://localhost:8086/health
