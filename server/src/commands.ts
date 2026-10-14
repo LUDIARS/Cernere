@@ -16,11 +16,14 @@
 import { db } from "./db/connection.js";
 import * as schema from "./db/schema.js";
 import { eq, and, sql, inArray } from "drizzle-orm";
+import { z } from "zod";
 import { AppError } from "./error.js";
 import { getUserState, getSession } from "./redis.js";
 import { redactSensitive } from "./lib/redact.js";
 import { revokeFaceConsents, revokeFacilityFaceConsents } from "./identity/face-consent-store.js";
 import { deviceSessionCommand } from "./auth/device-command.js";
+import { loginAlertCommand } from "./notify/login-alert-command.js";
+import { securityEventCommand } from "./notify/security-event-command.js";
 import { recoveryCommand } from "./auth/recovery-command.js";
 
 /**
@@ -102,6 +105,8 @@ async function execute(
       return workloadAdminCommand(action, payload);
     }
     case "device_session": return deviceSessionCommand(userId, sessionId, action, payload);
+    case "login_alert": return loginAlertCommand(userId, action, payload);
+    case "security_event": return securityEventCommand(userId, action);
     case "account_recovery": return recoveryCommand(userId, action, payload);
     case "enterprise": {
       await requireSystemAdmin(userId);
@@ -138,6 +143,7 @@ async function organizationCmd(userId: string, action: string, p?: Record<string
     }
     case "get": {
       const orgId = requireStr(p, "organizationId");
+      await requireOrgVisibility(userId, orgId);
       const org = await db.select().from(schema.organizations)
         .where(eq(schema.organizations.id, orgId)).limit(1);
       if (org.length === 0) throw AppError.notFound("Organization not found");
@@ -160,6 +166,7 @@ async function organizationCmd(userId: string, action: string, p?: Record<string
     }
     case "presence": {
       const orgId = requireStr(p, "organizationId");
+      await requireOrgVisibility(userId, orgId);
       const { getOrgPresence } = await import("./ws/events.js");
       return getOrgPresence(orgId);
     }
@@ -190,6 +197,9 @@ async function memberCmd(userId: string, action: string, p?: Record<string, unkn
   switch (action) {
     case "list": {
       const orgId = requireStr(p, "organizationId");
+      const viewerRole = await requireOrgVisibility(userId, orgId);
+      // メールアドレスはメンバー管理ができる人にだけ見せる (一般メンバーには出さない)。
+      const showEmail = viewerRole === "system_admin" || ORG_MANAGER_ROLES.includes(viewerRole);
       const members = await db.select({
         userId: schema.organizationMembers.userId,
         role: schema.organizationMembers.role,
@@ -201,7 +211,7 @@ async function memberCmd(userId: string, action: string, p?: Record<string, unkn
       }).from(schema.organizationMembers)
         .innerJoin(schema.users, eq(schema.organizationMembers.userId, schema.users.id))
         .where(eq(schema.organizationMembers.organizationId, orgId));
-      return members;
+      return showEmail ? members : members.map(({ email: _email, ...rest }) => rest);
     }
     case "add": {
       const orgId = requireStr(p, "organizationId");
@@ -298,6 +308,7 @@ async function orgProjectCmd(userId: string, action: string, p?: Record<string, 
   switch (action) {
     case "list": {
       const orgId = requireStr(p, "organizationId");
+      await requireOrgVisibility(userId, orgId);
       const rows = await db.select().from(schema.organizationProjects)
         .innerJoin(schema.projectDefinitions,
           eq(schema.organizationProjects.projectDefinitionId, schema.projectDefinitions.id))
@@ -336,16 +347,20 @@ async function userCmd(userId: string, action: string, p?: Record<string, unknow
         .where(eq(schema.users.id, targetId)).limit(1);
       if (rows.length === 0) throw AppError.notFound("User not found");
       const u = rows[0];
-      return {
-        id: u.id, login: u.login, displayName: u.displayName,
-        avatarUrl: u.avatarUrl, email: u.email, role: u.role,
-      };
+      // メールと role は本人と system admin にだけ返す (誰でも作れるアカウントから全員の連絡先を集めさせない)。
+      const privileged = targetId === userId || await isSystemAdmin(userId);
+      return privileged
+        ? { id: u.id, login: u.login, displayName: u.displayName, avatarUrl: u.avatarUrl, email: u.email, role: u.role }
+        : { id: u.id, login: u.login, displayName: u.displayName, avatarUrl: u.avatarUrl };
     }
     case "search": {
       const query = requireStr(p, "query");
       if (query.length < 2) throw AppError.badRequest("Query must be at least 2 characters");
       // ILIKE のワイルドカード (%/_) を literal 化 — 入力でのパターン注入によるユーザ列挙を防ぐ
       const escaped = query.replace(/[\\%_]/g, (ch) => "\\" + ch);
+      const pattern = '%' + escaped + '%';
+      // メールでの検索とメールの表示は system admin だけ (メールは任意の MFA 用で、公開情報ではない)。
+      const admin = await isSystemAdmin(userId);
       const rows = await db.select({
         id: schema.users.id,
         login: schema.users.login,
@@ -353,13 +368,11 @@ async function userCmd(userId: string, action: string, p?: Record<string, unknow
         avatarUrl: schema.users.avatarUrl,
         email: schema.users.email,
       }).from(schema.users)
-        .where(
-          sql`(${schema.users.login} ILIKE ${'%' + escaped + '%'}
-           OR ${schema.users.displayName} ILIKE ${'%' + escaped + '%'}
-           OR ${schema.users.email} ILIKE ${'%' + escaped + '%'})`
-        )
+        .where(admin
+          ? sql`(${schema.users.login} ILIKE ${pattern} OR ${schema.users.displayName} ILIKE ${pattern} OR ${schema.users.email} ILIKE ${pattern})`
+          : sql`(${schema.users.login} ILIKE ${pattern} OR ${schema.users.displayName} ILIKE ${pattern})`)
         .limit(10);
-      return rows;
+      return admin ? rows : rows.map(({ email: _email, ...rest }) => rest);
     }
     case "get_profile": {
       // 他ユーザーの公開プロフィール (privacy フィルタ付き)
@@ -411,6 +424,17 @@ async function profileCmd(userId: string, action: string, p?: Record<string, unk
         };
       }
       return rows[0];
+    }
+    case "set_display_name": {
+      // 名前は初回ログインの後に入れる (SPEC-DISPLAY-NAME-DEFERRED)。本人が付けた名前は IdP 等で上書きしない。
+      const parsed = z.object({ displayName: z.string().trim().min(1).max(80) }).strict().safeParse(p);
+      if (!parsed.success) throw AppError.badRequest("displayName must be 1-80 characters");
+      await db.update(schema.users).set({
+        displayName: parsed.data.displayName,
+        displayNameSource: "user",
+        updatedAt: new Date(),
+      }).where(eq(schema.users.id, userId));
+      return { displayName: parsed.data.displayName };
     }
     case "update": {
       const now = new Date();
@@ -662,10 +686,35 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+async function isSystemAdmin(userId: string): Promise<boolean> {
+  const rows = await db.select({ role: schema.users.role })
+    .from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+  return rows[0]?.role === "admin";
+}
+
 async function requireSystemAdmin(userId: string): Promise<void> {
   const rows = await db.select({ role: schema.users.role })
     .from(schema.users).where(eq(schema.users.id, userId)).limit(1);
   if (rows[0]?.role !== "admin") throw AppError.forbidden("System admin required");
+}
+
+const ORG_MANAGER_ROLES = ["admin", "owner", "maintainer"];
+
+/**
+ * 組織の中身 (詳細・在席・メンバー・有効プロジェクト) はメンバーか system admin にだけ見せる。
+ * パスキーのみ認証で誰でも即時にアカウントを作れるため、非メンバーの閲覧を許さない。
+ * 戻り値はメンバーとしての role (system admin で非メンバーなら "system_admin")。
+ */
+async function requireOrgVisibility(userId: string, orgId: string): Promise<string> {
+  const rows = await db.select({ role: schema.organizationMembers.role })
+    .from(schema.organizationMembers)
+    .where(and(
+      eq(schema.organizationMembers.organizationId, orgId),
+      eq(schema.organizationMembers.userId, userId),
+    )).limit(1);
+  if (rows[0]) return rows[0].role;
+  await requireSystemAdmin(userId).catch(() => { throw AppError.notFound("Organization not found"); });
+  return "system_admin";
 }
 
 async function requireOrgRole(userId: string, orgId: string, allowed: string[]): Promise<void> {

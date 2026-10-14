@@ -1,23 +1,26 @@
 /**
  * Composite Login Page
  *
- * 他サービスから popup / 同一窓で開かれるスタンドアロンログインページ。 認証 UI は
- * 埋め込み SDK の <CompositeLogin> (packages/composite) をそのまま描画する。
+ * 他サービスから popup / 同一窓で開かれるスタンドアロンログインページ。Cernere 自身の
+ * /login もこのページを使う (self モード)。認証 UI は埋め込み SDK の <CompositeLogin> を描画する。
  * 送信先検証・silent SSO・authCode の引き渡しは hooks/useCompositeLoginSession、
- * 通信は lib/composite-auth-adapter.ts (REST + composite WS) が担う。
+ * 通信は lib/composite-auth-adapter.ts が担う。
+ *
+ * ログインはパスキーのみで、登録とログインを区別しない (SPEC-PASSKEY-CONTINUE)。
+ * 「新しく始める」は Cernere のこの origin でパスキーを作り、/onboarding (名前・リカバリー QR・
+ * 別端末の追加) を済ませてからこのページへ戻る。戻ると silent SSO で authCode を渡す。
  *
  * Query params:
  *   origin       - postMessage 送信先 (popup モード)
  *   redirect_uri - リダイレクト先 (redirect モード)
- *   auth_mode    - "passkey" でパスワード導線を出さない
- *   mode         - "login" | "register" の初期タブ
  *   redirect     - self モードの戻り先 (ローカルパスのみ)
  */
 
 import type { CSSProperties } from "react";
 import { CompositeLogin } from "@ludiars/cernere-composite/ui";
-import { useAuth } from "../../contexts/AuthContext";
 import { useCompositeLoginSession } from "../../hooks/useCompositeLoginSession";
+import { signupWithPasskey } from "../../lib/passkey-account-api";
+import { onboardingUrl } from "../onboarding/onboarding-return";
 import { CERNERE_LOGIN_LABELS } from "./composite-login-labels";
 
 const API_BASE = "";
@@ -40,43 +43,36 @@ const noticeStyle: CSSProperties = {
   fontSize: "0.9rem",
 };
 
+/** 作成後に戻る場所。self は ?redirect=、composite はこのページ自身 (silent SSO で authCode を渡す)。 */
+function returnTarget(self: boolean, params: URLSearchParams): string {
+  if (!self) return window.location.pathname + window.location.search;
+  const redirect = params.get("redirect");
+  return redirect && redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/";
+}
+
 /**
- * self モード: Cernere 単独フロントの /login がこのページをそのまま使う (ダブスタ解消)。
- * 認証処理は composite と共通 (authCode 発行まで同一) で、 最後だけ
+ * self モード: Cernere 単独フロントの /login がこのページをそのまま使う。
+ * 認証処理は composite と共通 (authCode 発行まで同一) で、最後だけ
  * /api/auth/exchange で自分のトークンに交換してアプリへ入る。
  */
 export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
   const params = new URLSearchParams(window.location.search);
   const origin = self ? null : params.get("origin");
   const redirectUri = self ? null : params.get("redirect_uri");
-  // passkey 指定時は端末種別にかかわらずパスワードへ暗黙フォールバックしない。
-  const passkeyOnly = !self && params.get("auth_mode") === "passkey";
-  const { githubAuthUrl: selfGithubUrl } = useAuth();
 
   const session = useCompositeLoginSession({
     self,
     origin,
     redirectUri,
     redirectParam: params.get("redirect"),
-    modeParam: params.get("mode"),
     apiBase: API_BASE,
   });
 
-  // OAuth URL に composite_origin を付与
-  const compositeParam = origin
-    ? `composite_origin=${encodeURIComponent(origin)}`
-    : redirectUri
-      ? `composite_origin=${encodeURIComponent(redirectUri)}`
-      : "";
-  const oidcRequestId = self && window.location.pathname === "/oidc/consent" ? params.get("request_id") : null;
-  // self モードの戻り先は Google 経路でも失わない (password/passkey と同じ `?redirect=`)。
-  const selfGoogleParams = new URLSearchParams();
-  if (oidcRequestId) selfGoogleParams.set("oidc_request_id", oidcRequestId);
-  else if (params.get("redirect")) selfGoogleParams.set("redirect", params.get("redirect")!);
-  const selfGoogleQuery = selfGoogleParams.toString();
-  const selfGoogleUrl = `/login/google/start${selfGoogleQuery ? `?${selfGoogleQuery}` : ""}`;
-  const googleAuthUrl = self ? selfGoogleUrl : `/auth/google/login${compositeParam ? `?${compositeParam}` : ""}`;
-  const githubAuthUrl = self ? selfGithubUrl : `/auth/github/login${compositeParam ? `?${compositeParam}` : ""}`;
+  const createAccount = async () => {
+    await signupWithPasskey();
+    // AuthContext に新しいセッションを読ませるため、全体を読み直して遷移する。
+    window.location.assign(onboardingUrl(returnTarget(self, params)));
+  };
 
   if (session.blockedReason) {
     return (
@@ -95,10 +91,9 @@ export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
         <CompositeLogin
           authApi={session.adapter}
           onAuthCode={session.deliver}
-          oauth={passkeyOnly ? undefined : { googleUrl: googleAuthUrl, githubUrl: githubAuthUrl }}
+          onCreateAccount={createAccount}
+          recoverUrl="/recover"
           labels={CERNERE_LOGIN_LABELS}
-          initialMode={session.initialMode}
-          passkeyOnly={passkeyOnly}
           passkeyAutoStart={session.passkeyAutoReady}
           style={{ maxWidth: 400 }}
         />

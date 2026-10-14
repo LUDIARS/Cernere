@@ -10,6 +10,7 @@ import { displayHost, readListenHost } from "./http/listen-host.js";
 import { redis } from "./redis.js";
 import { runMigrations } from "./db/migrate.js";
 import { initOidcKeys } from "./auth/oidc-keys.js";
+import { startOutboxWorker } from "./notify/outbox-worker.js";
 import { purgeExpiredFaceConsents } from "./identity/face-consent-store.js";
 import { purgeExpiredFaceRevocations } from "./identity/face-revocation-store.js";
 
@@ -52,6 +53,8 @@ async function main() {
   if (listenHost) app.listen(listenHost, config.listenPort, onListen);
   else app.listen(config.listenPort, onListen);
   if (workloadListener) startWorkloadListener(workloadListener, httpHelpers, listenHost);
+  // ログイン通知の配送 (SPEC-LOGIN-ALERT)。配送の失敗は認証処理に影響しない。
+  startOutboxWorker();
 }
 
 main().catch((err) => {

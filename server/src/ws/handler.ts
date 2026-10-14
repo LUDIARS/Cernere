@@ -216,7 +216,9 @@ export async function handleWsMessage(
     return;
   }
   if (msg.type === "relay") {
-    sessionRegistry.relay(data.sessionId, data.userId, msg.target, msg.payload);
+    if (!sessionRegistry.relay(data.sessionId, data.userId, msg.target, msg.payload)) {
+      send(ws, { type: "error", code: "relay_forbidden", message: "Relay is limited to your own sessions" });
+    }
   }
 }
 

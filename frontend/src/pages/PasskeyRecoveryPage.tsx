@@ -1,8 +1,17 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { startRegistration, type PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
+import { RecoveryQrPage } from "./RecoveryQrPage";
 
+/**
+ * /recover: 運用者が発行した回復リンク (#token=...) なら運用者回復、それ以外はリカバリー QR による自己回復。
+ */
 export function PasskeyRecoveryPage() {
+  const [operatorLink] = useState(() => new URLSearchParams(window.location.hash.slice(1)).has("token"));
+  return operatorLink ? <OperatorRecovery /> : <RecoveryQrPage />;
+}
+
+function OperatorRecovery() {
   const [token, setToken] = useState(() => new URLSearchParams(window.location.hash.slice(1)).get("token") ?? "");
   const [busy, setBusy] = useState(false), [done, setDone] = useState(false), [error, setError] = useState("");
   useEffect(() => { window.history.replaceState({}, "", window.location.pathname); }, []);

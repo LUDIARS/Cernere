@@ -1,0 +1,95 @@
+/**
+ * 新しく始めた直後のオンボーディング (SPEC-PASSKEY-ONBOARDING)。
+ *
+ *   1. 名前 (SPEC-DISPLAY-NAME-DEFERRED)
+ *   2. リカバリー QR のダウンロード (SPEC-RECOVERY-QR)。ダウンロードするまで次へ進めない
+ *   3. PC ならスマホの追加 (SPEC-FIRST-LOGIN-PHONE-QR)。スマホなら出さない。「スマホを持っていない」で飛ばせる
+ *   4. ログイン通知 (任意)
+ *
+ * Cernere の origin でだけ動く。埋め込み先のサービスから来た場合は、終わったら
+ * /composite/login へ戻り、silent SSO で authCode を渡す (戻り先は ?return=)。
+ */
+
+import { useEffect, useState } from "react";
+import { AlertTargetsPanel } from "../../components/security/AlertTargetsPanel";
+import { PairingPanel } from "../../components/security/PairingPanel";
+import { RecoveryCodePanel } from "../../components/security/RecoveryCodePanel";
+import { bodyTextStyle, pageStyle, primaryButton, secondaryButton } from "../../components/security/panel-styles";
+import { useAuth } from "../../contexts/AuthContext";
+import { isMobileDevice } from "../../lib/device-kind";
+import { recoveryCode, type RecoveryStatus } from "../../lib/passkey-account-api";
+import { NameStep } from "./NameStep";
+import { readReturnPath } from "./onboarding-return";
+
+type Step = "name" | "recovery" | "phone" | "alerts";
+
+export function OnboardingPage() {
+  const { user } = useAuth();
+  const returnTo = readReturnPath(window.location.search);
+  const mobile = isMobileDevice();
+  const [step, setStep] = useState<Step>(user?.name ? "recovery" : "name");
+  const [recovery, setRecovery] = useState<RecoveryStatus | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    recoveryCode.status().then(setRecovery).catch((e) => setError((e as Error).message));
+  }, []);
+
+  const finish = () => window.location.assign(returnTo);
+  const afterRecovery = () => setStep(mobile ? "alerts" : "phone");
+
+  return (
+    <main style={pageStyle}>
+      <h1 style={{ fontSize: "1.4rem", fontWeight: 700 }}>Cernere へようこそ</h1>
+      <p style={bodyTextStyle}>はじめに、いくつか設定します。</p>
+      {error && <p role="alert" style={{ color: "var(--red)" }}>{error}</p>}
+
+      {step === "name" && <NameStep onDone={() => setStep("recovery")} />}
+
+      {step === "recovery" && recovery && (
+        <>
+          {recovery.hasActiveCode && !saved ? (
+            <p style={bodyTextStyle}>リカバリー QR は発行済みです。</p>
+          ) : (
+            <RecoveryCodePanel
+              withoutProof={recovery.canIssueWithoutProof}
+              hasActiveCode={recovery.hasActiveCode}
+              onSaved={() => setSaved(true)}
+            />
+          )}
+          <button
+            type="button"
+            onClick={afterRecovery}
+            disabled={!saved && !recovery.hasActiveCode}
+            style={{ ...primaryButton(!saved && !recovery.hasActiveCode), marginTop: "1rem" }}
+          >
+            次へ
+          </button>
+        </>
+      )}
+
+      {step === "phone" && (
+        <>
+          <PairingPanel title="📱 スマホでも使えるようにする" onAdded={() => setStep("alerts")} />
+          <p style={bodyTextStyle}>
+            この PC のパスキーは他の端末に移せません。PC を変えたときに困らないよう、スマホのパスキーも登録しておくことをおすすめします。
+          </p>
+          <button type="button" onClick={() => setStep("alerts")} style={secondaryButton(false)}>
+            スマホを持っていない / あとで設定する
+          </button>
+        </>
+      )}
+
+      {step === "alerts" && (
+        <>
+          <AlertTargetsPanel />
+          <p style={bodyTextStyle}>通知はあとからでも「セキュリティ」画面で設定できます。</p>
+          <button type="button" onClick={finish} style={{ ...primaryButton(false), marginTop: "1rem" }}>
+            はじめる
+          </button>
+        </>
+      )}
+    </main>
+  );
+}

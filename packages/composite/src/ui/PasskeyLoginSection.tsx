@@ -1,60 +1,44 @@
 /**
  * <PasskeyLoginSection>
  *
- * ログインタブのパスキー導線。 画面を開いた時点で ceremony は自動起動済みなので、
- * ここに出るボタンは再試行用。 自動起動が空振りした / 非対応だった理由だけ添える。
+ * 「パスキーで続ける」の主ボタン。画面を開いた時点で ceremony は自動起動済みなので、
+ * 取消・失敗の後は再試行ボタンになる。WebAuthn は「パスキーが無い」と「取消」を
+ * 区別できないため、失敗しても「アカウントが無い」とは言わない (SPEC-PASSKEY-CONTINUE)。
  */
 
 import type { ReactElement } from "react";
 import type { CompositeLoginLabels } from "./login-labels.js";
-import { hintStyle, secondaryButtonStyle } from "./login-styles.js";
+import { hintStyle, primaryButtonStyle } from "./login-styles.js";
 import type { PasskeyLoginPhase } from "./usePasskeyLogin.js";
 
 export interface PasskeyLoginSectionProps {
   phase: PasskeyLoginPhase;
   hasAttempted: boolean;
-  /** 他の処理 (パスワード送信等) が走っていて押せない */
-  disabled: boolean;
-  /** パスワードフォームが無い (auth_mode=passkey) ときは文言をパスキー完結に寄せる */
-  passkeyOnly: boolean;
-  /** 直前にエラー表示がある場合は fallback 文言を重ねない */
+  /** 直前にエラー表示がある場合は未完了の文言を重ねない */
   hasError: boolean;
   onStart: () => void;
   labels: CompositeLoginLabels;
 }
 
-/** @implements SPEC-COMPOSITE-PASSKEY-AUTOSTART */
+/** @implements SPEC-PASSKEY-CONTINUE */
 export function PasskeyLoginSection({
   phase,
   hasAttempted,
-  disabled,
-  passkeyOnly,
   hasError,
   onStart,
   labels: l,
 }: PasskeyLoginSectionProps): ReactElement {
   const busy = phase === "running";
-  const blocked = disabled || busy;
   return (
     <>
-      <button
-        type="button"
-        onClick={onStart}
-        disabled={blocked}
-        style={secondaryButtonStyle(blocked)}
-      >
-        {busy ? l.passkeyRunning : hasAttempted ? l.passkeyRetry : l.passkeyLogin}
+      <button type="button" onClick={onStart} disabled={busy} style={{ ...primaryButtonStyle(busy), marginTop: 0 }}>
+        {busy ? l.passkeyRunning : hasAttempted ? l.passkeyRetry : l.passkeyContinue}
       </button>
-
       {phase === "unsupported" && (
-        <p style={{ ...hintStyle, marginTop: "0.5rem" }}>
-          {passkeyOnly ? l.passkeyUnsupported : l.passkeyUnsupportedFallback}
-        </p>
+        <p style={{ ...hintStyle, marginTop: "0.5rem" }}>{l.passkeyUnsupported}</p>
       )}
       {phase === "fallback" && !hasError && (
-        <p style={{ ...hintStyle, marginTop: "0.5rem" }}>
-          {passkeyOnly ? l.passkeyFallback : l.passkeyFallbackWithForm}
-        </p>
+        <p style={{ ...hintStyle, marginTop: "0.5rem" }}>{l.passkeyNotCompleted}</p>
       )}
     </>
   );

@@ -2,11 +2,11 @@
  * パスキー (WebAuthn) ログインの ceremony を 1 箇所に集めた hook。
  *
  * ログイン画面を開いた直後に Windows Hello / Face ID を「そのまま」開くのが主用途。
- * メールを渡さない usernameless (discoverable credential) で begin を叩くため、
- * ユーザはメール入力もボタン押下も踏まずに端末の PIN / 生体ダイアログへ入る。
+ * usernameless (discoverable credential) で begin を叩くため、ユーザはボタン押下も
+ * 踏まずに端末の PIN / 生体ダイアログへ入る。
  *
  * ceremony:
- *   1. api.passkeyLoginBegin({ email })   → options (allowCredentials 空 = usernameless)
+ *   1. api.passkeyLoginBegin({})          → options (allowCredentials 空 = usernameless)
  *   2. navigator.credentials.get()        (startAuthentication)
  *   3. api.passkeyLoginFinish({ ... })    → CompositeAuthResponse (authCode)
  *
@@ -24,7 +24,7 @@ import {
   browserSupportsWebAuthn,
   type AuthenticationResponseJSON,
 } from "@simplewebauthn/browser";
-import type { CompositeAuthResponse, CompositePasskeyApi } from "./auth-api.js";
+import type { CompositeAuthApi, CompositeAuthResponse } from "./auth-api.js";
 
 export type PasskeyLoginPhase =
   /** 未実行 (自動起動待ち、 または fallback 後の待機) */
@@ -38,7 +38,7 @@ export type PasskeyLoginPhase =
 
 export interface UsePasskeyLoginArgs {
   /** null のときは何もしない (利用側がパスキー API を渡していない) */
-  api: CompositePasskeyApi | null;
+  api: CompositeAuthApi | null;
   /**
    * 自動起動して良い状態か。 composite ページでは送信先検証と silent SSO の決着後に
    * true を渡す (先に authCode が取れる場合に認証器ダイアログを開かせないため)。
@@ -54,8 +54,8 @@ export interface UsePasskeyLoginResult {
   phase: PasskeyLoginPhase;
   /** 自動・手動を問わず、一度でも認証起動を試したか (ボタン文言の切替に使う) */
   hasAttempted: boolean;
-  /** 手動起動。 email を渡すとそのユーザの credential に絞る (未指定は usernameless) */
-  start: (email?: string) => void;
+  /** 手動起動 (usernameless) */
+  start: () => void;
 }
 
 /**
@@ -93,12 +93,12 @@ export function usePasskeyLogin({
   onResponseRef.current = onResponse;
   onErrorRef.current = onError;
 
-  const run = useCallback(async (email: string): Promise<void> => {
+  const run = useCallback(async (): Promise<void> => {
     if (!api || inFlightRef.current) return;
     inFlightRef.current = true;
     setPhase("running");
     try {
-      const begin = await api.passkeyLoginBegin(email ? { email } : {});
+      const begin = await api.passkeyLoginBegin({});
       const assertion: AuthenticationResponseJSON =
         await startAuthentication({ optionsJSON: begin.options });
       const finish = await api.passkeyLoginFinish({
@@ -132,10 +132,10 @@ export function usePasskeyLogin({
       setPhase("unsupported");
       return;
     }
-    void run("");
+    void run();
   }, [api, autoStartReady, run]);
 
-  const start = useCallback((email?: string) => {
+  const start = useCallback(() => {
     if (!api) return;
     // 手動起動も 1 回きりの自動起動枠を消費済みにしておく (二重発火防止)。
     // hasAttempted も揃えて立てる — これを落とすと、 自動起動が走る前に手動で
@@ -147,7 +147,7 @@ export function usePasskeyLogin({
       setPhase("unsupported");
       return;
     }
-    void run(email?.trim() ?? "");
+    void run();
   }, [api, run]);
 
   return { phase, hasAttempted, start };

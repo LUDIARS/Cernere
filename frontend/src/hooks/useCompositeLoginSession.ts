@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { auth as authApi, getAccessToken, hasAccessRecord } from "../lib/api";
+import { auth as authApi, getAccessToken } from "../lib/api";
 import { CernereCompositeAuthAdapter } from "../lib/composite-auth-adapter";
 import { CompositeAuthHandoff } from "../lib/composite-auth-handoff";
 import { fetchAllowedOrigins, isTargetAllowed } from "../lib/composite-redirect";
@@ -25,15 +25,11 @@ export interface CompositeLoginSessionArgs {
   redirectUri: string | null;
   /** self モードの戻り先 (`?redirect=`) */
   redirectParam: string | null;
-  /** `?mode=` の生値 */
-  modeParam: string | null;
   apiBase: string;
 }
 
 export interface CompositeLoginSession {
   adapter: CernereCompositeAuthAdapter;
-  /** 初期タブ。 ?mode= 最優先、 self の初訪問は register */
-  initialMode: "login" | "register";
   /** 送信先が許可外 / 未指定のときの停止理由。 立っている間はログイン UI を出さない */
   blockedReason: string;
   /** authCode 引き渡し段階 (self exchange 等) の失敗 */
@@ -47,21 +43,11 @@ export interface CompositeLoginSession {
 const TARGET_CHECK_PENDING = "送信先を確認しています…";
 
 /**
- * 初期タブ: ?mode= が最優先。 self では「アクセスした形跡」が無い初訪問に Register を優先 (#149)。
- * @implements SPEC-COMPOSITE-AUTHCODE-HANDOFF
- */
-export function resolveInitialLoginMode(modeParam: string | null, self: boolean): "login" | "register" {
-  if (modeParam === "register" || modeParam === "login") return modeParam;
-  if (self && !hasAccessRecord()) return "register";
-  return "login";
-}
-
-/**
  * @implements SPEC-COMPOSITE-AUTHCODE-HANDOFF
  * @implements SPEC-COMPOSITE-PASSKEY-AUTOSTART
  */
 export function useCompositeLoginSession(args: CompositeLoginSessionArgs): CompositeLoginSession {
-  const { self, origin, redirectUri, redirectParam, modeParam, apiBase } = args;
+  const { self, origin, redirectUri, redirectParam, apiBase } = args;
 
   // composite は検証開始前も fail-closed。空文字にしておくと最初の effect が完了するまで
   // 認証 UI が一瞬描画され、資格情報や手動 passkey を送信できてしまう。
@@ -70,8 +56,6 @@ export function useCompositeLoginSession(args: CompositeLoginSessionArgs): Compo
   // self は即座に、 composite は送信先検証と silent SSO が「authCode を取れなかった」と
   // 決着してから true にする (ダイアログの空振り防止)。
   const [passkeyAutoReady, setPasskeyAutoReady] = useState(self);
-
-  const initialMode = useMemo(() => resolveInitialLoginMode(modeParam, self), [modeParam, self]);
 
   // adapter は WS を抱えるので、 ページと同じ寿命で 1 つだけ持ち unmount で閉じる。
   const adapter = useMemo(() => new CernereCompositeAuthAdapter(apiBase), [apiBase]);
@@ -144,5 +128,5 @@ export function useCompositeLoginSession(args: CompositeLoginSessionArgs): Compo
     handoff.deliver(authCode);
   };
 
-  return { adapter, initialMode, blockedReason, handoffError, passkeyAutoReady, deliver };
+  return { adapter, blockedReason, handoffError, passkeyAutoReady, deliver };
 }

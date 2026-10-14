@@ -20,6 +20,10 @@ export type ProtectedAction =
   | "passkey.register"
   | "passkey.delete"
   | "passkey.device_link"
+  | "passkey.pairing_approve"
+  | "recovery_code.issue"
+  | "recovery_request.cancel"
+  | "login_alert.manage"
   | "oauth.link"
   | "oauth.unlink"
   | "organization.delete"
@@ -66,9 +70,13 @@ export function resolveBrowserActionTarget(
   payload: unknown,
   currentUserId: string | undefined,
 ): { action: ProtectedAction; resource: string } | null {
-  const name = `${module}.${action}` as ProtectedAction;
+  // login_alert の start / remove は宛先の追加・削除で、サーバーは login_alert.manage を求める。
+  const name = (module === "login_alert" && (action === "start" || action === "remove")
+    ? "login_alert.manage"
+    : `${module}.${action}`) as ProtectedAction;
   const p = asObject(payload);
   switch (name) {
+    case "login_alert.manage": return { action: name, resource: requiredString(p, "channel") };
     case "device_session.revoke": return { action: name, resource: requiredString(p, "deviceId") };
     case "device_session.revoke_all": return { action: name, resource: requireCurrentUser(currentUserId) };
     case "account_recovery.issue": return { action: name, resource: requiredString(p, "userId") };

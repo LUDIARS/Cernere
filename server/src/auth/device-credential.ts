@@ -24,6 +24,7 @@ import {
   type SessionKeyMaterial,
 } from "./session-keys.js";
 import { DEVICE_TOKEN_PREFIX, formatDeviceToken, parseDeviceToken } from "./device-token.js";
+import { recordSecurityEvent } from "../notify/security-events.js";
 import {
   decideRotation,
   type DeviceCredentialState,
@@ -344,6 +345,7 @@ export async function revokeAllDeviceCredentials(params: {
       .set({ authEpoch: sql`${schema.users.authEpoch} + 1`, mfaRevision: sql`${schema.users.mfaRevision} + 1` })
       .where(eq(schema.users.id, params.userId));
     await tx.delete(schema.refreshSessions).where(eq(schema.refreshSessions.userId, params.userId));
+    await recordSecurityEvent(tx, params.userId, "session.revoke_all");
     return revoked.length;
   });
 }

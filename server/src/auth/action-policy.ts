@@ -13,9 +13,15 @@ export const protectedActionSchema = z.enum([
   "device_session.revoke_all",
   "account_recovery.issue",
   "account_recovery.revoke",
+  "account_recovery.freeze",
   "passkey.register",
   "passkey.delete",
   "passkey.device_link",
+  // パスキーのみ認証 (spec/plan/2026-10-14-passkey-only-authentication.md)
+  "passkey.pairing_approve",
+  "recovery_code.issue",
+  "recovery_request.cancel",
+  "login_alert.manage",
   "oauth.link",
   "oauth.unlink",
   "organization.delete",
@@ -50,10 +56,12 @@ export const actionTargetSchema = z.object({
 }).strict();
 
 const protectedWsActions = new Set<ProtectedAction>([
+  "login_alert.manage",
   "device_session.revoke",
   "device_session.revoke_all",
   "account_recovery.issue",
   "account_recovery.revoke",
+  "account_recovery.freeze",
   "enterprise.save_connection",
   "enterprise.save_identity",
   "enterprise.revoke_user",
@@ -82,16 +90,21 @@ export function resolveWsActionTarget(
   actionName: string,
   payload: unknown,
 ): ActionTarget | null {
-  const action = `${module}.${actionName}`;
+  // login_alert の start / remove は宛先の追加・削除なので同じ proof (login_alert.manage) を要求する。
+  const action = module === "login_alert" && (actionName === "start" || actionName === "remove")
+    ? "login_alert.manage"
+    : `${module}.${actionName}`;
   const parsedAction = protectedActionSchema.safeParse(action);
   if (!parsedAction.success || !protectedWsActions.has(parsedAction.data)) return null;
 
   const p = asObject(payload);
   switch (parsedAction.data) {
     case "device_session.revoke": return target(parsedAction.data, requiredString(p, "deviceId"));
+    case "login_alert.manage": return target(parsedAction.data, requiredString(p, "channel"));
     case "device_session.revoke_all": return target(parsedAction.data, userId);
     case "account_recovery.issue": return target(parsedAction.data, requiredString(p, "userId"));
     case "account_recovery.revoke": return target(parsedAction.data, requiredString(p, "grantId"));
+    case "account_recovery.freeze": return target(parsedAction.data, requiredString(p, "userId"));
     case "enterprise.save_connection":
       return target(parsedAction.data, requiredString(p, "projectKey"));
     case "enterprise.save_identity":

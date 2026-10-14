@@ -1,5 +1,10 @@
 # 認証フロー一覧
 
+> **2026-10-14: 利用者のログインはパスキーのみになった** ([../plan/2026-10-14-passkey-only-authentication.md](../plan/2026-10-14-passkey-only-authentication.md))。
+> 下の「user (email/pw)」「user (OAuth)」「composite の email + pw」は廃止済みで、入口は `410 login_method_retired` を返す。
+> OAuth はアカウント連携 (と §7 のログイン通知の宛先確認) だけに使う。`/api/auth/login` の `client_credentials` / `project_credentials` は残る。
+> 現行の利用者の経路は「パスキーで続ける」(§パスキー: 入口の統合) を参照。廃止経路の節は経緯として残す。
+
 Cernere がサポートする 6 種類の認証経路。すべて最終的に **HS256 JWT (`JWT_SECRET`)** で署名される。
 
 通常 user / tool / MFA 待ち token の用途は明示的に分離する。旧用途なし token と
@@ -10,12 +15,13 @@ Cernere がサポートする 6 種類の認証経路。すべて最終的に **
 
 | 経路 | 入力 | 出力 | 用途 |
 |---|---|---|---|
-| [user (email/pw)](#1-user-email--password) | email + password | access + refresh | エンドユーザの直接ログイン |
-| [user (OAuth)](#2-user-oauth-github--google) | GitHub / Google code | access + refresh | SNS 連携ログイン |
+| user (passkey) | WebAuthn assertion (登録とログインを区別しない) | access + refresh / Device Credential | エンドユーザのログイン (唯一の経路) |
+| ~~[user (email/pw)](#1-user-email--password)~~ | — | 410 | 廃止 (2026-10-14) |
+| ~~[user (OAuth)](#2-user-oauth-github--google)~~ | — | 410 | 廃止。連携専用 |
 | [project](#3-project-credentials) | client_id + client_secret | project token | サービスのサーバ認証 |
 | project launch | launcher project credential | 起動対象project credential | Excubitorによる起動時rotate |
 | [tool](#4-tool-client-credentials) | client_id + client_secret | tool token | CLI / API ツール認証 |
-| [composite](#5-composite-埋め込みログイン) | email + pw + デバイス本人確認 | one-time authCode | サービス内 SPA 埋め込みログイン |
+| [composite](#5-composite-埋め込みログイン) | パスキー (新規作成は Cernere の popup のみ) | one-time authCode | サービス内 SPA 埋め込みログイン |
 | [edge assertion](#6-edge-assertion-エッジ認証のバイパス) | 上流エッジの署名済みアサーション (Cloudflare Access JWT) | one-time authCode | 企業 SSO 配下の Hub (再ログイン無し) |
 
 ---
@@ -78,6 +84,17 @@ sequenceDiagram
 - CSRF: state パラメータ + Cookie で二重検証
 - Composite mode: PC は `redirect_uri` へ authCode を返し、呼び出し元が state を照合する。
   popup を使うクライアントは authCode を親 SPA に postMessage する
+
+## パスキー: 入口の統合 (2026-10-14)
+
+1. 画面は「パスキーで続ける」1 つ。`login-begin` (discoverable) → `navigator.credentials.get()` → `login-finish` / `composite-login-finish`。
+2. 取消・パスキー無しのときは「アカウントが無い」と言わず、再試行 / 他の端末にある (ブラウザのクロスデバイス QR・`/recover` のリカバリー QR) / 新しく始める の順に出す。
+3. 新しく始める: Cernere の origin で `signup-begin` (name・email を受け取らない) → `create()` → `signup-finish` → `/onboarding` (名前・リカバリー QR・PC ならスマホ追加・通知)。埋め込み先から来た場合は戻って silent SSO で authCode を渡す。project WS の `passkey-signup-*` は 410 `signup_moved_to_popup`。
+4. 別端末の追加 (`device-link` → `device-register-begin/finish`) は候補を保留し、追加する端末に出た 4 桁を元端末で入力して承認 (`device-pairing-approve`、action proof `passkey.pairing_approve`) したときだけ有効になる。
+5. リカバリー QR (`recovery-code-*`, `recovery-confirm-*`) は 24 時間の回復待機の後に確定する。待機中は旧キーで取り消せる。admin は対象外。
+6. 最初のユーザーを自動で admin にしない (`npm run bootstrap-admin -- <userId>`)。
+
+以下の「Passkey アカウント作成」「Passkey 他デバイス登録」は 2026-10-14 以前の記述。現行は上と設計書を正とする。
 
 ## Passkey アカウント作成
 

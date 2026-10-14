@@ -66,6 +66,8 @@ export const config = {
   discordClientId: env("DISCORD_CLIENT_ID", ""),
   discordClientSecret: env("DISCORD_CLIENT_SECRET", ""),
   discordRedirectUri: env("DISCORD_REDIRECT_URI", "http://localhost:8080/auth/discord/callback"),
+  // ログイン通知の DM を送る Cr 専用 Bot (SPEC-LOGIN-ALERT)。未設定なら Discord 通知先を有効化できない。
+  discordAlertBotToken: env("CERNERE_DISCORD_ALERT_BOT_TOKEN", ""),
 
   // JWT
   //

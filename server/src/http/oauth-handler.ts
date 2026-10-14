@@ -1,25 +1,21 @@
 /**
  * OAuth ハンドラ (uWebSockets.js 用)
  *
- * GitHub / Google OAuth のリダイレクト + コールバックを処理する。
+ * GitHub / Google / Discord の OAuth コールバックを処理する。アカウント連携専用で、
+ * ログイン・新規作成には使わない (パスキーのみ。spec/plan/2026-10-14-passkey-only-authentication.md §1)。
  * Cookie は Set-Cookie ヘッダーで手動管理。
  */
 
 import type uWS from "uWebSockets.js";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { config } from "../config.js";
-import { generateTokenPair, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
-import { hashRefreshToken } from "../auth/token-hash.js";
-import { redis, SESSION_TTL_SECS } from "../redis.js";
 import { logAuthEvent } from "../logging/auth-logger.js";
-import { isCompositeTargetAllowed } from "../auth/composite-redirect.js";
 import { verifyOAuthStateParam, isLinkStateToken } from "../auth/oauth-state.js";
-import { startGoogleOidc, completeGoogleOidc } from "../auth/google-oidc-client.js";
-import { GOOGLE_OIDC_REQUEST_TTL } from "../auth/google-oidc-request.js";
+import { completeGoogleOidc } from "../auth/google-oidc-client.js";
 import { AppError } from "../error.js";
-import { issueAuthCodeForUserId } from "../auth/auth-code.js";
+import { LOGIN_METHOD_RETIRED_MESSAGE } from "../auth/retired-login.js";
 import {
   createOAuthLinkGrant,
   deleteOAuthLinkGrant,
@@ -29,7 +25,6 @@ import {
 } from "../auth/oauth-link.js";
 
 const CSRF_COOKIE = "cernere_csrf_state";
-const SESSION_COOKIE = "ars_session";
 
 function getCookie(cookieHeader: string, name: string): string | undefined {
   const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
@@ -76,20 +71,15 @@ export function handleOAuthRoute(
   }
   const ctx = { ip, userAgent };
 
-  // Composite origin (外部サービスからの認証委譲時に指定される)
-  const queryParams = new URLSearchParams(query);
-  const compositeOrigin = queryParams.get("composite_origin") ?? undefined;
-
   // 非同期処理
   (async () => {
     try {
-      if (provider === "github" && action === "login") {
-        await githubLogin(res, aborted, compositeOrigin);
+      if (action === "login") {
+        // GitHub / Google によるログイン・新規作成は廃止した (パスキーのみ)。
+        // 連携は Bearer 認証済みの prepareOAuthLinkForUser から始める。
+        throw new Error(LOGIN_METHOD_RETIRED_MESSAGE);
       } else if (provider === "github" && action === "callback") {
         await githubCallback(res, query, cookieHeader, aborted, ctx);
-      } else if (provider === "google" && action === "login") {
-        await googleLogin(res, () => aborted, compositeOrigin,
-          queryParams.get("oidc_request_id") ?? undefined, queryParams.get("browser_state") ?? undefined);
       } else if (provider === "google" && action === "callback") {
         await googleCallback(res, query, cookieHeader, () => aborted, ctx);
       } else if (provider === "discord" && action === "callback") {
@@ -102,6 +92,7 @@ export function handleOAuthRoute(
     } catch (err) {
       // Google failures can include database values or upstream responses; expose only known errors.
       const message = provider === "google" && !(err instanceof AppError)
+        && (err as Error).message !== LOGIN_METHOD_RETIRED_MESSAGE
         ? "Google sign-in failed; please start again"
         : (err as Error).message;
       logAuthEvent({
@@ -232,24 +223,6 @@ async function discordCallback(
 
 // ── GitHub ─────────────────────────────────────────────────
 
-async function githubLogin(res: uWS.HttpResponse, aborted: boolean, compositeOrigin?: string): Promise<void> {
-  if (!config.githubClientId) throw new Error("GitHub OAuth is not configured");
-
-  const csrfState = compositeOrigin
-    ? `composite:${compositeOrigin}:${crypto.randomUUID()}`
-    : crypto.randomUUID();
-  const params = new URLSearchParams({
-    client_id: config.githubClientId,
-    redirect_uri: config.githubRedirectUri,
-    scope: "read:user user:email repo",
-    state: csrfState,
-  });
-  if (aborted) return;
-  redirect(res, `https://github.com/login/oauth/authorize?${params}`, [
-    setCookieHeader(CSRF_COOKIE, csrfState, 600),
-  ]);
-}
-
 async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader: string, aborted: boolean, ctx: { ip?: string; userAgent?: string }): Promise<void> {
   const params = new URLSearchParams(query);
   const code = params.get("code");
@@ -257,7 +230,6 @@ async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader
   const expectedState = getCookie(cookieHeader, CSRF_COOKIE);
   const frontend = config.frontendUrl;
 
-  const isComposite = stateParam?.startsWith("composite:");
   // 全フロー (通常 / composite / link) で cookie の state と厳密一致を要求する。
   // 旧実装は "link:" prefix で検証を丸ごとスキップし、攻撃者が state=link:<victim_uuid>
   // を送るだけで被害者の github_id を書き換えられた (Issue #63 C2)。
@@ -273,9 +245,12 @@ async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader
   // link のつもりで始めた flow を通常ログインへ落とさない。 Redis の 600 秒を
   // 過ぎた callback をそのまま通すと、 「連携する」 を押しただけの利用者が
   // 別アカウントにサインイン (未登録なら新規作成) されてしまう。
-  if (!redisLinkUserId && isLinkStateToken(stateParam)) {
-    throw new Error("Account link expired; please start linking again");
+  if (!redisLinkUserId) {
+    throw new Error(isLinkStateToken(stateParam)
+      ? "Account link expired; please start linking again"
+      : LOGIN_METHOD_RETIRED_MESSAGE);
   }
+  const linkUserId = redisLinkUserId;
 
   // Exchange code for token
   const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
@@ -321,9 +296,8 @@ async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader
 
   const now = new Date();
 
-  // Account linking
-  if (redisLinkUserId) {
-    const linkUserId = redisLinkUserId;
+  // Account linking (ログインには使わない)
+  {
     const existing = await db.select().from(schema.users)
       .where(eq(schema.users.githubId, ghUser.id)).limit(1);
     if (existing.length > 0 && existing[0].id !== linkUserId) {
@@ -344,98 +318,9 @@ async function githubCallback(res: uWS.HttpResponse, query: string, cookieHeader
     return;
   }
 
-  // Find or create user
-  let userId: string;
-  const userRows = await db.select().from(schema.users)
-    .where(eq(schema.users.githubId, ghUser.id)).limit(1);
-
-  if (userRows.length > 0) {
-    userId = userRows[0].id;
-    await db.update(schema.users).set({
-      login: ghUser.login, displayName: ghUser.name ?? ghUser.login,
-      avatarUrl: ghUser.avatar_url, email: ghUser.email,
-      lastLoginAt: now, updatedAt: now,
-    }).where(eq(schema.users.id, userId));
-  } else {
-    const countResult = await db.select({ count: sql<number>`count(*)` }).from(schema.users);
-    const role = Number(countResult[0]?.count ?? 0) === 0 ? "admin" : "general";
-    userId = crypto.randomUUID();
-    await db.insert(schema.users).values({
-      id: userId, githubId: ghUser.id, login: ghUser.login,
-      displayName: ghUser.name ?? ghUser.login, avatarUrl: ghUser.avatar_url,
-      email: ghUser.email, role, lastLoginAt: now, createdAt: now, updatedAt: now,
-    });
-  }
-
-  // Composite flow: auth_code を生成して composite callback にリダイレクト
-  if (isComposite) {
-    const userRole = userRows.length > 0 ? userRows[0].role : "general";
-    const { accessToken, refreshToken, authEpoch } = await generateTokenPair(userId, userRole);
-    const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
-    await db.insert(schema.refreshSessions).values({
-      authEpoch, id: crypto.randomUUID(), userId, refreshToken: hashRefreshToken(refreshToken), expiresAt,
-    });
-
-    const authCode = crypto.randomUUID();
-    await redis.set(`authcode:${authCode}`, JSON.stringify({
-      accessToken, refreshToken,
-      user: { id: userId, displayName: ghUser.name ?? ghUser.login, email: ghUser.email, role: userRole },
-    }), "EX", 60);
-
-    logAuthEvent({ event: "user.oauth", userId, email: ghUser.email ?? undefined, provider: "github", composite: true, ip: ctx.ip, userAgent: ctx.userAgent });
-
-    // composite:<origin>:<uuid> から origin を抽出
-    const compositeOrigin = stateParam!.split(":").slice(1, -1).join(":");
-    if (aborted) return;
-    // VULNWEB-001: 送信先 origin を許可リストで検証。 不正なら authCode を渡さず
-    // エラーへ返す (Redis の authCode は未使用のまま TTL 失効させる)。
-    if (!isCompositeTargetAllowed(compositeOrigin)) {
-      logAuthEvent({ event: "user.oauth.failed", userId, provider: "github", composite: true, reason: "redirect target not allowlisted", ip: ctx.ip, userAgent: ctx.userAgent });
-      redirect(res, `${config.frontendUrl}?authError=${encodeURIComponent("Invalid redirect target")}`, [
-        deleteCookieHeader(CSRF_COOKIE),
-      ]);
-      return;
-    }
-    redirect(res, `${config.frontendUrl}/composite/callback?code=${authCode}&origin=${encodeURIComponent(compositeOrigin)}`, [
-      deleteCookieHeader(CSRF_COOKIE),
-    ]);
-    return;
-  }
-
-  // Redis session
-  const sessionId = crypto.randomUUID();
-  await redis.set(`session:${sessionId}`, JSON.stringify({
-    id: sessionId, userId, expiresAt: new Date(Date.now() + SESSION_TTL_SECS * 1000).toISOString(),
-    accessToken: tokenData.access_token,
-  }), "EX", SESSION_TTL_SECS);
-
-  logAuthEvent({ event: "user.oauth", userId, email: ghUser.email ?? undefined, provider: "github", ip: ctx.ip, userAgent: ctx.userAgent });
-
-  if (aborted) return;
-  redirect(res, "/", [
-    deleteCookieHeader(CSRF_COOKIE),
-    setCookieHeader(SESSION_COOKIE, sessionId, SESSION_TTL_SECS),
-  ]);
 }
 
 // ── Google ────────────────────────────────────────────────
-
-/** @implements SPEC-GOOGLE-OIDC-REQUEST */
-async function googleLogin(res: uWS.HttpResponse, isAborted: () => boolean, compositeOrigin?: string, oidcRequestId?: string, browserState?: string): Promise<void> {
-  if (!compositeOrigin && !browserState) throw AppError.badRequest("Start Google sign-in from the Cernere login page");
-  if (compositeOrigin && (oidcRequestId || !isCompositeTargetAllowed(compositeOrigin))) {
-    throw AppError.badRequest("Invalid Google sign-in destination");
-  }
-
-  const csrfState = compositeOrigin
-    ? `composite:${compositeOrigin}:${crypto.randomUUID()}`
-    : crypto.randomUUID();
-  const authorizationUrl = await startGoogleOidc(csrfState, oidcRequestId, browserState);
-  if (isAborted()) return;
-  redirect(res, authorizationUrl, [
-    setCookieHeader(CSRF_COOKIE, csrfState, GOOGLE_OIDC_REQUEST_TTL),
-  ]);
-}
 
 /** @implements SPEC-GOOGLE-OIDC-VERIFICATION */
 async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader: string, isAborted: () => boolean, ctx: { ip?: string; userAgent?: string }): Promise<void> {
@@ -445,18 +330,15 @@ async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader
   const expectedState = getCookie(cookieHeader, CSRF_COOKIE);
   const frontend = config.frontendUrl;
 
-  const isCompositeGoogle = stateParam?.startsWith("composite:");
   if (!stateParam || !expectedState || !verifyOAuthStateParam({ stateParam, cookieState: expectedState }).ok) throw new Error("Invalid OAuth state");
   if (!code) throw new Error("Authorization code not provided");
   const verified = await completeGoogleOidc(stateParam, code);
   const linkUserId = await resolveLinkTarget(stateParam, "google");
   // github と同じく、 期限切れの link callback を通常ログインへ落とさない。
-  if (!linkUserId && isLinkStateToken(stateParam)) {
-    throw new Error("Account link expired; please start linking again");
-  }
-
-  if (!linkUserId && !isCompositeGoogle && !verified.browserState) {
-    throw AppError.unauthorized("Google sign-in browser binding is missing; start again");
+  if (!linkUserId) {
+    throw new Error(isLinkStateToken(stateParam)
+      ? "Account link expired; please start linking again"
+      : LOGIN_METHOD_RETIRED_MESSAGE);
   }
 
   const gUser = {
@@ -468,7 +350,7 @@ async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader
 
   const now = new Date();
 
-  if (linkUserId) {
+  {
     const existing = await db.select({ id: schema.users.id }).from(schema.users)
       .where(eq(schema.users.googleId, gUser.id)).limit(1);
     if (existing[0] && existing[0].id !== linkUserId) {
@@ -481,86 +363,12 @@ async function googleCallback(res: uWS.HttpResponse, query: string, cookieHeader
       }
       return;
     }
-    await db.update(schema.users).set({ googleId: gUser.id, updatedAt: now }).where(eq(schema.users.id, linkUserId));
+    // email は Google の ID トークン検証で email_verified=true を確認済み (google-id-token.ts)。
+    await db.update(schema.users).set({ googleId: gUser.id, googleVerifiedEmail: gUser.email, updatedAt: now }).where(eq(schema.users.id, linkUserId));
     await deleteOAuthLinkGrant(stateParam);
     // github / discord の link と同じく監査ログを残す (RULE.md Step 8)。
     logAuthEvent({ event: "user.oauth", userId: linkUserId, provider: "google", linked: true, ip: ctx.ip, userAgent: ctx.userAgent });
     if (!isAborted()) redirect(res, `${frontend}?linked=google`, [deleteCookieHeader(CSRF_COOKIE)]);
     return;
   }
-
-  // Find or create user
-  let userId: string;
-  const userRows = await db.select().from(schema.users)
-    .where(eq(schema.users.googleId, gUser.id)).limit(1);
-
-  if (userRows.length > 0) {
-    userId = userRows[0].id;
-    // users.email は unique。 Google 側でメールが変わった結果が別 Cr ユーザと衝突する場合、
-    // ログイン全体を失敗させず、 既存のメールを保持する (本人特定は google_id で済んでいる)。
-    let email = gUser.email;
-    if (email !== userRows[0].email) {
-      const emailTaken = await db.select({ id: schema.users.id }).from(schema.users)
-        .where(eq(schema.users.email, email)).limit(1);
-      if (emailTaken[0] && emailTaken[0].id !== userId) email = userRows[0].email ?? gUser.email;
-    }
-    await db.update(schema.users).set({
-      displayName: userRows[0].displayNameSource === "user" ? userRows[0].displayName : gUser.name,
-      displayNameSource: userRows[0].displayNameSource === "user" ? "user" : verified.identity.name ? "idp" : "provisional",
-      avatarUrl: gUser.picture ?? userRows[0].avatarUrl, email,
-      lastLoginAt: now, updatedAt: now,
-    }).where(eq(schema.users.id, userId));
-  } else {
-    const sameEmail = await db.select({ id: schema.users.id }).from(schema.users)
-      .where(eq(schema.users.email, gUser.email)).limit(1);
-    if (sameEmail.length > 0) {
-      throw AppError.conflict("Sign in to your existing Cernere account and link Google from your profile");
-    }
-    const countResult = await db.select({ count: sql<number>`count(*)` }).from(schema.users);
-    const userRole = Number(countResult[0]?.count ?? 0) === 0 ? "admin" : "general";
-    userId = crypto.randomUUID();
-    await db.insert(schema.users).values({
-      id: userId, googleId: gUser.id, login: `google_${userId}`,
-      displayName: gUser.name, avatarUrl: gUser.picture, email: gUser.email,
-      displayNameSource: verified.identity.name ? "idp" : "provisional",
-      role: userRole,
-      lastLoginAt: now, createdAt: now, updatedAt: now,
-    });
-  }
-
-  // Use the common short-lived Cr exchange code, with the current DB profile/role.
-  const authCode = await issueAuthCodeForUserId(userId);
-  if (!authCode) throw AppError.unauthorized("Google sign-in account is unavailable");
-
-  logAuthEvent({ event: "user.oauth", userId, email: gUser.email, provider: "google", composite: isCompositeGoogle, ip: ctx.ip, userAgent: ctx.userAgent });
-
-  if (isAborted()) return;
-
-  // Composite flow: composite callback にリダイレクト
-  if (isCompositeGoogle) {
-    const compositeOrigin = stateParam!.split(":").slice(1, -1).join(":");
-    // VULNWEB-001: 送信先 origin を許可リストで検証。 不正なら authCode を渡さない。
-    if (!isCompositeTargetAllowed(compositeOrigin)) {
-      logAuthEvent({ event: "user.oauth.failed", userId, provider: "google", composite: true, reason: "redirect target not allowlisted", ip: ctx.ip, userAgent: ctx.userAgent });
-      redirect(res, `${frontend}?authError=${encodeURIComponent("Invalid redirect target")}`, [
-        deleteCookieHeader(CSRF_COOKIE),
-      ]);
-      return;
-    }
-    redirect(res, `${frontend}/composite/callback?code=${authCode}&origin=${encodeURIComponent(compositeOrigin)}`, [
-      deleteCookieHeader(CSRF_COOKIE),
-    ]);
-    return;
-  }
-
-  const callback = new URL(`${frontend}/login/google/callback`);
-  callback.searchParams.set("code", authCode);
-  if (!verified.browserState) throw AppError.unauthorized("Google sign-in browser binding is missing");
-  callback.searchParams.set("browser_state", verified.browserState);
-  if (verified.oidcRequestId) {
-    callback.searchParams.set("redirect", `/oidc/consent?request_id=${verified.oidcRequestId}`);
-  }
-  redirect(res, callback.toString(), [
-    deleteCookieHeader(CSRF_COOKIE),
-  ]);
 }

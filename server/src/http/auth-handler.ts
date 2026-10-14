@@ -6,7 +6,6 @@
  */
 
 import bcrypt from "bcryptjs";
-import { beginMfaChallenge } from "../auth/mfa-challenge.js";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
@@ -17,19 +16,17 @@ import { hashRefreshToken } from "../auth/token-hash.js";
 import { isPasetoEnabled, signProjectToken } from "../auth/paseto.js";
 import { checkRateLimit, redis } from "../redis.js";
 import {
-  logUserLogin,
-  logUserLoginFailed,
-  logUserRegister,
   logProjectLogin,
   logProjectLoginFailed,
   logAuthEvent,
 } from "../logging/auth-logger.js";
 import { devLog } from "../logging/dev-logger.js";
 import { issueAuthCodeForUserId } from "../auth/auth-code.js";
-import { completedAuthentication, readAuthenticationEvidence } from "../lib/authentication-evidence.js";
+import { readAuthenticationEvidence } from "../lib/authentication-evidence.js";
 import { isCompositeTargetAllowed } from "../auth/composite-redirect.js";
 import { AppError } from "../error.js";
-import { canUnlinkProvider } from "../auth/login-methods.js";
+import { retiredLoginResult } from "../auth/retired-login.js";
+import { removeAlertTarget } from "../notify/alert-targets.js";
 import { actionProofStore, httpActionBinding } from "../auth/action-proof.js";
 import { prepareOAuthLinkForUser } from "./oauth-handler.js";
 import type { OAuthLinkProvider } from "../auth/oauth-link.js";
@@ -54,8 +51,10 @@ export async function handleAuthRoute(
 ): Promise<RouteResult> {
   devLog("auth.route", { action, ip: ctx.ip });
   switch (action) {
-    case "register": return register(parseBody(body), ctx);
-    case "login": return login(parseBody(body), ctx);
+    // メール+パスワードの登録・ログインは廃止 (パスキーのみ)。
+    // /login はサービス・ツールの client 認証も兼ねるため、そちらは残す。
+    case "register": return retiredLoginResult("password");
+    case "login": return clientCredentialLogin(parseBody(body), ctx);
     case "refresh": return refresh(parseBody(body));
     case "logout": return logout(parseBody(body));
     case "verify": return verify(parseBody(body), ctx);
@@ -77,122 +76,20 @@ function parseBody(body: string): Record<string, unknown> {
   try { return JSON.parse(body); } catch { return {}; }
 }
 
-async function register(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
-  const name = p.name as string | undefined;
-  const email = p.email as string | undefined;
-  const password = p.password as string | undefined;
-  devLog("auth.register.begin", { email, ip: ctx.ip });
-
-  if (!name || !email || !password) throw new Error("name, email, password are required");
-  if (password.length < 8) throw new Error("Password must be at least 8 characters");
-
-  devLog("auth.register.rateLimit", { email });
-  await checkRateLimit(`register:${email}`, 5, 600);
-
-  devLog("auth.register.checkExisting", { email });
-  const existing = await db.select({ id: schema.users.id })
-    .from(schema.users).where(eq(schema.users.email, email)).limit(1);
-  if (existing.length > 0) throw new Error("Registration failed. Please check your input and try again.");
-
-  devLog("auth.register.hashPassword");
-  const passwordHash = await bcrypt.hash(password, 12);
-  const countResult = await db.select({ count: sql<number>`count(*)` }).from(schema.users);
-  const role = Number(countResult[0]?.count ?? 0) === 0 ? "admin" : "general";
-  const userId = crypto.randomUUID();
-  const now = new Date();
-
-  devLog("auth.register.insertUser", { userId, role });
-  await db.insert(schema.users).values({
-    id: userId, login: name, displayName: name, email, role, passwordHash,
-    createdAt: now, updatedAt: now,
-  });
-
-  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(userId, role);
-  const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
-  await db.insert(schema.refreshSessions).values({
-    authEpoch, id: crypto.randomUUID(), userId, refreshToken: hashRefreshToken(refreshToken), expiresAt,
-  });
-
-  logUserRegister(userId, email, "email", { ip: ctx.ip });
-
-  return {
-    status: "201 Created",
-    data: {
-      user: { id: userId, displayName: name, email, role },
-      accessToken, refreshToken,
-    },
-  };
-}
-
-async function login(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
-  // Tool client login
+/**
+ * /login の非人間経路 (tool の client_credentials / project の project_credentials)。
+ * 利用者のメール+パスワードは 410 (spec/plan/2026-10-14-passkey-only-authentication.md §1)。
+ */
+async function clientCredentialLogin(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
   if (p.grant_type === "client_credentials") {
     devLog("auth.login.toolClient", { clientId: p.client_id });
     return toolLogin(p.client_id as string, p.client_secret as string);
   }
-  // Project login (managed_projects)
   if (p.grant_type === "project_credentials") {
     devLog("auth.login.project", { clientId: p.client_id });
     return projectLogin(p.client_id as string, p.client_secret as string, ctx);
   }
-
-  const email = p.email as string | undefined;
-  const password = p.password as string | undefined;
-  devLog("auth.login.user.begin", { email, ip: ctx.ip });
-  if (!email || !password) {
-    logUserLoginFailed(email, "email", "missing credentials", ctx);
-    throw new Error("email and password are required");
-  }
-
-  devLog("auth.login.user.rateLimit", { email });
-  // per-email: 標的アカウントへの総当たりを絞る。
-  await checkRateLimit(`login:${email}`, 10, 900);
-  // per-IP: 1 IP から多数アカウントへ 1 発ずつ撒く credential stuffing を絞る。
-  // NAT/オフィス共有 IP も想定し email 側より緩めに取る。
-  await checkRateLimit(`login-ip:${ctx.ip ?? "unknown"}`, 50, 900);
-
-  devLog("auth.login.user.lookup", { email });
-  const rows = await db.select().from(schema.users)
-    .where(eq(schema.users.email, email)).limit(1);
-  const user = rows[0];
-  if (!user || !user.passwordHash) {
-    devLog("auth.login.user.notFound", { email });
-    logUserLoginFailed(email, "email", "invalid credentials", ctx);
-    throw new Error("Unauthorized: Invalid email or password");
-  }
-
-  devLog("auth.login.user.verify", { userId: user.id });
-  const valid = await bcrypt.compare(password, user.passwordHash);
-  if (!valid) {
-    devLog("auth.login.user.invalid", { userId: user.id });
-    logUserLoginFailed(email, "email", "invalid credentials", ctx);
-    throw new Error("Unauthorized: Invalid email or password");
-  }
-
-  if (user.mfaEnabled) {
-    return { status: "200 OK", data: await beginMfaChallenge(user, { purpose: "rest" }) };
-  }
-
-  const now = new Date();
-  await db.update(schema.users).set({ lastLoginAt: now, updatedAt: now })
-    .where(eq(schema.users.id, user.id));
-
-  const authentication = completedAuthentication("password", user.mfaRevision, now.getTime());
-  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(user.id, user.role, authentication, { authEpoch: user.authEpoch });
-  const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
-  await db.insert(schema.refreshSessions).values({
-    authEpoch, id: crypto.randomUUID(), userId: user.id, refreshToken: hashRefreshToken(refreshToken), expiresAt, authentication,
-  });
-
-  logUserLogin(user.id, user.email, "email", ctx);
-
-  return {
-    status: "200 OK",
-    data: {
-      user: { id: user.id, displayName: user.displayName, email: user.email, role: user.role },
-      accessToken, refreshToken,
-    },
-  };
+  return retiredLoginResult("password");
 }
 
 async function refresh(p: Record<string, unknown>): Promise<RouteResult> {
@@ -422,7 +319,7 @@ async function unlink(p: Record<string, unknown>, authHeader: string, ctx: Reque
   const user = rows[0];
   if (!user) throw new Error("Unauthorized: User not found");
 
-  const hasPasskey = await requireCredentialChangeProofIfAvailable(
+  await requireCredentialChangeProofIfAvailable(
     user.id,
     token,
     ctx.actionProof,
@@ -430,34 +327,23 @@ async function unlink(p: Record<string, unknown>, authHeader: string, ctx: Reque
     provider,
   );
 
-  // Discord is not a login method. Other providers may only be removed if an
-  // alternative password, passkey, or OAuth login remains.
-  if (provider !== "discord") {
-    if (!canUnlinkProvider(provider, {
-      hasPassword: !!user.passwordHash,
-      passkeyCount: hasPasskey ? 1 : 0,
-      hasGitHubAuth: !!user.githubId,
-      hasGoogleAuth: !!user.googleId,
-    })) {
-      logAuthEvent({
-        event: "user.oauth.failed", userId: user.id, provider, unlinkAttempt: true,
-        error: "refused to unlink the last login method", ip: ctx.ip, userAgent: ctx.userAgent,
-      });
-      throw AppError.conflict("Cannot unlink the last login method");
-    }
-  }
-
+  // OAuth 連携はログイン手段ではない (パスキーのみ)。外してもログインには影響しないが、
+  // ログイン通知の宛先は外し、外す前の宛先に最後の通知を残す (SPEC-LOGIN-ALERT)。
   const now = new Date();
-  if (provider === "github") {
-    await db.update(schema.users).set({ githubId: null, updatedAt: now }).where(eq(schema.users.id, user.id));
-  } else if (provider === "google") {
-    await db.update(schema.users).set({
-      googleId: null, googleAccessToken: null, googleRefreshToken: null, googleTokenExpiresAt: null, googleScopes: null, updatedAt: now,
-    }).where(eq(schema.users.id, user.id));
-  } else {
-    await db.update(schema.users).set({ discordId: null, discordUsername: null, updatedAt: now })
-      .where(eq(schema.users.id, user.id));
-  }
+  await db.transaction(async (tx) => {
+    if (provider === "github") {
+      await tx.update(schema.users).set({ githubId: null, updatedAt: now }).where(eq(schema.users.id, user.id));
+    } else if (provider === "google") {
+      await removeAlertTarget(tx, user.id, "google");
+      await tx.update(schema.users).set({
+        googleId: null, googleVerifiedEmail: null, googleAccessToken: null, googleRefreshToken: null, googleTokenExpiresAt: null, googleScopes: null, updatedAt: now,
+      }).where(eq(schema.users.id, user.id));
+    } else {
+      await removeAlertTarget(tx, user.id, "discord");
+      await tx.update(schema.users).set({ discordId: null, discordUsername: null, updatedAt: now })
+        .where(eq(schema.users.id, user.id));
+    }
+  });
   // link と同じく解除も監査対象 (RULE.md Step 8)。
   logAuthEvent({ event: "user.oauth", userId: user.id, provider, linked: false, ip: ctx.ip, userAgent: ctx.userAgent });
   return { status: "200 OK", data: { ok: true } };

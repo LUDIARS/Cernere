@@ -5,6 +5,8 @@ import { z } from "zod";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { AppError } from "../error.js";
+import { recordSecurityEvent } from "../notify/security-events.js";
+import { invalidateSelfRecovery } from "./recovery-code.js";
 
 export const REGISTRATION_GRANT_TTL_MS = 15 * 60 * 1000;
 export interface IssuedGrant { grantId: string; token: string; expiresAt: Date }
@@ -105,6 +107,9 @@ export async function completeRecovery(params: {
     await tx.delete(schema.refreshSessions).where(eq(schema.refreshSessions.userId, user.id));
     await tx.update(schema.users).set({ authEpoch: user.authEpoch + 1, mfaRevision: user.mfaRevision + 1 }).where(eq(schema.users.id, user.id));
     await tx.update(schema.registrationGrants).set({ usedAt: now }).where(eq(schema.registrationGrants.id, grant.id));
+    // 盗まれた旧リカバリー QR や保留中の自己回復で再侵入させない (SPEC-RECOVERY-QR)。
+    await invalidateSelfRecovery(tx, user.id, now);
+    await recordSecurityEvent(tx, user.id, "recovery.operator");
   });
 }
 

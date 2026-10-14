@@ -8,8 +8,8 @@ import { AppError } from "../error.js";
 import { redis, checkRateLimit } from "../redis.js";
 import { passkeys } from "../db/schema.js";
 import { resolveGrant, completeRecovery, hashGrantToken } from "../auth/registration-grant.js";
-import { mergeWebauthnOrigins } from "../auth/webauthn-origins.js";
 import { logAuthEvent } from "../logging/auth-logger.js";
+import { sessionRegistry } from "../ws/session-registry.js";
 
 const pendingSchema = z.object({ userId: z.string().uuid(), grantHash: z.string(), challenge: z.string(), expiresAt: z.number() }).strict();
 const inputSchema = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/), ceremonyId: z.string().uuid().optional(), response: z.unknown().optional() }).strict();
@@ -41,7 +41,7 @@ export async function handlePasskeyRecovery(action: string, input: unknown, ip?:
   }
   const response = p.response as RegistrationResponseJSON;
   const verification = await verifyRegistrationResponse({ response, expectedChallenge: pending.data.challenge,
-    expectedOrigin: mergeWebauthnOrigins(config.webauthnOrigins, config.compositeAllowedOrigins), expectedRPID: config.webauthnRpId, requireUserVerification: true });
+    expectedOrigin: config.webauthnOrigins, expectedRPID: config.webauthnRpId, requireUserVerification: true });
   if (!verification.verified || !verification.registrationInfo) throw AppError.unauthorized("Passkey verification failed");
   const info = verification.registrationInfo;
   await completeRecovery({ token: p.token, expectedSubjectUserId: pending.data.userId, insertPasskey: async (tx, userId) => {
@@ -56,5 +56,7 @@ export async function handlePasskeyRecovery(action: string, input: unknown, ip?:
       backedUp: info.credentialBackedUp, transports: response.response.transports ?? [], discoverable: true, aaguid: info.aaguid });
   } });
   logAuthEvent({ event: "user.passkey.recovered", userId: pending.data.userId });
+  // epoch は進んでいるので旧 WS からの操作は拒否されるが、開いたままのソケットもすぐ閉じる。
+  sessionRegistry.closeUser(pending.data.userId, "Account recovered");
   return { status: "200 OK", data: { recovered: true } };
 }

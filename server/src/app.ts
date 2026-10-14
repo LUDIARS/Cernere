@@ -162,6 +162,8 @@ function readBody(
   return readBodyBuffer(res, maxBytes, onAborted).then((body) => body.toString("utf8"));
 }
 
+const NO_STORE_HEADERS = { "Cache-Control": "no-store" } as const;
+
 function jsonResponse(
   res: uWS.HttpResponse,
   status: string,
@@ -550,7 +552,8 @@ export function createApp() {
       if (aborted) return;
       const result = await handlePasskeyRoute(action, body, authHeader, { ip, userAgent, hostname, origin }, "", actionProof);
       devLog("http.passkey.ok", { action, status: result.status });
-      jsonResponse(res, result.status, result.data, result.cookies);
+      // 端末追加の QR URL やリカバリーコードなど、一度きりの秘密を返す応答がある。
+      jsonResponse(res, result.status, result.data, result.cookies, NO_STORE_HEADERS);
     } catch (err) {
       if (aborted) return;
       const { status, message, code } = classifyError(err);

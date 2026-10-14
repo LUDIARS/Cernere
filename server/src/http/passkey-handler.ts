@@ -46,9 +46,8 @@ import { config } from "../config.js";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { redis, checkRateLimit } from "../redis.js";
-import { generateAccessToken, generateTokenPair, verifyToken, extractBearerToken, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
+import { generateAccessToken, generateTokenPair, verifyToken, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
 import { completedAuthentication } from "../lib/authentication-evidence.js";
-import { assertUserSessionCurrent, type UserSessionState } from "../auth/user-session-state.js";
 import { handlePasskeyRecovery } from "./passkey-recovery-handler.js";
 import { hashRefreshToken } from "../auth/token-hash.js";
 import {
@@ -61,13 +60,34 @@ import { logUserLogin, logUserLoginFailed, logUserRegister } from "../logging/au
 import { devError, devLog } from "../logging/dev-logger.js";
 import { requireExportAuth } from "./export-auth.js";
 import { actionProofStore, httpActionBinding } from "../auth/action-proof.js";
-import { mergeWebauthnOrigins } from "../auth/webauthn-origins.js";
+import {
+  CERNERE_ORIGINS,
+  CHALLENGE_TTL_SEC,
+  ORIGINS,
+  REGISTRATION_AUTHENTICATOR_SELECTION,
+  RP_ID,
+  RP_NAME,
+} from "../auth/webauthn-policy.js";
 import {
   passkeyAnonymousRateLimitScope,
   passkeyLoginRateLimitScope,
 } from "../auth/passkey-rate-limit.js";
 import { publicPasskeyCompositeError } from "../auth/passkey-public-error.js";
 import { AppError } from "../error.js";
+import { summarizeUserAgent } from "../lib/user-agent-summary.js";
+import { recordSecurityEvent } from "../notify/security-events.js";
+import { requireUserId } from "./bearer-user.js";
+import { RECOVERY_CODE_ACTIONS, handleRecoveryCodeRoute } from "./recovery-code-handler.js";
+import {
+  approvePairing,
+  beginPairingRegistration,
+  createDevicePairing,
+  finishPairingRegistration,
+  getPairingStatus,
+  pairingApprovalResource,
+  pairingCandidateId,
+  rejectPairing,
+} from "../auth/device-pairing.js";
 
 interface RouteResult { status: string; data: unknown; cookies?: string[] }
 export interface RequestCtx {
@@ -83,35 +103,14 @@ export interface RequestCtx {
   projectKey?: string;
 }
 
-const RP_NAME = config.webauthnRpName;
-const RP_ID = config.webauthnRpId;
-// 埋め込み SDK を描画する first-party サービスの origin でも ceremony が走るため、
-// composite の許可 origin を expectedOrigin に合流させる (auth/webauthn-origins.ts)。
-const ORIGINS = mergeWebauthnOrigins(config.webauthnOrigins, config.compositeAllowedOrigins);
-const CHALLENGE_TTL_SEC = 5 * 60;
 
-/**
- * 登録時の認証器ポリシー (3 経路 = signup / profile 追加 / 新端末登録 で共通)。
- *
- *   - residentKey "required"
- *       usernameless (メール未入力) ログインには discoverable credential が要る。
- *       "preferred" だと非 discoverable が作られ得て、 認証器が候補を出せない。
- *   - userVerification "required"
- *       出席チェックイン (Ostiarius) が assertion を userVerification:'required' で
- *       検証するため、 登録時点で UV (生体/PIN) を必須化して整合させる。 端末貸し
- *       対策が設計の核なので、 ここはセキュア方向に寄せる。
- */
-const REGISTRATION_AUTHENTICATOR_SELECTION = {
-  residentKey: "required",
-  userVerification: "required",
-} as const;
+// 登録とログインを区別しない入口 (SPEC-PASSKEY-CONTINUE)。名前は初回ログインの後に入れ
+// (SPEC-DISPLAY-NAME-DEFERRED)、メールは登録時に集めない (SPEC-EMAIL-OPTIONAL-MFA)。
+// 旧クライアントが name/email を送ってきたら黙って捨てず 400 にする。
+const signupBeginSchema = z.object({}).strict();
 
-const signupBeginSchema = z.object({
-  name: z.string().trim().min(1).max(80),
-  // メールアドレスは任意。 Windows Hello 等の passkey だけで登録できる
-  // (email 無しアカウントの他デバイス追加は device-link 経由)。
-  email: z.string().trim().toLowerCase().email().max(254).optional(),
-}).strict();
+/** 名前を入れる前の表示名の出所。画面はこの値のユーザーを名前入力へ送る。 */
+export const DISPLAY_NAME_SOURCE_UNSET = "unset";
 
 const signupFinishSchema = z.object({
   signupId: z.string().uuid(),
@@ -121,8 +120,6 @@ const signupFinishSchema = z.object({
 interface PendingPasskeySignup {
   challenge: string;
   userId: string;
-  name: string;
-  email: string | null;
 }
 
 export async function handlePasskeyRoute(
@@ -134,6 +131,9 @@ export async function handlePasskeyRoute(
   actionProof: string = "",
 ): Promise<RouteResult> {
   devLog("passkey.route", { action, ip: ctx.ip });
+  if (RECOVERY_CODE_ACTIONS.has(action)) {
+    return handleRecoveryCodeRoute(action, parseBody(body), authHeader, actionProof, ctx);
+  }
   switch (action) {
     case "recovery-begin": case "recovery-finish": return handlePasskeyRecovery(action, parseBody(body), ctx.ip);
     case "signup-begin":    return signupBegin(parseBody(body), ctx);
@@ -150,12 +150,14 @@ export async function handlePasskeyRoute(
     /* 埋め込み SDK からのパスキー新規登録。 signup-finish と同じ検証・作成を行うが
      * JWT ではなく authCode を返し、 呼び出し元サービスが exchange で受け取る。 */
     case "composite-signup-finish": return compositeSignupFinish(parseBody(body), ctx);
-    /* 他デバイス登録リンク: ログイン済み端末で one-time URL を発行し、 新しい端末が
-     * その URL から自分の passkey (Windows Hello / スマホ生体認証) を同じアカウントへ
-     * 追加する。 email 無しアカウントでも新端末を追加できる唯一の経路。 */
-    case "device-link":            return deviceLinkCreate(authHeader, actionProof);
-    case "device-register-begin":  return deviceRegisterBegin(parseBody(body), ctx);
-    case "device-register-finish": return deviceRegisterFinish(parseBody(body), ctx);
+    /* 別端末の追加 (SPEC-DEVICE-PAIRING): 元端末が QR を出し、読んだ端末のキーは候補として
+     * 保留する。元端末が照合番号を確かめて承認したときだけ有効になる。 */
+    case "device-link":             return pairingCreate(authHeader);
+    case "device-register-begin":   return pairingRegisterBegin(parseBody(body), ctx);
+    case "device-register-finish":  return pairingRegisterFinish(parseBody(body), ctx);
+    case "device-pairing-status":   return pairingStatus(authHeader, parseBody(body));
+    case "device-pairing-approve":  return pairingApprove(authHeader, parseBody(body), actionProof);
+    case "device-pairing-reject":   return pairingReject(authHeader, parseBody(body));
     case "list":            return listPasskeys(authHeader);
     case "delete":          return deletePasskey(authHeader, parseBody(body), actionProof);
     /* Ostiarius 等の会場ゲートウェイがオフライン検証用に、 登録済み passkey の
@@ -212,11 +214,14 @@ export async function executePasskeyCompositeAction(
   ctx: RequestCtx,
 ): Promise<unknown> {
   try {
+    // 新規作成は Cr origin の popup でだけ行う。サービス backend を経由させない
+    // (オンボーディングとリカバリー QR を埋め込み先に通さないため。SPEC-PASSKEY-CONTINUE)。
+    if (action === "passkey-signup-begin" || action === "passkey-signup-finish") {
+      throw AppError.withCode(410, "signup_moved_to_popup", "Create the account in the Cernere sign-in window");
+    }
     switch (action) {
       case "passkey-login-begin":   return (await loginBegin(payload, ctx)).data;
       case "passkey-login-finish":  return (await compositeLoginFinish(payload, ctx)).data;
-      case "passkey-signup-begin":  return (await signupBegin(payload, ctx)).data;
-      case "passkey-signup-finish": return (await compositeSignupFinish(payload, ctx)).data;
     }
   } catch (error) {
     const publicError = publicPasskeyCompositeError(error);
@@ -227,15 +232,6 @@ export async function executePasskeyCompositeAction(
   }
 }
 
-async function requireUserId(authHeader: string): Promise<{ id: string; role: string; token: string }> {
-  const token = extractBearerToken(authHeader);
-  if (!token) throw new Error("Unauthorized: missing bearer token");
-  const payload = await verifyToken(token);
-  if (!payload || typeof payload.sub !== "string") {
-    throw new Error("Unauthorized: invalid token");
-  }
-  return { id: payload.sub, role: (payload.role as string) || "general", token };
-}
 
 /**
  * 生きている passkey だけを対象にする述語 (§7.1)。
@@ -256,22 +252,6 @@ function signupKey(signupId: string): string {
   return `passkey:signup:${signupId}`;
 }
 
-// device-link token は URL に載るため、 Redis には SHA-256 digest だけを保存する
-// (spec/plan/passkey-default-authentication.md §7.3 registration_grants の簡略形)。
-const DEVICE_LINK_TTL_SEC = 15 * 60;
-
-function deviceLinkKey(tokenDigest: string): string {
-  return `passkey:device-link:${tokenDigest}`;
-}
-
-function deviceRegisterKey(ceremonyId: string): string {
-  return `passkey:device-register:${ceremonyId}`;
-}
-
-function digestDeviceLinkToken(token: string): string {
-  return crypto.createHash("sha256").update(token).digest("base64url");
-}
-
 // export 用の認可 (admin / service token) は他の export ルートとも共有するため
 // ./export-auth.ts に切り出し済み (requireExportAuth を import して使う)。
 
@@ -283,25 +263,20 @@ function digestDeviceLinkToken(token: string): string {
  */
 async function signupBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
   const parsed = signupBeginSchema.safeParse(p);
-  if (!parsed.success) throw new Error("A valid name (and optional email) is required");
-  const { name, email } = parsed.data;
+  if (!parsed.success) throw AppError.badRequest("Passkey sign-up takes no name or email; set your name after signing in");
   await checkRateLimit(`passkey-signup:${passkeyAnonymousRateLimitScope(ctx)}`, 5, 600);
-
-  if (email) {
-    const existing = await db.select({ id: schema.users.id })
-      .from(schema.users).where(eq(schema.users.email, email)).limit(1);
-    if (existing.length > 0) {
-      throw new Error("Registration failed. Please check your input and try again.");
-    }
-  }
+  // アカウント量産の全体上限 (IP を変えて回す相手にも効かせる)。
+  await checkRateLimit("passkey-signup:global", 300, 600);
 
   const userId = crypto.randomUUID();
+  // 認証器のアカウント選択に出る名前。利用者の名前はまだ無いので、ID の先頭で区別できるようにする。
+  const authenticatorLabel = `Cernere ${userId.slice(0, 8)}`;
   const signupId = crypto.randomUUID();
   const options = await generateRegistrationOptions({
     rpName: RP_NAME,
     rpID: RP_ID,
-    userName: email ?? name,
-    userDisplayName: name,
+    userName: authenticatorLabel,
+    userDisplayName: authenticatorLabel,
     userID: new TextEncoder().encode(userId),
     attestationType: "none",
     excludeCredentials: [],
@@ -310,8 +285,6 @@ async function signupBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise
   const pending: PendingPasskeySignup = {
     challenge: options.challenge,
     userId,
-    name,
-    email: email ?? null,
   };
   await redis.set(signupKey(signupId), JSON.stringify(pending), "EX", CHALLENGE_TTL_SEC);
   return { status: "200 OK", data: { signupId, options } };
@@ -320,8 +293,6 @@ async function signupBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise
 /** WebAuthn 検証を通ってアカウントが作成された結果。 発行物 (JWT / authCode) は呼び出し側が決める。 */
 interface SignedUpAccount {
   userId: string;
-  name: string;
-  email: string | null;
   role: string;
 }
 
@@ -352,7 +323,7 @@ async function finalizePasskeySignup(
   const verification = await verifyRegistrationResponse({
     response,
     expectedChallenge: pending.challenge,
-    expectedOrigin: ORIGINS,
+    expectedOrigin: CERNERE_ORIGINS,
     expectedRPID: RP_ID,
     requireUserVerification: true,
   });
@@ -363,28 +334,18 @@ async function finalizePasskeySignup(
   const info = verification.registrationInfo;
   const credential = info.credential;
   const now = new Date();
-  const countResult = await db.select({ count: sql<number>`count(*)` }).from(schema.users);
-  const role = Number(countResult[0]?.count ?? 0) === 0 ? "admin" : "general";
-  const account: SignedUpAccount = {
-    userId: pending.userId,
-    name: pending.name,
-    email: pending.email,
-    role,
-  };
+  // 先着の公開 signup に管理権限を渡さない。admin は bootstrap-admin で明示的に付ける
+  // (SPEC-ADMIN-BOOTSTRAP)。
+  const role = "general";
+  const account: SignedUpAccount = { userId: pending.userId, role };
 
   await db.transaction(async (tx) => {
-    if (pending.email) {
-      const existing = await tx.select({ id: schema.users.id })
-        .from(schema.users).where(eq(schema.users.email, pending.email)).limit(1);
-      if (existing.length > 0) {
-        throw new Error("Registration failed. Please check your input and try again.");
-      }
-    }
     await tx.insert(schema.users).values({
       id: pending.userId,
-      login: pending.name,
-      displayName: pending.name,
-      email: pending.email,
+      login: "",
+      displayName: "",
+      displayNameSource: DISPLAY_NAME_SOURCE_UNSET,
+      email: null,
       role,
       passwordHash: null,
       createdAt: now,
@@ -406,7 +367,7 @@ async function finalizePasskeySignup(
     if (withinTx) await withinTx(tx, account);
   });
 
-  logUserRegister(pending.userId, pending.email ?? `(passkey-only) ${pending.name}`, "passkey", { ip: ctx.ip });
+  logUserRegister(pending.userId, "(passkey-only)", "passkey", { ip: ctx.ip });
   return account;
 }
 
@@ -430,9 +391,10 @@ async function signupFinish(p: Record<string, unknown>, ctx: RequestCtx): Promis
     data: {
       user: {
         id: account.userId,
-        displayName: account.name,
-        email: account.email,
+        displayName: null,
+        email: null,
         role: account.role,
+        needsProfile: true,
       },
       accessToken: issued.accessToken,
       refreshToken: issued.refreshToken,
@@ -450,8 +412,8 @@ async function compositeSignupFinish(p: Record<string, unknown>, ctx: RequestCtx
     await ensureProjectRowForComposite(account.userId, ctx);
     const authCode = await issueAuthCode({
       userId: account.userId,
-      displayName: account.name,
-      email: account.email,
+      displayName: "",
+      email: null,
       role: account.role,
     });
     return { status: "201 Created", data: { authCode } };
@@ -533,18 +495,21 @@ async function registerFinish(authHeader: string, p: Record<string, unknown>): P
 
   const info = verification.registrationInfo;
   const credential = info.credential;
-  await db.insert(schema.passkeys).values({
-    id: crypto.randomUUID(),
-    userId,
-    credentialId: credential.id,
-    publicKey: Buffer.from(credential.publicKey),
-    counter: credential.counter,
-    deviceType: info.credentialDeviceType,           // 'singleDevice' | 'multiDevice'
-    backedUp: info.credentialBackedUp,
-    transports: (response.response.transports ?? []) as unknown as Record<string, unknown>[],
-    nickname,
-    aaguid: info.aaguid,
-    createdAt: new Date(),
+  await db.transaction(async (tx) => {
+    await tx.insert(schema.passkeys).values({
+      id: crypto.randomUUID(),
+      userId,
+      credentialId: credential.id,
+      publicKey: Buffer.from(credential.publicKey),
+      counter: credential.counter,
+      deviceType: info.credentialDeviceType,           // 'singleDevice' | 'multiDevice'
+      backedUp: info.credentialBackedUp,
+      transports: (response.response.transports ?? []) as unknown as Record<string, unknown>[],
+      nickname,
+      aaguid: info.aaguid,
+      createdAt: new Date(),
+    });
+    await recordSecurityEvent(tx, userId, "passkey.added", { device: nickname ?? undefined });
   });
   await redis.del(challengeKey("reg", userId));
   devLog("passkey.register.ok", { userId, credentialId: credential.id });
@@ -663,6 +628,8 @@ async function verifyPasskeyAssertion(
     }
     await tx.update(schema.passkeys).set({ counter: newCounter, lastUsedAt: new Date() }).where(eq(schema.passkeys.id, active.id));
     await tx.update(schema.users).set({ lastLoginAt: new Date(), updatedAt: new Date() }).where(eq(schema.users.id, current.id));
+    // 新しいセッションの確立を本人へ知らせる (SPEC-LOGIN-ALERT)。REST・composite・端末セッションの全経路がここを通る。
+    await recordSecurityEvent(tx, current.id, "session.new", { device: summarizeUserAgent(ctx.userAgent) });
     return current;
   });
   return { user, challengeOwner, passkeyId: cred.id, verifiedAt };
@@ -723,178 +690,67 @@ async function compositeLoginFinish(p: Record<string, unknown>, ctx: RequestCtx)
   return { status: "200 OK", data: { authCode } };
 }
 
-// ─── 他デバイス登録 (one-time device link) ────────────────────────
-//
-// フロー:
-//   1. ログイン済み端末: POST device-link (要 step-up proof) → one-time URL
-//   2. 新しい端末: URL を開き POST device-register-begin { token }
-//      → grant を GETDEL (単回) して registration options + ceremonyId
-//   3. 新しい端末: POST device-register-finish { ceremonyId, response }
-//      → verify 成功で passkey 追加 + その端末をログイン状態にする
-//
-// token は 32 byte 乱数・TTL 15 分・単回。 begin 時点で消費するため、 ceremony を
-// 中断した場合はリンクの再発行が必要 (fail-closed)。
+// ─── 別端末の追加 (SPEC-DEVICE-PAIRING) ─────────────────────────
 
-async function deviceLinkCreate(
-  authHeader: string,
-  actionProof: string,
-): Promise<RouteResult> {
-  const { id: userId, token: bearer } = await requireUserId(authHeader);
-  const authorization = await verifyToken(bearer);
-  const user = (await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1))[0];
-  if (!user) throw new Error("Unauthorized: user not found");
-  await checkRateLimit(`passkey-device-link:${userId}`, 5, 600);
+const pairingIdSchema = z.object({ pairingId: z.string().uuid() }).strict();
+const pairingApproveSchema = z.object({ pairingId: z.string().uuid(), matchCode: z.string().regex(/^\d{4}$/) }).strict();
 
-  // passkey を既に持つユーザには fresh step-up を要求する (register-begin と同じ方針)。
-  // パスワード/OAuth のみのユーザは step-up に使える passkey が無いため bootstrap 扱い。
-  const existing = await db.select({ id: schema.passkeys.id })
-    .from(schema.passkeys).where(activePasskeysOf(userId));
-  if (existing.length > 0) {
-    await actionProofStore.consume(actionProof, {
-      userId,
-      binding: httpActionBinding(bearer),
-      action: "passkey.device_link",
-      resource: userId,
-    });
-  }
-
-  const linkToken = crypto.randomBytes(32).toString("base64url");
-  await redis.set(
-    deviceLinkKey(digestDeviceLinkToken(linkToken)),
-    JSON.stringify({ userId, authorization }),
-    "EX",
-    DEVICE_LINK_TTL_SEC,
-  );
-
-  const url = new URL("/device-register", config.frontendUrl);
-  url.searchParams.set("token", linkToken);
-  devLog("passkey.deviceLink.issued", { userId });
-  return { status: "200 OK", data: { url: url.toString(), expiresIn: DEVICE_LINK_TTL_SEC } };
+async function pairingCreate(authHeader: string): Promise<RouteResult> {
+  const { id: userId } = await requireUserId(authHeader);
+  await checkRateLimit(`passkey-pairing-create:${userId}`, 10, 600);
+  return { status: "200 OK", data: await createDevicePairing(userId) };
 }
 
-async function deviceRegisterBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
-  const linkToken = typeof p.token === "string" ? p.token : "";
-  if (!linkToken || linkToken.length > 512) throw new Error("token is required");
-  await checkRateLimit(`passkey-device-register:${ctx.ip ?? "anon"}`, 10, 600);
-
-  // GETDEL で grant を単回消費 (並行 begin は 1 件だけ成功する)。
-  const raw = await redis.getdel(deviceLinkKey(digestDeviceLinkToken(linkToken)));
-  if (!raw) throw new Error("Registration link is invalid, expired, or already used");
-  const { userId, authorization } = JSON.parse(raw) as { userId: string; authorization?: UserSessionState };
-  if (!authorization || authorization.sub !== userId) throw AppError.unauthorized("Registration link must be reissued");
-  await assertUserSessionCurrent(authorization);
-
-  const user = (await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1))[0];
-  if (!user) throw new Error("Registration link is invalid, expired, or already used");
-
-  const existing = await db.select({
-    credentialId: schema.passkeys.credentialId,
-    transports: schema.passkeys.transports,
-  }).from(schema.passkeys).where(activePasskeysOf(userId));
-
-  const options = await generateRegistrationOptions({
-    rpName: RP_NAME,
-    rpID: RP_ID,
-    userName: user.email ?? user.login,
-    userDisplayName: user.displayName,
-    userID: new TextEncoder().encode(userId),
-    attestationType: "none",
-    excludeCredentials: existing.map((e) => ({
-      id: e.credentialId,
-      transports: Array.isArray(e.transports)
-        ? (e.transports as AuthenticatorTransportFuture[])
-        : undefined,
-    })),
-    authenticatorSelection: REGISTRATION_AUTHENTICATOR_SELECTION,
-  });
-
-  const ceremonyId = crypto.randomUUID();
-  await redis.set(
-    deviceRegisterKey(ceremonyId),
-    JSON.stringify({ challenge: options.challenge, userId, authorization }),
-    "EX",
-    CHALLENGE_TTL_SEC,
-  );
-  return {
-    status: "200 OK",
-    data: { ceremonyId, options, account: { displayName: user.displayName } },
-  };
+async function pairingRegisterBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
+  // token は単回で総当たりの意味が無い。NAT 配下の教室でも詰まらない程度の上限にする。
+  await checkRateLimit(`passkey-pairing-begin:${ctx.ip ?? "anon"}`, 60, 600);
+  const token = typeof p.token === "string" ? p.token : "";
+  return { status: "200 OK", data: await beginPairingRegistration(token) };
 }
 
-async function deviceRegisterFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
+async function pairingRegisterFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
   const ceremonyId = typeof p.ceremonyId === "string" ? p.ceremonyId : "";
   const response = p.response as RegistrationResponseJSON | undefined;
-  const nickname = typeof p.nickname === "string" ? p.nickname.trim().slice(0, 64) : null;
-  if (!ceremonyId || !response) throw new Error("ceremonyId and response are required");
+  if (!ceremonyId || !response) throw AppError.badRequest("ceremonyId and response are required");
+  const nickname = typeof p.nickname === "string" ? p.nickname.trim().slice(0, 64) || null : null;
+  const result = await finishPairingRegistration({ ceremonyId, response, nickname, userAgent: ctx.userAgent });
+  return { status: "202 Accepted", data: { pending: true, ...result } };
+}
 
-  const raw = await redis.getdel(deviceRegisterKey(ceremonyId));
-  if (!raw) throw new Error("Challenge expired or missing - please retry from a new link");
-  const pending = JSON.parse(raw) as { challenge: string; userId: string; authorization?: UserSessionState };
-  if (!pending.authorization || pending.authorization.sub !== pending.userId) throw AppError.unauthorized("Registration link must be reissued");
+async function pairingStatus(authHeader: string, p: Record<string, unknown>): Promise<RouteResult> {
+  const { id: userId } = await requireUserId(authHeader);
+  const parsed = pairingIdSchema.safeParse(p);
+  if (!parsed.success) throw AppError.badRequest("pairingId is required");
+  const status = await getPairingStatus(userId, parsed.data.pairingId);
+  // 承認の proof を取るため、候補があるときは束縛先 (resource) を返す。
+  const approvalResource = status.state === "candidate"
+    ? pairingApprovalResource(parsed.data.pairingId, await pairingCandidateId(userId, parsed.data.pairingId))
+    : undefined;
+  return { status: "200 OK", data: { ...status, approvalResource } };
+}
 
-  const verification = await verifyRegistrationResponse({
-    response,
-    expectedChallenge: pending.challenge,
-    expectedOrigin: ORIGINS,
-    expectedRPID: RP_ID,
-    requireUserVerification: true,
+async function pairingApprove(authHeader: string, p: Record<string, unknown>, actionProof: string): Promise<RouteResult> {
+  const { id: userId, token } = await requireUserId(authHeader);
+  const parsed = pairingApproveSchema.safeParse(p);
+  if (!parsed.success) throw AppError.badRequest("pairingId and the 4-digit number shown on the other device are required");
+  const claims = await verifyToken(token);
+  const candidateId = await pairingCandidateId(userId, parsed.data.pairingId);
+  await actionProofStore.consume(actionProof, {
+    userId,
+    binding: httpActionBinding(token),
+    action: "passkey.pairing_approve",
+    resource: pairingApprovalResource(parsed.data.pairingId, candidateId),
   });
-  if (!verification.verified || !verification.registrationInfo) {
-    throw new Error("Passkey registration failed verification");
-  }
+  await approvePairing(userId, parsed.data.pairingId, candidateId, Number(claims?.authEpoch ?? 0), parsed.data.matchCode);
+  return { status: "200 OK", data: { approved: true } };
+}
 
-  const user = (await db.select().from(schema.users)
-    .where(eq(schema.users.id, pending.userId)).limit(1))[0];
-  if (!user) throw new Error("Unauthorized: linked user not found");
-
-  const info = verification.registrationInfo;
-  const credential = info.credential;
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
-
-  const { accessToken, refreshToken } = await db.transaction(async (tx) => {
-    await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, user.id)).for("update");
-    await assertUserSessionCurrent(pending.authorization!, tx);
-    const authentication = completedAuthentication("passkey", user.mfaRevision, now.getTime());
-    const tokens = await generateTokenPair(user.id, user.role, authentication, { authEpoch: pending.authorization!.authEpoch, database: tx });
-    await tx.insert(schema.passkeys).values({
-      id: crypto.randomUUID(),
-      userId: user.id,
-      credentialId: credential.id,
-      publicKey: Buffer.from(credential.publicKey),
-      counter: credential.counter,
-      deviceType: info.credentialDeviceType,
-      backedUp: info.credentialBackedUp,
-      transports: (response.response.transports ?? []) as unknown as Record<string, unknown>[],
-      nickname,
-      aaguid: info.aaguid,
-      createdAt: now,
-    });
-    await tx.insert(schema.refreshSessions).values({
-      authEpoch: tokens.authEpoch, authentication, id: crypto.randomUUID(),
-      userId: user.id,
-      refreshToken: hashRefreshToken(tokens.refreshToken),
-      expiresAt,
-    });
-    return tokens;
-  });
-
-  logUserLogin(user.id, user.email ?? user.login, "passkey-device-link", { ip: ctx.ip });
-  return {
-    status: "201 Created",
-    data: {
-      user: {
-        id: user.id,
-        login: user.login,
-        displayName: user.displayName,
-        email: user.email,
-        role: user.role,
-        avatarUrl: user.avatarUrl,
-      },
-      accessToken,
-      refreshToken,
-    },
-  };
+async function pairingReject(authHeader: string, p: Record<string, unknown>): Promise<RouteResult> {
+  const { id: userId } = await requireUserId(authHeader);
+  const parsed = pairingIdSchema.safeParse(p);
+  if (!parsed.success) throw AppError.badRequest("pairingId is required");
+  await rejectPairing(userId, parsed.data.pairingId);
+  return { status: "200 OK", data: { rejected: true } };
 }
 
 // ─── プロフィール画面用: 一覧 + 削除 ──────────────────────────
@@ -956,6 +812,7 @@ async function deletePasskey(
       ))
       .returning({ id: schema.passkeys.id });
     await tx.update(schema.deviceCredentials).set({ revokedAt: new Date(), revokedReason: "passkey_revoked" }).where(eq(schema.deviceCredentials.rootPasskeyId, id));
+    if (changed.length > 0) await recordSecurityEvent(tx, userId, "passkey.removed");
     return changed;
   });
 

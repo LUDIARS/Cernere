@@ -10,7 +10,8 @@
     "start": "node dist/bootstrap.js",
     "start:legacy": "node dist/index.js",
     "test": "vitest run",
-    "migrate:dry-run": "tsx src/db/migrate-dry-run-cli.ts"
+    "migrate:dry-run": "tsx src/db/migrate-dry-run-cli.ts",
+    "bootstrap-admin": "tsx scripts/bootstrap-admin.ts"
   },
   "dependencies": {
     "@ludiars/log-weaver": "file:../lib/lapilli/packages/log-weaver",

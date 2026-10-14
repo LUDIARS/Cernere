@@ -2,17 +2,10 @@
  * ゲスト WS セッション用 auth コマンド処理
  */
 
-import bcrypt from "bcryptjs";
-import { eq, sql } from "drizzle-orm";
-import { db } from "../db/connection.js";
-import * as schema from "../db/schema.js";
+import { retiredLoginError } from "../auth/retired-login.js";
 import { AppError } from "../error.js";
-import { checkRateLimit } from "../redis.js";
-import { generateTokenPair, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
-import { beginMfaChallenge, sendMfaChallengeCode, verifyMfaChallenge, issueMfaLogin } from "../auth/mfa-challenge.js";
+import { sendMfaChallengeCode, verifyMfaChallenge, issueMfaLogin } from "../auth/mfa-challenge.js";
 import { parseMfaInput, requireMfaMethod } from "../auth/mfa-contract.js";
-import { hashRefreshToken } from "../auth/token-hash.js";
-import { completedAuthentication } from "../lib/authentication-evidence.js";
 
 export interface GuestAuthResult {
   userId?: string;
@@ -33,8 +26,8 @@ export async function handleGuestAuthCommand(
   if (!p) throw AppError.badRequest("Payload required");
 
   switch (action) {
-    case "register": return guestRegister(p);
-    case "login": return guestLogin(p, ip);
+    // メール+パスワードの登録・ログインは廃止 (パスキーのみ)。
+    case "register": case "login": throw retiredLoginError();
     case "mfa-verify": {
       const input = parseMfaInput(p);
       return verifyMfaChallenge(input.mfaToken ?? "", requireMfaMethod(input.method), input.code ?? "", { purpose: "guest" }, issueMfaLogin);
@@ -47,89 +40,4 @@ export async function handleGuestAuthCommand(
     default:
       throw AppError.badRequest(`Guest auth action '${action}' not supported. Use 'register' or 'login'.`);
   }
-}
-
-async function guestRegister(p: Record<string, unknown>): Promise<GuestAuthResult> {
-  const name = p.name as string | undefined;
-  const email = p.email as string | undefined;
-  const password = p.password as string | undefined;
-
-  if (!name || !email || !password) throw AppError.badRequest("name, email, password are required");
-  if (password.length < 8) throw AppError.badRequest("Password must be at least 8 characters");
-
-  await checkRateLimit(`ws_register:${email}`, 5, 600);
-
-  const existing = await db.select({ id: schema.users.id })
-    .from(schema.users).where(eq(schema.users.email, email)).limit(1);
-  if (existing.length > 0) {
-    throw AppError.badRequest("Registration failed. Please check your input and try again.");
-  }
-
-  const passwordHash = await bcrypt.hash(password, 12);
-  const countResult = await db.select({ count: sql<number>`count(*)` }).from(schema.users);
-  const role = Number(countResult[0]?.count ?? 0) === 0 ? "admin" : "general";
-  const userId = crypto.randomUUID();
-  const now = new Date();
-
-  await db.insert(schema.users).values({
-    id: userId, login: name, displayName: name, email, role, passwordHash,
-    createdAt: now, updatedAt: now,
-  });
-
-  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(userId, role);
-  const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
-  await db.insert(schema.refreshSessions).values({
-    authEpoch, id: crypto.randomUUID(), userId, refreshToken: hashRefreshToken(refreshToken), expiresAt,
-  });
-
-  return {
-    userId,
-    accessToken,
-    refreshToken,
-    user: { id: userId, displayName: name, email, role },
-  };
-}
-
-async function guestLogin(p: Record<string, unknown>, ip?: string): Promise<GuestAuthResult> {
-  const email = p.email as string | undefined;
-  const password = p.password as string | undefined;
-
-  if (!email || !password) throw AppError.badRequest("email and password are required");
-
-  // per-email: 標的アカウントへの総当たりを絞る。
-  await checkRateLimit(`ws_login:${email}`, 10, 900);
-  // per-IP: 1 IP から多数アカウントへ撒く credential stuffing を絞る (REST login と同ポリシー)。
-  await checkRateLimit(`ws_login-ip:${ip ?? "unknown"}`, 50, 900);
-
-  const rows = await db.select().from(schema.users)
-    .where(eq(schema.users.email, email)).limit(1);
-  const user = rows[0];
-
-  if (!user || !user.passwordHash) throw AppError.unauthorized("Invalid credentials");
-
-  const valid = await bcrypt.compare(password, user.passwordHash);
-  if (!valid) throw AppError.unauthorized("Invalid credentials");
-
-  // MFA
-  if (user.mfaEnabled) {
-    return beginMfaChallenge(user, { purpose: "guest" });
-  }
-
-  const now = new Date();
-  await db.update(schema.users).set({ lastLoginAt: now, updatedAt: now })
-    .where(eq(schema.users.id, user.id));
-
-  const authentication = completedAuthentication("password", user.mfaRevision, now.getTime());
-  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(user.id, user.role, authentication, { authEpoch: user.authEpoch });
-  const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
-  await db.insert(schema.refreshSessions).values({
-    authEpoch, id: crypto.randomUUID(), userId: user.id, refreshToken: hashRefreshToken(refreshToken), expiresAt, authentication,
-  });
-
-  return {
-    userId: user.id,
-    accessToken,
-    refreshToken,
-    user: { id: user.id, displayName: user.displayName, email: user.email, role: user.role },
-  };
 }

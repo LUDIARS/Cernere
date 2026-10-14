@@ -66,6 +66,10 @@ export const users = pgTable("users", {
   webauthnUserId: text("webauthn_user_id"),
   // 回復・全端末失効で increment し、 旧 access token / WS session を無効化する (§7.1)。
   authEpoch: bigint("auth_epoch", { mode: "number" }).notNull().default(0),
+  // リカバリー QR の世代。再発行・回復確定・運用者回復で進め、保留中の回復要求を無効にする。
+  recoveryGeneration: integer("recovery_generation").notNull().default(0),
+  // Google 連携時に Google が検証したアドレス。ログイン通知の宛先として本人が有効にしたときだけ使う。
+  googleVerifiedEmail: text("google_verified_email"),
 
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -156,6 +160,111 @@ export const passkeys = pgTable("passkeys", {
 // ── Device Credentials / Registration Grants ─────────────────
 //
 // spec/plan/passkey-default-authentication.md §7.2 / §7.3。
+
+// ── パスキーのみ認証 (spec/plan/2026-10-14-passkey-only-authentication.md) ──
+
+/** 承認待ちのパスキー。passkeys へ移すまでログイン・action proof に使えない。 */
+export const passkeyCandidates = pgTable("passkey_candidates", {
+  id: uuid("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  purpose: text("purpose").notNull(), // 'pairing' | 'recovery'
+  credentialId: text("credential_id").notNull(),
+  publicKey: bytea("public_key").notNull(),
+  counter: bigint("counter", { mode: "number" }).notNull().default(0),
+  deviceType: text("device_type").notNull().default("singleDevice"),
+  backedUp: boolean("backed_up").notNull().default(false),
+  transports: jsonb("transports").notNull().default([]),
+  aaguid: text("aaguid"),
+  nickname: text("nickname"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  promotedAt: timestamp("promoted_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+}, (t) => [uniqueIndex("uq_passkey_candidates_credential").on(t.credentialId)]);
+
+/** 別端末の追加。QR token は digest のみ。元端末の承認で候補を有効化する。 */
+export const devicePairings = pgTable("device_pairings", {
+  id: uuid("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenDigest: text("token_digest").notNull(),
+  authEpoch: bigint("auth_epoch", { mode: "number" }).notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  claimedAt: timestamp("claimed_at", { withTimezone: true }),
+  candidateId: uuid("candidate_id").references(() => passkeyCandidates.id, { onDelete: "set null" }),
+  matchCode: text("match_code"),
+  matchAttempts: integer("match_attempts").notNull().default(0),
+  candidateLabel: text("candidate_label"),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  rejectedAt: timestamp("rejected_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex("uq_device_pairings_token").on(t.tokenDigest)]);
+
+/** リカバリー QR。秘密値は保存せず HMAC digest のみ。 */
+export const userRecoveryCodes = pgTable("user_recovery_codes", {
+  id: text("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  secretDigest: text("secret_digest").notNull(),
+  keyId: text("key_id").notNull(),
+  generation: integer("generation").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+});
+
+/** リカバリー QR による回復の待機。eligibleAt 以降に新しいキーで確定する。 */
+export const recoveryRequests = pgTable("recovery_requests", {
+  id: uuid("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  recoveryCodeId: text("recovery_code_id").notNull().references(() => userRecoveryCodes.id),
+  candidateId: uuid("candidate_id").notNull().references(() => passkeyCandidates.id),
+  authEpoch: bigint("auth_epoch", { mode: "number" }).notNull(),
+  recoveryGeneration: integer("recovery_generation").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  eligibleAt: timestamp("eligible_at", { withTimezone: true }).notNull(),
+  cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+  frozenAt: timestamp("frozen_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+});
+
+/** ログイン通知の出来事 (SPEC-LOGIN-ALERT)。detail に秘密値・完全な IP を入れない。 */
+export const securityEvents = pgTable("security_events", {
+  id: uuid("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  severity: text("severity").notNull(),
+  detail: jsonb("detail").notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** 通知の配送待ち。出来事と同じトランザクションで積み、worker が配送する。 */
+export const notificationOutbox = pgTable("notification_outbox", {
+  id: uuid("id").primaryKey(),
+  eventId: uuid("event_id").notNull().references(() => securityEvents.id, { onDelete: "cascade" }),
+  channel: text("channel").notNull(),
+  targetRef: text("target_ref").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+  leasedUntil: timestamp("leased_until", { withTimezone: true }),
+  deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+  failedAt: timestamp("failed_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** 通知先。verifiedAt のあるものだけに配送する。 */
+export const loginAlertTargets = pgTable("login_alert_targets", {
+  id: uuid("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  channel: text("channel").notNull(),
+  address: text("address").notNull(),
+  verificationDigest: text("verification_digest"),
+  verificationExpiresAt: timestamp("verification_expires_at", { withTimezone: true }),
+  verificationAttempts: integer("verification_attempts").notNull().default(0),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  degradedAt: timestamp("degraded_at", { withTimezone: true }),
+  removedAt: timestamp("removed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const deviceCredentials = pgTable("device_credentials", {
   /** この id が stable な device_id になる。 */

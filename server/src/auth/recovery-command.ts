@@ -2,6 +2,7 @@
 import { z } from "zod";
 import { AppError } from "../error.js";
 import { issueRecoveryGrant, revokeGrant } from "./registration-grant.js";
+import { freezeRecoveryRequest } from "./recovery-request.js";
 
 export async function recoveryCommand(actorUserId: string, action: string, payload: unknown): Promise<unknown> {
   if (action === "issue") {
@@ -15,6 +16,12 @@ export async function recoveryCommand(actorUserId: string, action: string, paylo
     const parsed = z.object({ grantId: z.string().uuid() }).strict().safeParse(payload);
     if (!parsed.success) throw AppError.badRequest("Invalid recovery selection");
     return { revoked: await revokeGrant(parsed.data.grantId, actorUserId) };
+  }
+  if (action === "freeze") {
+    // 本人から「リカバリー QR を盗まれた」と申告があったときに、保留中の自己回復を止める。
+    const parsed = z.object({ userId: z.string().uuid() }).strict().safeParse(payload);
+    if (!parsed.success) throw AppError.badRequest("Invalid recovery selection");
+    return freezeRecoveryRequest(actorUserId, parsed.data.userId);
   }
   throw AppError.badRequest("Unknown recovery action");
 }

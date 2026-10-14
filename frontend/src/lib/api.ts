@@ -1,15 +1,8 @@
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 // Passkey 用は @simplewebauthn/browser を使うので type だけ import
-import {
-  startRegistration, startAuthentication,
-} from "@simplewebauthn/browser";
-import type {
-  PublicKeyCredentialCreationOptionsJSON,
-  PublicKeyCredentialRequestOptionsJSON,
-  RegistrationResponseJSON,
-  AuthenticationResponseJSON,
-} from "@simplewebauthn/browser";
+import { startRegistration } from "@simplewebauthn/browser";
+import type { PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
 import { authorizeAction } from "./action-auth";
 
 // ── Token Management ──────────────────────────────
@@ -77,14 +70,6 @@ interface UserProfile {
   phoneVerified: boolean;
 }
 
-// ── MFA Types ────────────────────────────────────
-
-interface MfaChallengeResponse {
-  mfaRequired: true;
-  mfaToken: string;
-  mfaMethods: string[];
-}
-
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE}${path}`;
   const headers: Record<string, string> = {
@@ -124,55 +109,8 @@ interface AuthResponse {
   refreshToken: string;
 }
 
-type LoginResponse = AuthResponse | MfaChallengeResponse;
-
-function isMfaChallenge(res: LoginResponse): res is MfaChallengeResponse {
-  return "mfaRequired" in res && res.mfaRequired === true;
-}
-
 export const auth = {
-  async register(body: { name: string; email: string; password: string }): Promise<AuthResponse> {
-    const res = await fetch(`${API_BASE}/api/auth/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json() as AuthResponse & { error?: string };
-    if (!res.ok) throw new Error(data.error || "Registration failed");
-    setTokens(data.accessToken, data.refreshToken);
-    setStoredUser({
-      id: data.user.id,
-      name: data.user.displayName,
-      email: data.user.email || "",
-      role: data.user.role,
-    });
-    return data;
-  },
 
-  async login(body: { email: string; password: string }): Promise<LoginResponse> {
-    const res = await fetch(`${API_BASE}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json() as (AuthResponse | MfaChallengeResponse) & { error?: string };
-    if (!res.ok) throw new Error(data.error || "Login failed");
-
-    // MFA チャレンジの場合はトークンを保存しない
-    if (isMfaChallenge(data)) {
-      return data;
-    }
-
-    const authData = data as AuthResponse;
-    setTokens(authData.accessToken, authData.refreshToken);
-    setStoredUser({
-      id: authData.user.id,
-      name: authData.user.displayName,
-      email: authData.user.email || "",
-      role: authData.user.role,
-    });
-    return authData;
-  },
 
   async logout() {
     // 端末側の資格情報は必ず捨てる。 サーバ応答が 5xx / offline でも
@@ -194,13 +132,7 @@ export const auth = {
     clearTokens();
   },
 
-  getGoogleAuthUrl() {
-    return "/auth/google/login";
-  },
 
-  getGitHubAuthUrl() {
-    return "/auth/github/login";
-  },
 
   async me(): Promise<UserProfile> {
     return request<UserProfile>("/api/auth/me");
@@ -230,70 +162,7 @@ export const auth = {
     return res;
   },
 
-  /** パスワードを作らず、最初の passkey を資格情報にしてアカウントを作成する。
-   *  email は任意 (Windows Hello 等だけで登録可)。 email 無しアカウントの
-   *  他デバイス追加はログイン後の device-link で行う。 */
-  async passkeySignup(name: string, email?: string): Promise<AuthResponse> {
-    const begin = await fetch(`${API_BASE}/api/auth/passkey/signup-begin`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(email ? { name, email } : { name }),
-    });
-    const beginData = await begin.json() as {
-      signupId?: string;
-      options?: PublicKeyCredentialCreationOptionsJSON;
-      error?: string;
-    };
-    if (!begin.ok || !beginData.signupId || !beginData.options) {
-      throw new Error(beginData.error || "Passkey registration failed");
-    }
-    const response: RegistrationResponseJSON = await startRegistration({
-      optionsJSON: beginData.options,
-    });
-    const finish = await fetch(`${API_BASE}/api/auth/passkey/signup-finish`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ signupId: beginData.signupId, response }),
-    });
-    const data = await finish.json() as AuthResponse & { error?: string };
-    if (!finish.ok) throw new Error(data.error || "Passkey registration failed");
-    setTokens(data.accessToken, data.refreshToken);
-    setStoredUser({
-      id: data.user.id,
-      name: data.user.displayName,
-      email: data.user.email || "",
-      role: data.user.role,
-    });
-    return data;
-  },
 
-  /** passkey でログイン。 email を渡すとそのユーザの credentials を allow に詰める */
-  async passkeyLogin(email?: string): Promise<AuthResponse> {
-    const begin = await fetch(`${API_BASE}/api/auth/passkey/login-begin`, {
-      method: "POST", credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: email ?? "" }),
-    });
-    const beginData = await begin.json() as
-      { options: PublicKeyCredentialRequestOptionsJSON; challengeOwner: string; error?: string };
-    if (!begin.ok) throw new Error(beginData.error || "Passkey login failed");
-    const response: AuthenticationResponseJSON = await startAuthentication({ optionsJSON: beginData.options });
-    const finish = await fetch(`${API_BASE}/api/auth/passkey/login-finish`, {
-      method: "POST", credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ response, challengeOwner: beginData.challengeOwner, deviceSession: true }),
-    });
-    const data = await finish.json() as AuthResponse & { error?: string };
-    if (!finish.ok) throw new Error(data.error || "Passkey login failed");
-    setTokens(data.accessToken, data.refreshToken);
-    setStoredUser({
-      id: data.user.id,
-      name: data.user.displayName,
-      email: data.user.email || "",
-      role: data.user.role,
-    });
-    return data;
-  },
 
   async passkeyList(): Promise<{ items: Array<{ id: string; credentialId: string; nickname: string | null; deviceType: string; backedUp: boolean; aaguid: string | null; createdAt: string; lastUsedAt: string | null }> }> {
     return request("/api/auth/passkey/list", { method: "POST", body: "{}" });
@@ -319,57 +188,7 @@ export const auth = {
     return data;
   },
 
-  /** 他デバイス登録用の one-time URL を発行する (要ログイン + step-up)。 */
-  async passkeyDeviceLinkCreate(): Promise<{ url: string; expiresIn: number }> {
-    const existing = await this.passkeyList();
-    const currentUser = getStoredUser();
-    if (!currentUser) throw new Error("Current user is unavailable");
-    const proof = existing.items.length > 0
-      ? await authorizeAction("passkey.device_link", currentUser.id)
-      : undefined;
-    return request("/api/auth/passkey/device-link", {
-      method: "POST",
-      headers: proof ? { "X-Cernere-Action-Proof": proof } : undefined,
-      body: JSON.stringify({}),
-    });
-  },
 
-  /** 新しい端末側: device-link URL の token でこの端末の passkey を登録し、
-   *  そのままログイン状態にする。 */
-  async passkeyDeviceRegister(token: string, nickname?: string): Promise<AuthResponse> {
-    const begin = await fetch(`${API_BASE}/api/auth/passkey/device-register-begin`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
-    });
-    const beginData = await begin.json() as {
-      ceremonyId?: string;
-      options?: PublicKeyCredentialCreationOptionsJSON;
-      account?: { displayName: string };
-      error?: string;
-    };
-    if (!begin.ok || !beginData.ceremonyId || !beginData.options) {
-      throw new Error(beginData.error || "Device registration failed");
-    }
-    const response: RegistrationResponseJSON = await startRegistration({
-      optionsJSON: beginData.options,
-    });
-    const finish = await fetch(`${API_BASE}/api/auth/passkey/device-register-finish`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ceremonyId: beginData.ceremonyId, response, ...(nickname ? { nickname } : {}) }),
-    });
-    const data = await finish.json() as AuthResponse & { error?: string };
-    if (!finish.ok) throw new Error(data.error || "Device registration failed");
-    setTokens(data.accessToken, data.refreshToken);
-    setStoredUser({
-      id: data.user.id,
-      name: data.user.displayName,
-      email: data.user.email || "",
-      role: data.user.role,
-    });
-    return data;
-  },
 
   async passkeyDelete(id: string): Promise<{ ok: true; removed: number }> {
     const proof = await authorizeAction("passkey.delete", id);
@@ -381,8 +200,6 @@ export const auth = {
   },
 
   // ── MFA ──────────────────────────────────────
-
-  isMfaChallenge,
 
   // MFA の状態取得と要素の登録/解除は mfaApi (lib/mfa-api.ts) を直接使う。
   // management token を扱う経路をひとつに保つため、ここには再輸出を置かない。
@@ -409,35 +226,7 @@ export const auth = {
     await request("/api/auth/mfa/sms/disable", { method: "POST" });
   },
 
-  async mfaSendCode(mfaToken: string, method: string): Promise<void> {
-    const response = await fetch(`${API_BASE}/api/auth/mfa/send-code`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mfaToken, method }),
-    });
-    if (!response.ok) {
-      const data = await response.json() as { error?: string };
-      throw new Error(data.error ?? "MFA code delivery failed");
-    }
-  },
 
-  async mfaVerify(mfaToken: string, method: string, code: string): Promise<AuthResponse> {
-    const res = await fetch(`${API_BASE}/api/auth/mfa/verify`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mfaToken, method, code }),
-    });
-    const data = await res.json() as AuthResponse & { error?: string };
-    if (!res.ok) throw new Error(data.error || "MFA verification failed");
-    setTokens(data.accessToken, data.refreshToken);
-    setStoredUser({
-      id: data.user.id,
-      name: data.user.displayName,
-      email: data.user.email || "",
-      role: data.user.role,
-    });
-    return data;
-  },
 
   // ── フェデレーション (アカウントリンク) ──────
 
@@ -579,6 +368,11 @@ import { wsClient } from "./ws-client";
 export const profile = {
   async getMyProfile(): Promise<UserProfileData> {
     return wsClient.sendCommand<UserProfileData>("profile", "get");
+  },
+
+  /** 表示名 (初回ログイン後に入れる。SPEC-DISPLAY-NAME-DEFERRED) */
+  async setDisplayName(displayName: string): Promise<{ displayName: string }> {
+    return wsClient.sendCommand<{ displayName: string }>("profile", "set_display_name", { displayName });
   },
 
   async updateMyProfile(body: UpdateProfileBody): Promise<UserProfileData> {

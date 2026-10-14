@@ -47,6 +47,13 @@ class SessionRegistry {
     return [...ids].map((id) => this.sessions.get(id)).filter(Boolean) as RegisteredSession[];
   }
 
+  /** 回復・失効の後に、このプロセスで開いているそのユーザーのソケットを閉じる。 */
+  closeUser(userId: string, reason: string): void {
+    for (const session of this.getByUser(userId)) {
+      try { session.ws.end(1008, reason); } catch { /* 既に閉じている */ }
+    }
+  }
+
   isOnline(userId: string): boolean {
     const ids = this.userSessions.get(userId);
     return !!ids && ids.size > 0;
@@ -91,20 +98,33 @@ class SessionRegistry {
     }
   }
 
-  relay(fromSessionId: string, fromUserId: string, target: RelayTarget, payload: unknown): void {
+  /**
+   * relay は同一ユーザーのセッション間に限る (RULE §1.2 Step 4 / 脅威モデル「クロスユーザーリレーの悪用」)。
+   * 他人のユーザー・セッションを宛先にした要求は false を返し、何も送らない。
+   */
+  relay(fromSessionId: string, fromUserId: string, target: RelayTarget, payload: unknown): boolean {
     const msg: ServerMessage = { type: "relayed", from_session: fromSessionId, payload };
 
     if (target === "broadcast") {
       for (const session of this.getByUser(fromUserId)) {
         if (session.sessionId !== fromSessionId) this.send(session.ws, msg);
       }
-    } else if ("user" in target) {
-      for (const session of this.getByUser(target.user)) {
-        this.send(session.ws, msg);
-      }
-    } else if ("session" in target) {
-      this.sendTo(target.session, msg);
+      return true;
     }
+    if ("user" in target) {
+      if (target.user !== fromUserId) return false;
+      for (const session of this.getByUser(fromUserId)) {
+        if (session.sessionId !== fromSessionId) this.send(session.ws, msg);
+      }
+      return true;
+    }
+    if ("session" in target) {
+      const destination = this.sessions.get(target.session);
+      if (!destination || destination.userId !== fromUserId) return false;
+      this.send(destination.ws, msg);
+      return true;
+    }
+    return false;
   }
 }
 
