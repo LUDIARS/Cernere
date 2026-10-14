@@ -3,6 +3,8 @@
 const PUBLIC_PASSKEY_MESSAGES = [
   /^Rate limit exceeded\. Please try again later\.$/,
   /^Create the account in the Cernere sign-in window$/,
+  /^This account is waiting for approval\. Request access from Cernere\.$/,
+  /^This account is locked\.$/,
   /^Registration failed\. Please check your input and try again\.$/,
   /^signupId and response are required$/,
   /^response is required$/,

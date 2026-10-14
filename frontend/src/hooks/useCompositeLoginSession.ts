@@ -58,7 +58,10 @@ export function useCompositeLoginSession(args: CompositeLoginSessionArgs): Compo
   const [passkeyAutoReady, setPasskeyAutoReady] = useState(self);
 
   // adapter は WS を抱えるので、 ページと同じ寿命で 1 つだけ持ち unmount で閉じる。
-  const adapter = useMemo(() => new CernereCompositeAuthAdapter(apiBase), [apiBase]);
+  const adapter = useMemo(
+    () => new CernereCompositeAuthAdapter(apiBase, self ? null : (origin ?? redirectUri)),
+    [apiBase, self, origin, redirectUri],
+  );
   useEffect(() => () => adapter.dispose(), [adapter]);
 
   // 引き渡し先は URL 由来で描画中に変わらない。
@@ -108,6 +111,14 @@ export function useCompositeLoginSession(args: CompositeLoginSessionArgs): Compo
           if (!cancelled && res.ok) {
             const body = await res.json().catch(() => null) as { authCode?: string } | null;
             if (body?.authCode) { handoff.deliver(body.authCode); return; }
+          }
+          // ログイン済みでも許可待ち (許可制 案 A) ならサービスへは入れない。申請画面へ案内する。
+          if (!cancelled && res.status === 403) {
+            const body = await res.json().catch(() => null) as { code?: string } | null;
+            if (body?.code === "approval_required") {
+              setBlockedReason("Cernere の利用許可を待っています。Cernere の「利用許可」画面 (/access) から申請し、許可されてからもう一度開いてください。");
+              return;
+            }
           }
         } catch {
           /* 対話フローにフォールバック */

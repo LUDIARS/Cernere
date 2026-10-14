@@ -7,7 +7,7 @@ import { assertUserSessionCurrent, type SessionReader, type UserSessionState } f
 const userId = "11111111-1111-4111-8111-111111111111";
 const deviceId = "22222222-2222-4222-8222-222222222222";
 const authentication = { authTime: 100, authTimeMs: 100_000, revision: 3, amr: ["pop", "mfa"] as ("pop" | "mfa")[] };
-let user: { sub: string; role: string; authEpoch: number; mfaRevision: number };
+let user: { sub: string; role: string; authEpoch: number; mfaRevision: number; accessStatus?: string };
 let device: Record<string, unknown> | undefined;
 let claims: UserSessionState;
 
@@ -22,9 +22,9 @@ const sessionMasterKey = Buffer.alloc(32, 7).toString("base64url");
 beforeEach(() => {
   vi.stubEnv("CERNERE_AUTH_SESSION_KEY", sessionMasterKey);
   vi.stubEnv("CERNERE_AUTH_SESSION_KEY_ID", "key-1");
-  user = { sub: userId, role: "general", authEpoch: 4, mfaRevision: 3 };
+  user = { sub: userId, role: "general", authEpoch: 4, mfaRevision: 3, accessStatus: "active" };
   device = { authEpoch: 4, tokenKeyId: "key-1", authentication, expiresAt: new Date(Date.now() + 60_000) };
-  claims = { ...user, deviceId, authentication };
+  claims = { sub: userId, role: "general", authEpoch: 4, mfaRevision: 3, deviceId, authentication };
 });
 afterEach(() => vi.unstubAllEnvs());
 
@@ -64,4 +64,13 @@ describe("current user session authorization", () => {
   it("cannot use a legacy user token after global revocation", async () => {
     await expect(assertUserSessionCurrent({ sub: userId, role: "general" }, reader)).rejects.toMatchObject({ statusCode: 401 });
   });
+
+describe("locked accounts (registration approval A)", () => {
+  it("rejects every session of a locked account but keeps pending sessions", async () => {
+    user = { ...user, accessStatus: "locked" };
+    await expect(assertUserSessionCurrent({ ...claims, deviceId: undefined }, reader)).rejects.toMatchObject({ statusCode: 401 });
+    user = { ...user, accessStatus: "pending" };
+    await expect(assertUserSessionCurrent({ ...claims, deviceId: undefined }, reader)).resolves.toBeUndefined();
+  });
+});
 });

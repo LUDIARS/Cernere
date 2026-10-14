@@ -15,13 +15,23 @@ import * as schema from "../db/schema.js";
 import { generateTokenPair, REFRESH_TOKEN_DAYS } from "./jwt.js";
 import { hashRefreshToken } from "./token-hash.js";
 import { redis } from "../redis.js";
+import { requireActiveUser } from "./user-access.js";
 
 import type { AuthenticationEvidence } from "../lib/authentication-evidence.js";
 import type { UserSessionState } from "./user-session-state.js";
 
 const AUTH_CODE_TTL = 60;
 
+/**
+ * authCode の用途 (許可制 案 A)。
+ *   service  サービスへ渡す (popup / redirect / silent SSO / サービス経由)。active のユーザーにだけ発行する
+ *   cernere  Cernere 自身の /login。許可待ちでも発行するが、交換は Cernere の画面からだけ受け付ける
+ */
+export type AuthCodeAudience = "service" | "cernere";
+
 export interface AuthCodeUser {
+  /** 既定は service (外へ出る側に倒す) */
+  audience?: AuthCodeAudience;
   authentication?: AuthenticationEvidence;
   authEpoch?: number;
   deviceId?: string;
@@ -32,6 +42,9 @@ export interface AuthCodeUser {
 }
 
 export async function issueAuthCode(user: AuthCodeUser): Promise<string> {
+  const audience = user.audience ?? "service";
+  // 許可待ち・停止中のユーザーをサービスへ入れない。refresh 行を作る前に止める。
+  if (audience === "service") await requireActiveUser(user.userId);
   const { accessToken, refreshToken, authEpoch } = await generateTokenPair(user.userId, user.role, user.authentication, { authEpoch: user.authEpoch, deviceId: user.deviceId });
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
@@ -42,6 +55,7 @@ export async function issueAuthCode(user: AuthCodeUser): Promise<string> {
   });
   const authCode = crypto.randomUUID();
   await redis.set(`authcode:${authCode}`, JSON.stringify({
+    audience,
     accessToken,
     refreshToken,
     user: {

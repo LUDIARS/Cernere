@@ -17,6 +17,9 @@ import { db } from "./db/connection.js";
 import * as schema from "./db/schema.js";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { z } from "zod";
+import { APPROVAL_REQUIRED, getAccessStatus } from "./auth/user-access.js";
+import { isAllowedWhilePending } from "./auth/pending-allowlist.js";
+import { userAccessCommand } from "./auth/user-access-command.js";
 import { AppError } from "./error.js";
 import { getUserState, getSession } from "./redis.js";
 import { redactSensitive } from "./lib/redact.js";
@@ -60,6 +63,10 @@ export async function dispatch(
       }
       if (state.state !== "logged_in") {
         throw AppError.forbidden(`Session not active (state=${state.state})`);
+      }
+      // 許可待ちは本人用の操作だけ (許可制 案 A)。locked は getSession の時点で拒否済み。
+      if (await getAccessStatus(userId) !== "active" && !isAllowedWhilePending(userId, module, action, payload)) {
+        throw AppError.withCode(403, APPROVAL_REQUIRED, "This account is waiting for approval. Request access from Cernere.");
       }
     }
 
@@ -107,6 +114,7 @@ async function execute(
     case "device_session": return deviceSessionCommand(userId, sessionId, action, payload);
     case "login_alert": return loginAlertCommand(userId, action, payload);
     case "security_event": return securityEventCommand(userId, action);
+    case "user_access": return userAccessCommand(userId, action, payload);
     case "account_recovery": return recoveryCommand(userId, action, payload);
     case "enterprise": {
       await requireSystemAdmin(userId);

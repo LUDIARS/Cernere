@@ -16,6 +16,9 @@ import { CheckinPage } from "./pages/CheckinPage";
 import { OnboardingPage } from "./pages/onboarding/OnboardingPage";
 import { onboardingUrl } from "./pages/onboarding/onboarding-return";
 import { SecurityPage } from "./pages/SecurityPage";
+import { AccessPage } from "./pages/AccessPage";
+import { AccessReviewPage } from "./pages/admin/AccessReviewPage";
+import { AccessGate } from "./components/AccessGate";
 import { DeviceSessionsPage } from "./pages/DeviceSessionsPage";
 import { PasskeyRecoveryPage } from "./pages/PasskeyRecoveryPage";
 import { AccountRecoveryPage } from "./pages/admin/AccountRecoveryPage";
@@ -67,11 +70,13 @@ function AppRoutes() {
       {/* 新しく始めた直後の設定 (名前・リカバリー QR・別端末・通知)。アプリシェルの外 */}
       <Route path="/onboarding" element={user ? <OnboardingPage /> : <Navigate to="/login" replace />} />
       {/* 認証済みページは AppLayout 内で描画 — WS 接続を維持 */}
-      <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
+      <Route element={<RequireAuth><AccessGate><AppLayout /></AccessGate></RequireAuth>}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/devices" element={<DeviceSessionsPage />} />
         <Route path="/security" element={<SecurityPage />} />
+        <Route path="/access" element={<AccessPage />} />
+        <Route path="/admin/access" element={<AccessReviewPage />} />
         <Route path="/account-recovery" element={<AccountRecoveryPage />} />
         <Route path="/data-optout" element={<DataOptOutPage />} />
         <Route path="/organizations" element={<OrganizationsPage />} />

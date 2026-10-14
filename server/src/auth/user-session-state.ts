@@ -6,6 +6,7 @@ import { AppError } from "../error.js";
 import { config } from "../config.js";
 import { readAuthenticationEvidence, type AuthenticationEvidence } from "../lib/authentication-evidence.js";
 import { loadSessionKeyMaterial } from "./session-keys.js";
+import { parseAccessStatus } from "./user-access.js";
 
 export interface UserSessionState {
   sub: string;
@@ -19,10 +20,13 @@ export interface UserSessionState {
 export type SessionReader = Pick<typeof db, "select">;
 
 export async function currentUserSessionState(userId: string, reader: SessionReader = db): Promise<Required<Pick<UserSessionState, "sub" | "role" | "authEpoch" | "mfaRevision">>> {
-  const user = (await reader.select({ sub: users.id, role: users.role, authEpoch: users.authEpoch, mfaRevision: users.mfaRevision })
-    .from(users).where(eq(users.id, userId)).limit(1))[0];
+  const user = (await reader.select({
+    sub: users.id, role: users.role, authEpoch: users.authEpoch, mfaRevision: users.mfaRevision, accessStatus: users.accessStatus,
+  }).from(users).where(eq(users.id, userId)).limit(1))[0];
   if (!user) throw AppError.unauthorized("User session is no longer valid");
-  return user;
+  // 停止したアカウントはどの経路のセッションも通さない (許可制 案 A)。pending は本人用操作のため通す。
+  if (parseAccessStatus(user.accessStatus) === "locked") throw AppError.unauthorized("This account is locked");
+  return { sub: user.sub, role: user.role, authEpoch: user.authEpoch, mfaRevision: user.mfaRevision };
 }
 
 export async function assertUserSessionCurrent(claims: UserSessionState, reader: SessionReader = db): Promise<void> {

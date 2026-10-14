@@ -70,6 +70,10 @@ export const users = pgTable("users", {
   recoveryGeneration: integer("recovery_generation").notNull().default(0),
   // Google 連携時に Google が検証したアドレス。ログイン通知の宛先として本人が有効にしたときだけ使う。
   googleVerifiedEmail: text("google_verified_email"),
+  // 利用許可 (案 A)。pending=許可待ち (本人用操作のみ) / active / locked。未知値は拒否側に倒す。
+  accessStatus: text("access_status").notNull().default("pending"),
+  accessRevision: integer("access_revision").notNull().default(0),
+  accessChangedAt: timestamp("access_changed_at", { withTimezone: true }),
 
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -263,6 +267,29 @@ export const loginAlertTargets = pgTable("login_alert_targets", {
   verifiedAt: timestamp("verified_at", { withTimezone: true }),
   degradedAt: timestamp("degraded_at", { withTimezone: true }),
   removedAt: timestamp("removed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** 利用申請。ユーザーごとに未決 (open) は 1 件。 */
+export const registrationRequests = pgTable("registration_requests", {
+  id: uuid("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  state: text("state").notNull(),
+  purpose: text("purpose").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+});
+
+/** 許可・拒否・ロック・解除の監査。 */
+export const accessDecisions = pgTable("access_decisions", {
+  id: uuid("id").primaryKey(),
+  actorUserId: uuid("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+  targetUserId: uuid("target_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  expectedRevision: integer("expected_revision").notNull(),
+  beforeStatus: text("before_status").notNull(),
+  afterStatus: text("after_status").notNull(),
+  reasonCode: text("reason_code").notNull(),
+  requestId: uuid("request_id").references(() => registrationRequests.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -74,6 +74,7 @@ import {
 } from "../auth/passkey-rate-limit.js";
 import { publicPasskeyCompositeError } from "../auth/passkey-public-error.js";
 import { AppError } from "../error.js";
+import { requireActiveUser } from "../auth/user-access.js";
 import { summarizeUserAgent } from "../lib/user-agent-summary.js";
 import { recordSecurityEvent } from "../notify/security-events.js";
 import { requireUserId } from "./bearer-user.js";
@@ -677,8 +678,13 @@ async function loginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise
  *  経由で実トークンに交換する。 */
 async function compositeLoginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
   const { user, verifiedAt } = await verifyPasskeyAssertion(p, ctx);
+  // 送り先 (popup / redirect の target) があるか、サービス経由 (project WS) なら、authCode はサービスへ渡る。
+  // 送り先の無い REST は Cernere 自身の /login (許可待ちでも入れる。交換は Cernere の画面からだけ)。
+  const audience = ctx.projectKey || (typeof p.target === "string" && p.target) ? "service" : "cernere";
+  if (audience === "service") await requireActiveUser(user.id);
   await ensureProjectRowForComposite(user.id, ctx);
   const authCode = await issueAuthCode({
+    audience,
     userId: user.id,
     displayName: user.displayName,
     email: user.email,

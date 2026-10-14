@@ -24,7 +24,12 @@ export type SecurityEventKind =
   | "recovery.operator"
   | "session.revoke_all"
   | "alert_target.added"
-  | "alert_target.removed";
+  | "alert_target.removed"
+  | "access.approved"
+  | "access.rejected"
+  | "access.locked"
+  | "access.unlocked"
+  | "access.requests_pending";
 
 export type SecuritySeverity = "normal" | "high" | "critical";
 
@@ -41,6 +46,11 @@ const SEVERITY: Record<SecurityEventKind, SecuritySeverity> = {
   "session.revoke_all": "high",
   "alert_target.added": "high",
   "alert_target.removed": "high",
+  "access.approved": "normal",
+  "access.rejected": "high",
+  "access.locked": "critical",
+  "access.unlocked": "high",
+  "access.requests_pending": "normal",
 };
 
 /** 通知に載せてよい概略だけ。秘密値・token・完全な IP・userId・メールは入れない。 */
@@ -49,6 +59,8 @@ export interface SecurityEventDetail {
   country?: string;
   eligibleAt?: string;
   channel?: string;
+  /** 審査待ちの件数 (admin 向けのまとめ通知) */
+  count?: number;
 }
 
 type Database = Pick<typeof db, "select" | "insert">;

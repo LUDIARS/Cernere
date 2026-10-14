@@ -11,6 +11,7 @@ import { redis } from "./redis.js";
 import { runMigrations } from "./db/migrate.js";
 import { initOidcKeys } from "./auth/oidc-keys.js";
 import { startOutboxWorker } from "./notify/outbox-worker.js";
+import { startAccessRequestDigest } from "./notify/access-request-digest.js";
 import { purgeExpiredFaceConsents } from "./identity/face-consent-store.js";
 import { purgeExpiredFaceRevocations } from "./identity/face-revocation-store.js";
 
@@ -55,6 +56,8 @@ async function main() {
   if (workloadListener) startWorkloadListener(workloadListener, httpHelpers, listenHost);
   // ログイン通知の配送 (SPEC-LOGIN-ALERT)。配送の失敗は認証処理に影響しない。
   startOutboxWorker();
+  // 審査待ちの利用申請を admin へまとめて知らせる (許可制 案 A)。
+  startAccessRequestDigest();
 }
 
 main().catch((err) => {

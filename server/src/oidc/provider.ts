@@ -21,6 +21,7 @@ import { signIdToken } from "../auth/oidc-keys.js";
 import { config } from "../config.js";
 import { devLog } from "../logging/dev-logger.js";
 import { assertUserSessionCurrent, currentUserSessionState, type UserSessionState } from "../auth/user-session-state.js";
+import { requireActiveUser } from "../auth/user-access.js";
 import { readAuthenticationEvidence } from "../lib/authentication-evidence.js";
 import {
   getClientByClientId,
@@ -213,6 +214,8 @@ export async function approveAuthorization(requestId: string, userId: string, au
   const authorization = source ?? { ...await currentUserSessionState(userId), authentication: readAuthenticationEvidence(authentication) };
   if (authorization.sub !== userId) throw AppError.unauthorized("OIDC session user mismatch");
   await assertUserSessionCurrent(authorization);
+  // 外部の RP へ身元を渡すのは許可済みのユーザーだけ (許可制 案 A)。
+  await requireActiveUser(userId);
   const req = await getAuthRequest(requestId);
   if (!req) throw AppError.badRequest("Invalid or expired authorization request");
   const client = await getClientByClientId(req.clientId);
@@ -291,7 +294,7 @@ export async function exchangeToken(params: TokenRequestParams): Promise<TokenRe
   const record = await consumeAuthCode(params.code);
   if (!record) throw new OidcError("invalid_grant", "code is invalid, expired, or already used");
   if (!record.authorization || record.authorization.sub !== record.userId) throw new OidcError("invalid_grant", "Session provenance is unavailable");
-  try { await assertUserSessionCurrent(record.authorization); }
+  try { await assertUserSessionCurrent(record.authorization); await requireActiveUser(record.userId); }
   catch { throw new OidcError("invalid_grant", "Authorizing session was revoked"); }
 
   if (record.clientId !== client.clientId) {
@@ -362,6 +365,7 @@ export async function userinfo(accessToken: string | null): Promise<Record<strin
   if (!record) throw AppError.unauthorized("invalid or expired access token");
   if (!record.authorization || record.authorization.sub !== record.userId) throw AppError.unauthorized("Session provenance is unavailable");
   await assertUserSessionCurrent(record.authorization);
+  await requireActiveUser(record.userId);
   const client = await getClientByClientId(record.clientId);
   if (!client?.isActive) throw AppError.unauthorized("OIDC client is disabled");
   await checkOidcAuthentication(record.clientId, record.userId, record.authorization.authentication, undefined, record.enterprise);

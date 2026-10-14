@@ -24,6 +24,7 @@ export type ProtectedAction =
   | "recovery_code.issue"
   | "recovery_request.cancel"
   | "login_alert.manage"
+  | "user_access.decide"
   | "oauth.link"
   | "oauth.unlink"
   | "organization.delete"
@@ -77,6 +78,7 @@ export function resolveBrowserActionTarget(
   const p = asObject(payload);
   switch (name) {
     case "login_alert.manage": return { action: name, resource: requiredString(p, "channel") };
+    case "user_access.decide": return { action: name, resource: requiredString(p, "userId") };
     case "device_session.revoke": return { action: name, resource: requiredString(p, "deviceId") };
     case "device_session.revoke_all": return { action: name, resource: requireCurrentUser(currentUserId) };
     case "account_recovery.issue": return { action: name, resource: requiredString(p, "userId") };

@@ -34,6 +34,7 @@ export interface AuthCodeExchangeResult {
 }
 
 interface StoredAuthCode {
+  audience?: unknown;
   accessToken?: unknown;
   refreshToken?: unknown;
   user?: { id?: unknown } | null;
@@ -52,6 +53,11 @@ export async function handleAuthCodeExchange(body: string, authHeader: string): 
   const userId = typeof stored.user?.id === "string" ? stored.user.id : null;
   const accessToken = typeof stored.accessToken === "string" ? stored.accessToken : null;
   if (!userId || !accessToken) throw AppError.unauthorized("Invalid or expired auth code");
+  // Cernere 自身の /login 用の code (許可待ちでも出る) は kiosk に渡さない (許可制 案 A)。
+  if (stored.audience === "cernere") {
+    await dropRefreshSession(stored.refreshToken);
+    throw AppError.unauthorized("Invalid or expired auth code");
+  }
   await dropRefreshSession(stored.refreshToken);
 
   devLog("auth.codeExchange.done");

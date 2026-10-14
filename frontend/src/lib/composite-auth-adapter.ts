@@ -27,7 +27,11 @@ async function postJson<T>(url: string, body: unknown, fallbackError: string): P
 }
 
 export class CernereCompositeAuthAdapter implements CompositeAuthApi {
-  constructor(private readonly apiBase: string = "") {}
+  /**
+   * @param target popup / redirect の送り先。あればサービス向けの authCode として発行させる
+   *   (許可待ちのユーザーには出ない)。self モード (Cernere 自身の /login) は null。
+   */
+  constructor(private readonly apiBase: string = "", private readonly target: string | null = null) {}
 
   passkeyLoginBegin(): Promise<PasskeyLoginBeginResult> {
     return postJson(`${this.apiBase}/api/auth/passkey/login-begin`, {}, "Passkey login start failed");
@@ -35,7 +39,8 @@ export class CernereCompositeAuthAdapter implements CompositeAuthApi {
 
   async passkeyLoginFinish(params: { challengeOwner: string; response: AuthenticationResponseJSON }): Promise<CompositeAuthResponse> {
     const data = await postJson<{ authCode?: string }>(
-      `${this.apiBase}/api/auth/passkey/composite-login-finish`, params, "Passkey login failed");
+      `${this.apiBase}/api/auth/passkey/composite-login-finish`,
+      this.target ? { ...params, target: this.target } : params, "Passkey login failed");
     if (!data.authCode) throw new Error("Passkey login failed");
     return { authCode: data.authCode };
   }

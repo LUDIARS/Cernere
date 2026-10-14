@@ -22,6 +22,7 @@ export const protectedActionSchema = z.enum([
   "recovery_code.issue",
   "recovery_request.cancel",
   "login_alert.manage",
+  "user_access.decide",
   "oauth.link",
   "oauth.unlink",
   "organization.delete",
@@ -57,6 +58,7 @@ export const actionTargetSchema = z.object({
 
 const protectedWsActions = new Set<ProtectedAction>([
   "login_alert.manage",
+  "user_access.decide",
   "device_session.revoke",
   "device_session.revoke_all",
   "account_recovery.issue",
@@ -101,6 +103,7 @@ export function resolveWsActionTarget(
   switch (parsedAction.data) {
     case "device_session.revoke": return target(parsedAction.data, requiredString(p, "deviceId"));
     case "login_alert.manage": return target(parsedAction.data, requiredString(p, "channel"));
+    case "user_access.decide": return target(parsedAction.data, requiredString(p, "userId"));
     case "device_session.revoke_all": return target(parsedAction.data, userId);
     case "account_recovery.issue": return target(parsedAction.data, requiredString(p, "userId"));
     case "account_recovery.revoke": return target(parsedAction.data, requiredString(p, "grantId"));

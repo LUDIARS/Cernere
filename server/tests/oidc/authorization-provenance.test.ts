@@ -40,6 +40,7 @@ vi.mock("../../src/db/connection.js", () => ({
         authEpoch: state.authEpoch, mfaRevision: state.revision, revision: state.revision,
         email: "user@example.com", displayName: "User", login: "user", avatarUrl: null,
         googleId: "google-user", githubId: null,
+        accessStatus: "active", status: "active",
       }],
     }) }) }),
   },

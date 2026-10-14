@@ -40,11 +40,14 @@ describe('workload administrator enrollment', () => {
     expect(fake.inserts.every(row => row.table === operationLogs)).toBe(true);
   });
   it('rejects non-admin users', async () => {
+    // dispatch は許可状態 (許可制 案 A) を先に読む。
+    fake.queueSelect([{ status: 'active' }]);
     fake.queueSelect([{ role: 'general' }]);
     await expect(dispatch('admin', 'session', 'workload_authority', 'register', {})).rejects.toMatchObject({ statusCode: 403 });
     expect(fake.inserts.every(row => row.table === operationLogs)).toBe(true);
   });
   it('stores only a hash and registered public key, redacts admin audit input', async () => {
+    fake.queueSelect([{ status: 'active' }]);
     fake.queueSelect([{ role: 'admin' }]);
     const result = await dispatch('admin', 'session', 'workload_authority', 'register', {
       id: 'site-a/excubitor', publicKeyPem,

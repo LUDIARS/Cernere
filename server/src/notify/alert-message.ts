@@ -23,6 +23,11 @@ const HEADLINES: Record<SecurityEventKind, string> = {
   "session.revoke_all": "すべての端末からログアウトしました",
   "alert_target.added": "ログイン通知の宛先が追加されました",
   "alert_target.removed": "ログイン通知の宛先が外されました",
+  "access.approved": "Cernere の利用が許可されました",
+  "access.rejected": "Cernere の利用申請は承認されませんでした",
+  "access.locked": "アカウントが停止されました",
+  "access.unlocked": "アカウントの停止が解除されました",
+  "access.requests_pending": "利用申請が審査を待っています",
 };
 
 const GUIDANCE: Partial<Record<SecurityEventKind, string>> = {
@@ -64,6 +69,7 @@ export function renderAlertMessage(event: {
   if (event.detail.device) lines.push(`端末: ${escape(event.detail.device)}`);
   if (event.detail.country) lines.push(`地域: ${escape(event.detail.country)}`);
   if (event.detail.channel) lines.push(`宛先: ${event.detail.channel === "discord" ? "Discord" : "Google"}`);
+  if (typeof event.detail.count === "number") lines.push(`件数: ${event.detail.count}`);
   if (event.detail.eligibleAt) lines.push(`回復が確定する時刻: ${formatTime(new Date(event.detail.eligibleAt))}`);
   const guidance = GUIDANCE[event.kind];
   if (guidance) lines.push("", guidance);

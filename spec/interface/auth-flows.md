@@ -94,6 +94,23 @@ sequenceDiagram
 5. リカバリー QR (`recovery-code-*`, `recovery-confirm-*`) は 24 時間の回復待機の後に確定する。待機中は旧キーで取り消せる。admin は対象外。
 6. 最初のユーザーを自動で admin にしない (`npm run bootstrap-admin -- <userId>`)。
 
+## 利用許可 (許可制 案 A、2026-10-15)
+
+設計: [../plan/2026-10-14-registration-approval-design-astra.md](../plan/2026-10-14-registration-approval-design-astra.md)。
+
+| 状態 | できること |
+|---|---|
+| `pending` (新規登録の既定) | Cernere 内の本人用操作だけ (プロフィール・パスキー・リカバリー QR・通知・端末・利用申請・退会)。他は `approval_required` (403) |
+| `active` | admin が許可。既存の組織ロール・共有設定・サービス権限の範囲 |
+| `locked` | 全セッション・トークン発行を拒否 (`assertUserSessionCurrent`) |
+
+- authCode は用途 (`audience`) を持つ。サービス向け (popup / redirect の `target`、project WS、silent SSO、edge、open URL) は active 必須。
+  Cernere 自身の `/login` 用 (`cernere`) は pending でも出すが、`/api/auth/exchange` は Origin が Cernere の画面のときだけ受け付け、kiosk 交換は拒否する。
+- user×project token と OIDC の同意・トークン交換・userinfo は active 必須。
+- WS `user_access`: 本人の `status` / `apply` / `withdraw`、admin の `list` / `decide` (action proof `user_access.decide`、expected revision)。
+- `bootstrap-admin` は admin と active を同時に付ける。審査待ちの申請は 15 分ごとに件数だけ admin へ通知する。
+- ロックアウトの下流サービスへの伝播 (失効イベント・オンライン認可) は未実装 (設計書 §3.5)。
+
 以下の「Passkey アカウント作成」「Passkey 他デバイス登録」は 2026-10-14 以前の記述。現行は上と設計書を正とする。
 
 ## Passkey アカウント作成

@@ -467,6 +467,8 @@ export function createApp() {
     const authHeader = req.getHeader("authorization") ?? "";
     const actionProof = req.getHeader("x-cernere-action-proof") ?? "";
     const userAgent = req.getHeader("user-agent") ?? undefined;
+    // authCode の交換で Cernere 自身の画面からかを確かめる (uWS の req は await の前にしか読めない)。
+    const origin = req.getHeader("origin") ?? "";
     const ip = getRemoteIp(res);
     let aborted = false;
     res.onAborted(() => { aborted = true; });
@@ -476,7 +478,7 @@ export function createApp() {
       const body = await readBody(res);
       if (aborted) return;
       devLog("http.auth.body", { action, bodyLen: body.length });
-      const result = await handleAuthRoute(action, body, authHeader, { ip, userAgent, actionProof });
+      const result = await handleAuthRoute(action, body, authHeader, { ip, userAgent, actionProof, origin });
       devLog("http.auth.ok", { action, status: result.status });
       jsonResponse(res, result.status, result.data, result.cookies);
     } catch (err) {

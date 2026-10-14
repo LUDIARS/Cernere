@@ -25,6 +25,8 @@ import { issueAuthCodeForUserId } from "../auth/auth-code.js";
 import { readAuthenticationEvidence } from "../lib/authentication-evidence.js";
 import { isCompositeTargetAllowed } from "../auth/composite-redirect.js";
 import { AppError } from "../error.js";
+import { APPROVAL_REQUIRED, requireActiveUser } from "../auth/user-access.js";
+import { config } from "../config.js";
 import { retiredLoginResult } from "../auth/retired-login.js";
 import { removeAlertTarget } from "../notify/alert-targets.js";
 import { actionProofStore, httpActionBinding } from "../auth/action-proof.js";
@@ -41,6 +43,8 @@ export interface RequestCtx {
   ip?: string;
   userAgent?: string;
   actionProof?: string;
+  /** 要求元の Origin ヘッダー (Cernere 自身の画面からの交換かを確かめる) */
+  origin?: string;
 }
 
 export async function handleAuthRoute(
@@ -58,7 +62,7 @@ export async function handleAuthRoute(
     case "refresh": return refresh(parseBody(body));
     case "logout": return logout(parseBody(body));
     case "verify": return verify(parseBody(body), ctx);
-    case "exchange": return exchange(parseBody(body));
+    case "exchange": return exchange(parseBody(body), ctx);
     case "me": return me(authHeader);
     case "link": return linkProvider(parseBody(body), authHeader, ctx);
     case "unlink": return unlink(parseBody(body), authHeader, ctx);
@@ -184,7 +188,13 @@ async function verify(p: Record<string, unknown>, ctx: RequestCtx): Promise<Rout
   }
 }
 
-async function exchange(p: Record<string, unknown>): Promise<RouteResult> {
+/** Cernere 自身の画面の origin。cernere 向けの authCode はここからの交換だけを受け付ける。 */
+function isCernereFrontendOrigin(origin: string | undefined): boolean {
+  if (!origin) return false;
+  try { return new URL(origin).origin === new URL(config.frontendUrl).origin; } catch { return false; }
+}
+
+async function exchange(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
   // M-3: authcode は user の access/refresh token を取り出す bearer ticket。
   // 以前は code の先頭 8 文字を平文 console.log に書いていた。 値はログに残さず、
   // dev のみ有効な devLog に「有無 / 結果」だけを寄せる。
@@ -199,6 +209,11 @@ async function exchange(p: Record<string, unknown>): Promise<RouteResult> {
   devLog("auth.exchange.lookup", { found: raw !== null });
   if (!raw) throw new Error("Unauthorized: Invalid or expired auth code");
   const parsed = JSON.parse(raw);
+  // Cernere 自身の /login 用 (許可待ちでも発行) は、サービスのバックエンドからは交換させない (許可制 案 A)。
+  // 用途の無い旧形式はサービス向けとして扱い、発行時の active 確認に任せる。
+  if (parsed.audience === "cernere" && !isCernereFrontendOrigin(ctx.origin)) {
+    throw AppError.withCode(403, APPROVAL_REQUIRED, "This sign-in code can only be used by Cernere");
+  }
   await verifyToken(parsed.accessToken);
   devLog("auth.exchange.done", {
     userId: parsed.user?.id ?? "(none)",
@@ -395,6 +410,8 @@ async function projectUserToken(
   const token = extractBearerToken(authHeader);
   if (!token) throw new Error("Unauthorized: No token provided");
   const claims = await verifyToken(token);
+  // サービスへの user×project token は許可済みのユーザーにだけ出す (許可制 案 A)。
+  await requireActiveUser(claims.sub);
 
   const projectKey = (p.project_key as string | undefined) ?? (p.project_id as string | undefined);
   if (!projectKey || typeof projectKey !== "string") {

@@ -18,6 +18,7 @@ import { bodyTextStyle, pageStyle, primaryButton, secondaryButton } from "../../
 import { useAuth } from "../../contexts/AuthContext";
 import { isMobileDevice } from "../../lib/device-kind";
 import { recoveryCode, type RecoveryStatus } from "../../lib/passkey-account-api";
+import { userAccess } from "../../lib/user-access-api";
 import { NameStep } from "./NameStep";
 import { readReturnPath } from "./onboarding-return";
 
@@ -36,7 +37,15 @@ export function OnboardingPage() {
     recoveryCode.status().then(setRecovery).catch((e) => setError((e as Error).message));
   }, []);
 
-  const finish = () => window.location.assign(returnTo);
+  // 許可待ちなら、サービスへ戻っても入れないので申請画面へ (許可制 案 A)。
+  const finish = async () => {
+    const access = await userAccess.status().catch(() => null);
+    if (access && access.status !== "active") {
+      window.location.assign(`/access?${new URLSearchParams({ return: returnTo }).toString()}`);
+      return;
+    }
+    window.location.assign(returnTo);
+  };
   const afterRecovery = () => setStep(mobile ? "alerts" : "phone");
 
   return (
@@ -85,7 +94,7 @@ export function OnboardingPage() {
         <>
           <AlertTargetsPanel />
           <p style={bodyTextStyle}>通知はあとからでも「セキュリティ」画面で設定できます。</p>
-          <button type="button" onClick={finish} style={{ ...primaryButton(false), marginTop: "1rem" }}>
+          <button type="button" onClick={() => { void finish(); }} style={{ ...primaryButton(false), marginTop: "1rem" }}>
             はじめる
           </button>
         </>
