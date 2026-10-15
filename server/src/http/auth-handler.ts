@@ -26,8 +26,9 @@ import { readAuthenticationEvidence } from "../lib/authentication-evidence.js";
 import { isCompositeTargetAllowed } from "../auth/composite-redirect.js";
 import { ConsentRequiredError, consentRequiredBody } from "../consent/gate.js";
 import { isCernereFrontendOrigin } from "./cernere-origin.js";
+import { checkExchangeAudience } from "../auth/auth-code-audience.js";
 import { AppError } from "../error.js";
-import { APPROVAL_REQUIRED, requireActiveUser } from "../auth/user-access.js";
+import { requireActiveUser } from "../auth/user-access.js";
 import { retiredLoginResult } from "../auth/retired-login.js";
 import { removeAlertTarget } from "../notify/alert-targets.js";
 import { actionProofStore, httpActionBinding } from "../auth/action-proof.js";
@@ -207,9 +208,8 @@ async function exchange(p: Record<string, unknown>, ctx: RequestCtx): Promise<Ro
   // Cernere 自身の /login 用 (許可待ちでも発行) は、サービスのバックエンドからは交換させない (許可制 案 A)。
   // Cernere 自身の画面の origin からの交換だけを受け付ける (isCernereFrontendOrigin)。
   // 用途の無い旧形式はサービス向けとして扱い、発行時の active 確認に任せる。
-  if (parsed.audience === "cernere" && !isCernereFrontendOrigin(ctx.origin)) {
-    throw AppError.withCode(403, APPROVAL_REQUIRED, "This sign-in code can only be used by Cernere");
-  }
+  const mismatch = checkExchangeAudience(parsed.audience, isCernereFrontendOrigin(ctx.origin));
+  if (mismatch) throw AppError.withCode(403, mismatch.code, mismatch.message);
   await verifyToken(parsed.accessToken);
   devLog("auth.exchange.done", {
     userId: parsed.user?.id ?? "(none)",
