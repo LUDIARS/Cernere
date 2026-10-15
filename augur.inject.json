@@ -1,8 +1,17 @@
 {
   "service": "cernere",
-  "include": ["server/scripts/env/**/*.ts"],
-  "exclude": ["**/*.test.ts", "dist/**"],
-  "runtime": { "autoImport": false, "entrypoints": [] },
+  "include": [
+    "server/scripts/env/**/*.ts",
+    "server/src/consent/**/*.ts"
+  ],
+  "exclude": [
+    "**/*.test.ts",
+    "dist/**"
+  ],
+  "runtime": {
+    "autoImport": false,
+    "entrypoints": []
+  },
   "rules": {
     "silent-catch": false,
     "spawn-watch": false,

@@ -131,6 +131,11 @@ async function execute(
     case "oidc_client": return oidcClientCmd(userId, action, payload);
     case "edge_idp": return edgeIdpCmd(userId, action, payload);
     case "oidc_keys": return oidcKeysCmd(userId, action, payload);
+    case "consent": {
+      // 本人の「サービスの権限」。decide / revoke は action proof (ws/handler) を通ってからここへ来る。
+      const { consentCommand } = await import("./consent/command.js");
+      return consentCommand(userId, action, payload);
+    }
     default:
       throw AppError.badRequest(`Unknown module: ${module}`);
   }
@@ -613,6 +618,9 @@ async function oidcClientCmd(userId: string, action: string, p?: Record<string, 
       return svc.setActive(requireStr(p, "clientId"), true);
     case "disable":
       return svc.setActive(requireStr(p, "clientId"), false);
+    case "update_consent":
+      // 同意の移行モードと宣言 (管理者所有)。宣言は client の scopes を上限に検証する。
+      return svc.updateConsent(requireStr(p, "clientId"), p?.consentMode ?? p?.consent_mode, p?.consent);
     default:
       throw AppError.badRequest(`Unknown oidc_client action: ${action}`);
   }

@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { LoginPage } from "../LoginPage";
 import { oidc, type OidcConsentInfo } from "../../lib/api";
+import { PermissionList, initialRecommendedSelection } from "../../components/consent/PermissionList";
 
 /** scope → ユーザー向けの説明ラベル。 */
 const SCOPE_LABELS: Record<string, string> = {
@@ -26,6 +27,9 @@ function Spinner() {
  * 未ログインなら LoginPage を inline 表示し、 ログイン完了後 (AuthContext の
  * user 更新) に同意 UI へ自動で切り替わる。 承認/拒否すると RP の redirect_uri
  * へ window.location で戻る。
+ *
+ * RP の consent_mode が warn / enforce なら、/consent と同じ表示データ (必須/推奨・目的・誰が読めるか)
+ * で描き、許可した推奨を送る。保存済みの同意で足りていれば画面を省略して承認する。
  */
 export function OidcConsentPage() {
   const { user, loading, logout } = useAuth();
@@ -36,6 +40,8 @@ export function OidcConsentPage() {
   const [loadingInfo, setLoadingInfo] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const autoApproved = useRef(false);
 
   useEffect(() => {
     if (!requestId) {
@@ -48,11 +54,28 @@ export function OidcConsentPage() {
     setInfo(null);
     setError("");
     oidc.getRequest(requestId)
-      .then((result) => { if (!cancelled) setInfo(result); })
+      .then((result) => {
+        if (cancelled) return;
+        setInfo(result);
+        if (result.consent) setSelected(initialRecommendedSelection(result.consent.view));
+      })
       .catch((e: unknown) => { if (!cancelled) setError(e instanceof Error ? e.message : "リクエストの読み込みに失敗しました"); })
       .finally(() => { if (!cancelled) setLoadingInfo(false); });
     return () => { cancelled = true; };
   }, [requestId, user]);
+
+  // 保存済みの同意で足りている (consent_mode warn/enforce) なら確認画面を省略する。
+  useEffect(() => {
+    if (!user || !info?.consent?.satisfied || info.reauthenticationRequired || autoApproved.current) return;
+    autoApproved.current = true;
+    setBusy(true);
+    oidc.approve(requestId)
+      .then(({ redirectTo }) => { window.location.href = redirectTo; })
+      .catch((e: unknown) => {
+        setError(e instanceof Error ? e.message : "処理に失敗しました");
+        setBusy(false);
+      });
+  }, [user, info, requestId]);
 
   if (loading) return <Spinner />;
   // 未ログイン: ログインフォームを表示。 ログイン成功で user が入り再描画される。
@@ -63,7 +86,8 @@ export function OidcConsentPage() {
     setBusy(true);
     setError("");
     try {
-      const { redirectTo } = kind === "approve" ? await oidc.approve(requestId) : await oidc.deny(requestId);
+      const recommended = info?.consent ? [...selected] : undefined;
+      const { redirectTo } = kind === "approve" ? await oidc.approve(requestId, recommended) : await oidc.deny(requestId);
       window.location.href = redirectTo;
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "処理に失敗しました");
@@ -110,15 +134,30 @@ export function OidcConsentPage() {
               ログイン中: <strong style={{ color: "var(--text)" }}>{user.name}</strong>（{user.email}）
             </div>
 
-            <p style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.5rem" }}>共有される情報</p>
-            <ul style={{ listStyle: "none", padding: 0, margin: "0 0 1.25rem" }}>
-              {info.scopes.map((s) => (
-                <li key={s} style={{ display: "flex", gap: "0.5rem", alignItems: "flex-start", padding: "0.4rem 0", fontSize: "0.85rem" }}>
-                  <span style={{ color: "var(--accent)" }}>✓</span>
-                  <span>{SCOPE_LABELS[s] ?? s}</span>
-                </li>
-              ))}
-            </ul>
+            {info.consent ? (
+              <PermissionList
+                view={info.consent.view}
+                selected={selected}
+                disabled={busy}
+                onToggle={(key, checked) => setSelected((prev) => {
+                  const next = new Set(prev);
+                  if (checked) next.add(key); else next.delete(key);
+                  return next;
+                })}
+              />
+            ) : (
+              <>
+                <p style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.5rem" }}>共有される情報</p>
+                <ul style={{ listStyle: "none", padding: 0, margin: "0 0 1.25rem" }}>
+                  {info.scopes.map((s) => (
+                    <li key={s} style={{ display: "flex", gap: "0.5rem", alignItems: "flex-start", padding: "0.4rem 0", fontSize: "0.85rem" }}>
+                      <span style={{ color: "var(--accent)" }}>✓</span>
+                      <span>{SCOPE_LABELS[s] ?? s}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
 
             <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "1.25rem" }}>
               承認すると <strong style={{ color: "var(--text)" }}>{redirectHost}</strong> にリダイレクトされます。

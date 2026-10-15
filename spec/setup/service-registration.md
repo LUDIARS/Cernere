@@ -117,6 +117,49 @@ POST /api/auth/project-token
 
 実装は `@ludiars/cernere-service-adapter` の `PeerAdapter`。
 
+## 6. 権限の宣言 (`consent`) と移行モード (`consent_mode`)
+
+初回ログイン時に利用者へ見せる権限を `schema_definition.consent` に宣言する
+(設計: [../plan/2026-10-15-service-consent-design.md](../plan/2026-10-15-service-consent-design.md)、応答: [../interface/auth-flows.md](../interface/auth-flows.md) 「サービスの権限確認」)。
+
+```json
+{
+  "consent": {
+    "version": 3,
+    "permissions": [
+      { "key": "profile.displayName", "level": "required", "purpose": "メンバー一覧に名前を出すため", "visible_to": ["service_users"] },
+      { "key": "profile.email", "level": "recommended", "purpose": "締切のお知らせをメールで送るため", "visible_to": ["self"] },
+      { "key": "user_data.module:calendar", "level": "recommended", "purpose": "予定を Google Calendar と同期するため", "visible_to": ["self"] }
+    ]
+  }
+}
+```
+
+| 項目 | 規則 |
+|---|---|
+| `key` | `identity.basic` / `profile.<field>` / `identity_claim.<claim>` / `user_data.module:<module>` / `oidc.<email\|profile>`。許可リスト外は保存しない |
+| 上限 | `profile.*` は `profile_access.read` ∪ `write`、`identity_claim.*` は `identity_claims`、`user_data.module:*` は論理削除されていない列の module、`oidc.*` は `oidc_clients.scopes`。上限外は `400 Invalid consent declaration` (自己付与の禁止) |
+| `level` | `required` (拒否するとログインできない) / `recommended` (既定オフ、外して進める)。`identity.basic` は常に必須 (省略しても表示) |
+| `purpose` | 必須。画面に「目的」として出す |
+| `visible_to` | 必須。`self` / `service_users` / `public`。画面には「サービスの申告」と出所を書く。`other_services` は Cernere が `data_sharing` から足すので書けない |
+| `version` | 単調増加。下げる更新は拒否。権限の集合 (key と level) を変えたら上げる (据え置きは拒否)。文言 (`purpose`) だけの変更は据え置いてよい |
+
+- サービス (project client) は WS `managed_project.update_schema` で `consent` を保存できる。user_data だけを送る auto-sync では
+  保存済みの `consent` を消さない。
+- 再確認は「版が上がり、保存済みの許可/拒否に無い権限が増えた」ときと「推奨で拒否した権限が必須に上がった」ときだけ。
+- 未宣言のサービスは `identity.basic` だけ必須、上限で許可されている残りを全て推奨として表示する (黙って渡さない)。
+- `consent_mode` (`off` / `warn` / `enforce`、既定 `off`) は **管理者所有**。project client の update_schema では保存されない
+  (`adminOwnedFieldsPreserved` に載る)。admin は WS `managed_project.update_schema` (action proof) で切り替える。
+- OIDC client は `schema_definition` を持たないので、admin が WS `oidc_client.update_consent { clientId, consentMode, consent }`
+  (action proof `oidc_client.update_consent`) で移行モードと宣言を設定する (上限は client の `scopes`)。
+
+サービス側の対応:
+
+1. 宣言を書く。上限外が要るときは管理者に `profile_access` / `identity_claims` を頼む。
+2. silent SSO・project WS で `consent_required` を受けたら `consentUrl` を popup で開く。
+3. `consent_denied` を受けたら「権限が許可されなかったため利用できません」と出す。
+4. 推奨を拒否された項目は `null` / 403 で返る前提で画面を作る。
+
 ## サービス側 (受け取る側) の検証
 
 - **PASETO user×project token (§3)**: `/.well-known/cernere-public-key` から公開鍵を fetch (6h ごと等) してローカル検証。`aud` (= 自分の URL) と `kind="user_for_project"` を必ず照合する。署名鍵を共有しないので leaf 漏洩でも偽造能力は漏れない。

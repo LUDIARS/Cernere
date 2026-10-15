@@ -24,6 +24,10 @@ vi.mock("postgres", () => ({
 
 vi.mock("../../src/config.js", () => ({ config: { databaseUrl: "postgres://test/test" } }));
 
+// 同意で外された claim (consent:identity_claim.<c>)。既定は拒否なし。
+const mockDenied = vi.fn(async (): Promise<Set<string>> => new Set());
+vi.mock("../../src/consent/denials.js", () => ({ deniedPermissionKeys: mockDenied }));
+
 const { getIdentityClaims, resolveUserByClaim, loadDeclaredClaims } =
   await import("../../src/project/identity-claims.js");
 
@@ -43,6 +47,27 @@ describe("identity claims (declaration-driven, no service name hardcoded)", () =
     // postgres() の戻りは関数兼オブジェクト。unsafe/end を生やして返す。
     mockUnsafe.unsafe = mockUnsafe;
     mockUnsafe.end = mockEnd;
+    mockDenied.mockReset();
+    mockDenied.mockResolvedValue(new Set());
+  });
+
+  it("同意で外された claim は null で返す (データ提供側で拒否する)", async () => {
+    mockManagedProjectRow.mockReturnValue(projectRow(["discord_id", "discord_username"]));
+    mockUnsafe.mockResolvedValue([{ discord_id: "12345", discord_username: "neco" }]);
+    mockDenied.mockResolvedValue(new Set(["identity_claim.discord_username"]));
+
+    const result = await getIdentityClaims("somesvc", "user-1");
+
+    expect(result).toEqual({ discord_id: "12345", discord_username: null });
+    expect(mockDenied).toHaveBeenCalledWith("user-1", "somesvc");
+  });
+
+  it("claim を外した利用者は claim の値から逆引きさせない", async () => {
+    mockManagedProjectRow.mockReturnValue(projectRow(["discord_id"]));
+    mockUnsafe.mockResolvedValue([{ userId: "user-1", displayName: "Neco" }]);
+    mockDenied.mockResolvedValue(new Set(["identity_claim.discord_id"]));
+
+    await expect(resolveUserByClaim("somesvc", "discord_id", "12345")).resolves.toBeNull();
   });
 
   it("宣言が無いプロジェクトは claim を読めない (fail-closed)", async () => {

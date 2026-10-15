@@ -42,6 +42,10 @@ export const protectedActionSchema = z.enum([
   "edge_idp.enable",
   "edge_idp.disable",
   "edge_idp.purge_user",
+  // サービスの権限 (同意) の見直し。spec/plan/2026-10-15-service-consent-design.md §7.2
+  "consent.decide",
+  "consent.revoke",
+  "oidc_client.update_consent",
 ]);
 
 export type ProtectedAction = z.infer<typeof protectedActionSchema>;
@@ -84,6 +88,9 @@ const protectedWsActions = new Set<ProtectedAction>([
   "edge_idp.enable",
   "edge_idp.disable",
   "edge_idp.purge_user",
+  "consent.decide",
+  "consent.revoke",
+  "oidc_client.update_consent",
 ]);
 
 export function resolveWsActionTarget(
@@ -134,7 +141,12 @@ export function resolveWsActionTarget(
     case "oidc_client.rotate_secret":
     case "oidc_client.update_redirect_uris":
     case "oidc_client.disable":
+    case "oidc_client.update_consent":
       return target(parsedAction.data, requiredString(p, "clientId"));
+    // 同意の変更・取り消しは対象サービス単位で束ねる (取り消しはそのサービスの利用停止)。
+    case "consent.decide":
+    case "consent.revoke":
+      return target(parsedAction.data, joinResource(p, "subjectKind", "subjectKey"));
     // binding の変更は「どの CF Access アプリのアサーションを受理するか」を書き換える
     // = セッション発行の前提そのもの。 spec §11 に従い redirect URI 変更と同格に扱う。
     case "edge_idp.register":

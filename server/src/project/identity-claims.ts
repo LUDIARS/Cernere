@@ -17,6 +17,7 @@ import * as dbSchema from "../db/schema.js";
 import { config } from "../config.js";
 import { AppError } from "../error.js";
 import { IDENTITY_CLAIMS, type IdentityClaim, type ProjectDefinition } from "./schema.js";
+import { deniedPermissionKeys } from "../consent/denials.js";
 
 const CLAIM_SET: ReadonlySet<string> = new Set(IDENTITY_CLAIMS);
 
@@ -61,7 +62,7 @@ async function resolveRequestedClaims(
   return allowed;
 }
 
-/** 指定ユーザの、宣言済み claim のみを返す。 */
+/** 指定ユーザの、宣言済み claim のみを返す。同意で外された claim は null で返す。 */
 export async function getIdentityClaims(
   projectKey: string,
   userId: string,
@@ -78,8 +79,9 @@ export async function getIdentityClaims(
       `SELECT ${selectCols} FROM users WHERE id = $1 LIMIT 1`,
       [userId],
     );
+    const denied = await deniedPermissionKeys(userId, projectKey);
     const result: Record<string, unknown> = {};
-    for (const c of claims) result[c] = rows[0]?.[c] ?? null;
+    for (const c of claims) result[c] = denied.has(`identity_claim.${c}`) ? null : rows[0]?.[c] ?? null;
     return result;
   } finally {
     await sqlClient.end();
@@ -104,7 +106,10 @@ export async function resolveUserByClaim(
       `SELECT id AS "userId", display_name AS "displayName" FROM users WHERE "${allowed}" = $1 LIMIT 1`,
       [value],
     );
-    return (rows[0] as unknown as { userId: string; displayName: string } | undefined) ?? null;
+    const found = (rows[0] as unknown as { userId: string; displayName: string } | undefined) ?? null;
+    // この claim を渡すことを外した利用者は、claim の値から引かせない。
+    if (found && (await deniedPermissionKeys(found.userId, projectKey)).has(`identity_claim.${allowed}`)) return null;
+    return found;
   } finally {
     await sqlClient.end();
   }

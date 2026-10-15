@@ -16,6 +16,9 @@ import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { AppError } from "../error.js";
 import { SUPPORTED_SCOPES } from "./scopes.js";
+import { consentModeSchema, readConsentDeclaration, readConsentMode, type ConsentMode } from "../consent/declaration-schema.js";
+import { validateConsentDeclaration } from "../consent/declaration.js";
+import { capsFromOidcScopes } from "../consent/permission-keys.js";
 
 export interface OidcClientPublic {
   id: string;
@@ -24,6 +27,10 @@ export interface OidcClientPublic {
   redirectUris: string[];
   scopes: string[];
   isActive: boolean;
+  /** 同意の移行モード (管理者所有、既定 off) */
+  consentMode: ConsentMode;
+  /** 同意の宣言 (管理者所有)。未宣言は null */
+  consent: unknown;
   lastUsedAt: string | null;
   createdAt: string;
 }
@@ -40,6 +47,8 @@ function toPublic(row: typeof schema.oidcClients.$inferSelect): OidcClientPublic
     redirectUris: (row.redirectUris as string[]) ?? [],
     scopes: (row.scopes as string[]) ?? [],
     isActive: row.isActive,
+    consentMode: readConsentMode(row.consentMode),
+    consent: row.consent ?? null,
     lastUsedAt: row.lastUsedAt ? row.lastUsedAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(),
   };
@@ -166,4 +175,32 @@ export async function touchLastUsed(clientId: string): Promise<void> {
   await db.update(schema.oidcClients)
     .set({ lastUsedAt: new Date() })
     .where(eq(schema.oidcClients.clientId, clientId));
+}
+
+/**
+ * 同意の移行モードと宣言を更新する (管理者のみ)。OIDC client には schema_definition が無いので列で持つ。
+ * 宣言は client の scopes を上限として検証し、版を下げる更新は拒否する。undefined の項目は変えない。
+ */
+export async function updateConsent(clientId: string, modeInput: unknown, consentInput: unknown): Promise<OidcClientPublic> {
+  const existing = await getClientByClientId(clientId);
+  if (!existing) throw AppError.notFound("OIDC client not found");
+  const patch: Partial<typeof schema.oidcClients.$inferInsert> = { updatedAt: new Date() };
+  if (modeInput !== undefined) {
+    const mode = consentModeSchema.safeParse(modeInput);
+    if (!mode.success) throw AppError.badRequest("consentMode must be off, warn or enforce");
+    patch.consentMode = mode.data;
+  }
+  if (consentInput !== undefined) {
+    if (consentInput === null) {
+      patch.consent = null;
+    } else {
+      const previous = readConsentDeclaration(existing.consent);
+      const checked = validateConsentDeclaration(consentInput, capsFromOidcScopes(existing.scopes), previous?.version ?? null, previous);
+      if (!checked.ok) throw AppError.badRequest(`Invalid consent declaration: ${checked.errors.join("; ")}`);
+      patch.consent = checked.declaration;
+    }
+  }
+  const rows = await db.update(schema.oidcClients).set(patch)
+    .where(eq(schema.oidcClients.clientId, clientId)).returning();
+  return toPublic(rows[0]);
 }

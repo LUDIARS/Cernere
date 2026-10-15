@@ -181,9 +181,11 @@ export function DashboardPage() {
     // opener 経由で新タブから親タブを操作できないよう sever (noopener と同等の効果)。
     try { popup.opener = null; } catch { /* cross-origin 後は無視 */ }
     setError(null);
-    wsClient.sendCommand<{ url: string }>("managed_project", "open_url", { projectKey: key })
-      .then(({ url }) => {
-        popup.location.replace(url);
+    wsClient.sendCommand<{ url: string } | { consentRequired: true; consentUrl: string }>("managed_project", "open_url", { projectKey: key })
+      .then((result) => {
+        // 初回 (または権限が増えた) なら、開いたタブで権限の確認 (/consent) を出す。
+        // 同意後は /consent がサーバ側で検証済みの frontend_url へ ?code= 付きで遷移させる。
+        popup.location.replace("consentUrl" in result ? result.consentUrl : result.url);
       })
       .catch((err) => {
         popup.close();

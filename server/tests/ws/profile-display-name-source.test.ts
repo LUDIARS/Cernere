@@ -60,6 +60,8 @@ const fakeDb: Record<string, unknown> = {
 fakeDb.transaction = async (callback: (tx: unknown) => Promise<unknown>) => callback(fakeDb);
 
 vi.mock("../../src/db/connection.js", () => ({ db: fakeDb }));
+// 同意の拒否 (consent:profile.*) はこのテストの関心外。拒否なしとして select の順序を崩さない。
+vi.mock("../../src/consent/denials.js", () => ({ deniedPermissionKeys: async () => new Set<string>() }));
 
 const { dispatchProjectCommand } = await import("../../src/ws/project-dispatch.js");
 const schema = await import("../../src/db/schema.js");

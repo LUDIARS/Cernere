@@ -19,6 +19,7 @@ import { randomUUID, randomBytes } from "node:crypto";
 import { and, eq, or, inArray } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
+import { CONSENT_OPTOUT_PREFIX } from "../consent/denials.js";
 
 const CHALLENGE_TTL_MS = 60_000;
 
@@ -130,7 +131,7 @@ async function userOptedOutOfRelay(
   toKey: string,
 ): Promise<boolean> {
   const rows = await db
-    .select({ serviceId: schema.userDataOptouts.serviceId })
+    .select({ serviceId: schema.userDataOptouts.serviceId, categoryKey: schema.userDataOptouts.categoryKey })
     .from(schema.userDataOptouts)
     .where(
       and(
@@ -138,7 +139,9 @@ async function userOptedOutOfRelay(
         inArray(schema.userDataOptouts.serviceId, [fromKey, toKey]),
       ),
     );
-  const ids = new Set(rows.map((r) => r.serviceId));
+  // 同意で外した profile / identity claim (consent:<key>) は「その項目を渡さない」だけで、
+  // サービス間 relay 全体の opt-out ではない。module の opt-out は従来どおり relay を止める。
+  const ids = new Set(rows.filter((r) => !r.categoryKey.startsWith(CONSENT_OPTOUT_PREFIX)).map((r) => r.serviceId));
   return isRelayBlockedByOptout(ids, fromKey, toKey);
 }
 

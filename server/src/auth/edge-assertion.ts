@@ -57,6 +57,11 @@ export interface EdgeAssertionParams {
   assertion: string;
   /** Hub が転送した `CF_Authorization` クッキーの値 (get-identity 用)。 */
   cfAuthorization?: string;
+  /**
+   * 同意が要るとき、同意後に戻す Hub の URL (継続先)。Hub の frontend_url / composite 許可 origin
+   * の内側だけを受け付ける (関門が検証する)。省略時は Hub の frontend_url の origin へ戻す。
+   */
+  returnTo?: string;
   now?: number;
   fetchImpl?: FetchLike;
 }
@@ -131,7 +136,15 @@ export async function authenticateEdgeAssertion(
   await touchLastLogin(userId, new Date(now));
 
   // 解決したユーザが (競合削除等で) 消えていたら authCode は発行できない。
-  const authCode = await issueAuthCodeForUserId(userId);
+  // 同意が要るときは ConsentRequiredError が上がる。同意後は継続先へ戻すだけで authCode は出さず、
+  // Hub がアサーションを再送して (groups 付きで) ログインし直す。
+  const authCode = await issueAuthCodeForUserId(userId, {
+    subject: { projectKey: binding.projectKey },
+    continuation: params.returnTo ? { mode: "redirect", target: params.returnTo } : null,
+    channel: "service",
+    deliverAuthCode: false,
+    defaultContinuation: "redirect",
+  });
   if (!authCode) throw new EdgeAssertionError("not_provisioned");
   return { authCode, groups, userId };
 }

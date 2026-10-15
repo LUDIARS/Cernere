@@ -23,6 +23,7 @@ import { devLog } from "../logging/dev-logger.js";
 import { assertUserSessionCurrent, currentUserSessionState, type UserSessionState } from "../auth/user-session-state.js";
 import { requireActiveUser } from "../auth/user-access.js";
 import { readAuthenticationEvidence } from "../lib/authentication-evidence.js";
+import { oidcConsentInfo, settleOidcConsent, withoutDeniedScopes, type OidcConsentInfo } from "../consent/oidc-consent.js";
 import {
   getClientByClientId,
   isRedirectUriAllowed,
@@ -187,6 +188,8 @@ export interface ConsentInfo {
   redirectUri: string;
   reauthenticationRequired: boolean;
   authenticationMessage?: string;
+  /** サービスの権限確認 (必須/推奨・誰が読めるか)。consent_mode off の RP は null (従来の表示) */
+  consent: OidcConsentInfo | null;
 }
 
 export async function getConsentInfo(requestId: string, claims?: JwtClaims): Promise<ConsentInfo | null> {
@@ -203,13 +206,14 @@ export async function getConsentInfo(requestId: string, claims?: JwtClaims): Pro
     }
   }
   return { clientName: client.name, scopes: req.scope, redirectUri: req.redirectUri,
-    reauthenticationRequired: !claims || !!authenticationMessage, authenticationMessage };
+    reauthenticationRequired: !claims || !!authenticationMessage, authenticationMessage,
+    consent: await oidcConsentInfo(req.clientId, claims?.sub ?? null) };
 }
 
 /** 承認は main の provenance 検査 (authEpoch/デバイス失効) と、 企業接続ポリシーの両方を通す。
  *  source には検証済み JwtClaims をそのまま渡す (exp を見てログインセッション切れも弾く)。 */
 export async function approveAuthorization(requestId: string, userId: string, authentication?: unknown,
-  source?: UserSessionState & { exp?: number }): Promise<{ redirectTo: string }> {
+  source?: UserSessionState & { exp?: number }, chosenRecommended?: readonly string[]): Promise<{ redirectTo: string }> {
   if (source?.exp !== undefined && source.exp * 1000 <= Date.now()) throw AppError.unauthorized("Login session expired");
   const authorization = source ?? { ...await currentUserSessionState(userId), authentication: readAuthenticationEvidence(authentication) };
   if (authorization.sub !== userId) throw AppError.unauthorized("OIDC session user mismatch");
@@ -221,12 +225,14 @@ export async function approveAuthorization(requestId: string, userId: string, au
   const client = await getClientByClientId(req.clientId);
   if (!client?.isActive || !isRedirectUriAllowed(client, req.redirectUri)) throw AppError.forbidden("OIDC client changed");
   const facts = await checkOidcAuthentication(req.clientId, userId, authorization.authentication, req);
+  // 同意 (consent_mode warn/enforce の RP): 判断を保存し、拒否した scope は code に載せない。
+  const scope = await settleOidcConsent(userId, req.clientId, req.scope, chosenRecommended);
   if (!await consumeAuthRequest(requestId)) throw AppError.badRequest("Authorization request already used");
 
   const code = await putAuthCode({
     clientId: req.clientId,
     redirectUri: req.redirectUri,
-    scope: req.scope,
+    scope,
     nonce: req.nonce,
     codeChallenge: req.codeChallenge,
     userId,
@@ -318,7 +324,9 @@ export async function exchangeToken(params: TokenRequestParams): Promise<TokenRe
   const user = await loadClaimUser(record.userId);
   if (!user) throw new OidcError("invalid_grant", "user no longer exists");
 
-  const claims = buildClaims(user, record.scope);
+  // 承認後に推奨を取り消していたら、その claim は渡さない。
+  const scope = await withoutDeniedScopes(user.id, client.clientId, record.scope);
+  const claims = buildClaims(user, scope);
   const authenticated = record.authorization.authentication;
   const ttl = Math.min(ACCESS_TOKEN_TTL_SEC, ID_TOKEN_TTL_SEC,
     record.enterprise ? record.enterprise.expiresAt - Math.floor(Date.now() / 1000) : ACCESS_TOKEN_TTL_SEC);
@@ -341,19 +349,19 @@ export async function exchangeToken(params: TokenRequestParams): Promise<TokenRe
     authorization: record.authorization,
     userId: user.id,
     clientId: client.clientId,
-    scope: record.scope,
+    scope,
     enterprise: record.enterprise,
   }, ttl);
 
   await touchLastUsed(client.clientId);
-  devLog("oidc.token.issued", { clientId: client.clientId, userId: user.id, scope: record.scope });
+  devLog("oidc.token.issued", { clientId: client.clientId, userId: user.id, scope });
 
   return {
     access_token: accessToken,
     token_type: "Bearer",
     expires_in: ttl,
     id_token: idToken,
-    scope: record.scope.join(" "),
+    scope: scope.join(" "),
   };
 }
 
@@ -371,7 +379,8 @@ export async function userinfo(accessToken: string | null): Promise<Record<strin
   await checkOidcAuthentication(record.clientId, record.userId, record.authorization.authentication, undefined, record.enterprise);
   const user = await loadClaimUser(record.userId);
   if (!user) throw AppError.unauthorized("user no longer exists");
-  return { ...buildClaims(user, record.scope), ...enterpriseOidcClaims(record.enterprise),
+  const scope = await withoutDeniedScopes(user.id, record.clientId, record.scope);
+  return { ...buildClaims(user, scope), ...enterpriseOidcClaims(record.enterprise),
     ...(record.enterprise ? { cr_user_id: user.id } : {}),
     ...(record.authorization.authentication ? { auth_time: record.authorization.authentication.authTime,
       amr: record.authorization.authentication.amr, cr_auth_revision: record.authorization.authentication.revision } : {}) };

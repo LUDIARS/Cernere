@@ -56,6 +56,7 @@ import {
 import { buildDeviceCookie } from "../auth/device-cookie.js";
 import { assertDeviceOrigin } from "../auth/device-origin.js";
 import { issueAuthCode } from "../auth/auth-code.js";
+import { ConsentRequiredError, consentRequiredBody, type ServiceConsentRequest } from "../consent/gate.js";
 import { logUserLogin, logUserLoginFailed, logUserRegister } from "../logging/auth-logger.js";
 import { devError, devLog } from "../logging/dev-logger.js";
 import { requireExportAuth } from "./export-auth.js";
@@ -416,9 +417,11 @@ async function compositeSignupFinish(p: Record<string, unknown>, ctx: RequestCtx
       displayName: "",
       email: null,
       role: account.role,
+      service: compositeConsentRequest(p, ctx),
     });
     return { status: "201 Created", data: { authCode } };
-  } catch {
+  } catch (error) {
+    if (error instanceof ConsentRequiredError) return { status: "403 Forbidden", data: consentRequiredBody(error) };
     // WebAuthn 検証と user/passkey 作成は既に commit 済み。一般的な「登録失敗」に
     // すると同じ signupId を再送しても回復できないため、作成済みであることと
     // 新しい passkey で login できる復旧手順を明示する。内部障害の詳細は返さない。
@@ -682,18 +685,45 @@ async function compositeLoginFinish(p: Record<string, unknown>, ctx: RequestCtx)
   // 送り先の無い REST は Cernere 自身の /login (許可待ちでも入れる。交換は Cernere の画面からだけ)。
   const audience = ctx.projectKey || (typeof p.target === "string" && p.target) ? "service" : "cernere";
   if (audience === "service") await requireActiveUser(user.id);
+  let authCode: string;
+  try {
+    authCode = await issueAuthCode({
+      audience,
+      userId: user.id,
+      displayName: user.displayName,
+      email: user.email,
+      role: user.role ?? "general",
+      authentication: completedAuthentication("passkey", user.mfaRevision, verifiedAt),
+      authEpoch: user.authEpoch,
+      ...(audience === "service" ? { service: compositeConsentRequest(p, ctx) } : {}),
+    });
+  } catch (error) {
+    // 同意が要る: authCode は出さず consent_required + consentUrl を返す。popup はそのまま /consent を開き、
+    // サービス経由 (project WS) はサービスが consentUrl を popup で開く (spec/interface/auth-flows.md)。
+    if (error instanceof ConsentRequiredError) {
+      logUserLogin(user.id, user.email ?? user.login, "passkey-composite-consent-required", { ip: ctx.ip });
+      return { status: "403 Forbidden", data: consentRequiredBody(error) };
+    }
+    throw error;
+  }
   await ensureProjectRowForComposite(user.id, ctx);
-  const authCode = await issueAuthCode({
-    audience,
-    userId: user.id,
-    displayName: user.displayName,
-    email: user.email,
-    role: user.role ?? "general",
-    authentication: completedAuthentication("passkey", user.mfaRevision, verifiedAt),
-    authEpoch: user.authEpoch,
-  });
   logUserLogin(user.id, user.email ?? user.login, "passkey-composite", { ip: ctx.ip });
   return { status: "200 OK", data: { authCode } };
+}
+
+/**
+ * composite の authCode の渡し先。project WS 経由ならその project (サービスの backend を通るので
+ * channel = service)、popup / redirect なら送り先 (target) の origin から逆引きする。
+ */
+function compositeConsentRequest(p: Record<string, unknown>, ctx: RequestCtx): ServiceConsentRequest {
+  if (ctx.projectKey) return { subject: { projectKey: ctx.projectKey }, channel: "service" };
+  const target = typeof p.target === "string" ? p.target : "";
+  if (!target) return { subject: null, channel: "browser", reason: "composite request without target" };
+  return {
+    subject: { origin: target },
+    continuation: { mode: p.targetMode === "redirect" ? "redirect" : "post_message", target },
+    channel: "browser",
+  };
 }
 
 // ─── 別端末の追加 (SPEC-DEVICE-PAIRING) ─────────────────────────

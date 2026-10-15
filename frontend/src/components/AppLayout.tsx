@@ -11,7 +11,7 @@ const navItems = [
   { path: "/access", label: "利用許可" },
   { path: "/admin/access", label: "審査", adminOnly: true },
   { path: "/account-recovery", label: "回復", adminOnly: true },
-  { path: "/data-optout", label: "Data" },
+  { path: "/data-optout", label: "サービスの権限" },
   { path: "/oidc-clients", label: "OIDC", adminOnly: true },
   { path: "/enterprise", label: "Cloudflare", adminOnly: true },
   { path: "/onsite-kiosks", label: "Kiosk", adminOnly: true },

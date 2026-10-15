@@ -23,6 +23,7 @@ import { AppError } from "../error.js";
 import { assertSafeIdentifier } from "./identifier.js";
 import { storageTableFromRow } from "./storage-resolver.js";
 import { loadDeclaredClaims, isIdentityClaim } from "./identity-claims.js";
+import { deniedClaimsByUser } from "../consent/denials.js";
 import type { ProjectDefinition } from "./schema.js";
 
 export interface ListUserDataInput {
@@ -147,7 +148,16 @@ export async function listUserData(
       `SELECT ${projected} FROM "${table}" d JOIN users u ON u.id = d.user_id ${whereSql} LIMIT ${limit}`,
       params,
     );
-    return rows as unknown as Array<Record<string, unknown>>;
+    const result = rows as unknown as Array<Record<string, unknown>>;
+    if (claims.length === 0) return result;
+    // 同意で外された identity claim は null にする。
+    const denied = await deniedClaimsByUser(result.map((row) => String(row.userId)), projectKey);
+    for (const row of result) {
+      for (const claim of denied.get(String(row.userId)) ?? []) {
+        if (claim in row) row[claim] = null;
+      }
+    }
+    return result;
   } finally {
     await sqlClient.end();
   }

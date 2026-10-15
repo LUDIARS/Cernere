@@ -38,6 +38,7 @@ import {
   type DeviceFingerprint,
 } from "../auth/identity-verification.js";
 import { issueAuthCode as sharedIssueAuthCode } from "../auth/auth-code.js";
+import { ConsentRequiredError } from "../consent/gate.js";
 import { ensureUserProjectRow } from "../project/service.js";
 import { logAuthEvent } from "../logging/auth-logger.js";
 import { devError, devLog } from "../logging/dev-logger.js";
@@ -61,6 +62,8 @@ type ClientMessage =
 type ServerMessage =
   | { type: "state"; state: AuthSession["state"]; data?: Record<string, unknown> }
   | { type: "authenticated"; authCode: string }
+  /** サービスの権限への同意が要る。クライアントは consentUrl を popup で開く (authCode は出ない) */
+  | { type: "consent_required"; consentUrl: string }
   | { type: "error"; retryable: boolean; reason: string }
   | { type: "ping"; ts: number };
 
@@ -95,14 +98,37 @@ export async function resolveCompositeTicket(
 
 // ── authCode 発行 (auth-code.ts に共通化) ────────────────
 
-async function issueAuthCode(user: AuthSessionUser): Promise<string> {
+async function issueAuthCode(session: AuthSession): Promise<string> {
+  const user: AuthSessionUser = session.user;
   return sharedIssueAuthCode({
     authEpoch: user.authEpoch, authentication: user.authentication,
     userId: user.userId,
     displayName: user.displayName,
     email: user.email,
     role: user.role,
+    // project WS 経由ならその project。REST 直叩きの composite は送り先を持たないので対象を特定できない。
+    service: session.projectKey
+      ? { subject: { projectKey: session.projectKey }, channel: "service" }
+      : { subject: null, channel: "browser", reason: "composite ws session without project" },
   });
+}
+
+/**
+ * authCode を発行して送る。同意が要るときは consent_required を送って接続を閉じる
+ * (チケットは期限切れまで残し、同意後にサービスがログインし直せるようにする)。
+ */
+async function completeAuthentication(
+  ws: uWS.WebSocket<CompositeWsUserData>,
+  session: AuthSession,
+): Promise<string | null> {
+  try {
+    return await issueAuthCode(session);
+  } catch (error) {
+    if (!(error instanceof ConsentRequiredError)) throw error;
+    send(ws, { type: "consent_required", consentUrl: error.consentUrl });
+    try { ws.end(1000, "consent required"); } catch { /* ignore */ }
+    return null;
+  }
 }
 
 /**
@@ -242,7 +268,8 @@ async function handleDevice(
       await db.update(schema.users)
         .set({ lastLoginAt: now, updatedAt: now })
         .where(eq(schema.users.id, session.user.userId));
-      const authCode = await issueAuthCode(session.user);
+      const authCode = await completeAuthentication(ws, session);
+      if (!authCode) return;
       await ensureProjectRowFromSession(session);
       await updateAuthSession(session.ticket, {
         state: "authenticated",
@@ -329,7 +356,8 @@ async function handleVerifyCode(
   await db.update(schema.users)
     .set({ lastLoginAt: now, updatedAt: now })
     .where(eq(schema.users.id, session.user.userId));
-  const authCode = await issueAuthCode(session.user);
+  const authCode = await completeAuthentication(ws, session);
+  if (!authCode) return;
   await ensureProjectRowFromSession(session);
   await updateAuthSession(session.ticket, { state: "authenticated", authCode });
   logAuthEvent({

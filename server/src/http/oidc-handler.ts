@@ -269,16 +269,25 @@ export function handleOidcApprove(res: uWS.HttpResponse, req: uWS.HttpRequest): 
 
       const body = await readBody(res, () => { aborted = true; });
       if (aborted) return;
-      const requestId = (parseJson(body).request_id as string | undefined) ?? "";
+      const parsed = parseJson(body);
+      const requestId = (parsed.request_id as string | undefined) ?? "";
       if (!requestId) throw AppError.badRequest("request_id is required");
+      // 同意画面で許可した推奨 (consent_mode warn/enforce の RP)。省略は保存済みの同意で進める。
+      const recommended = parsed.recommended;
+      if (recommended !== undefined && (!Array.isArray(recommended) || recommended.some((k) => typeof k !== "string"))) {
+        throw AppError.badRequest("recommended must be an array of permission keys");
+      }
 
-      const result = await approveAuthorization(requestId, claims.sub, claims.authentication, claims);
+      const result = await approveAuthorization(requestId, claims.sub, claims.authentication, claims,
+        recommended as string[] | undefined);
       if (aborted) return;
       json(res, "200 OK", result, config.frontendUrl, true);
     } catch (err) {
       if (aborted) return;
       const status = err instanceof AppError ? statusLine(err.statusCode) : "400 Bad Request";
-      json(res, status, { error: (err as Error).message }, config.frontendUrl, true);
+      // consent_required (同意画面で選ばずに承認した) を画面が見分けられるよう code を添える。
+      const code = err instanceof AppError && err.code ? { code: err.code } : {};
+      json(res, status, { error: (err as Error).message, ...code }, config.frontendUrl, true);
     }
   })();
 }

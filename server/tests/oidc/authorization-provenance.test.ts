@@ -64,6 +64,13 @@ vi.mock("../../src/enterprise/connections.js", () => ({
   }),
 }));
 
+// 同意 (consent_mode off の RP 相当): 要求 scope をそのまま渡す。同意の判定は tests/consent で見る。
+vi.mock("../../src/consent/oidc-consent.js", () => ({
+  oidcConsentInfo: async () => null,
+  settleOidcConsent: async (_userId: string, _clientId: string, scope: string[]) => scope,
+  withoutDeniedScopes: async (_userId: string, _clientId: string, scope: string[]) => scope,
+}));
+
 const { approveAuthorization, exchangeToken, userinfo } = await import("../../src/oidc/provider.js");
 const { putAuthRequest } = await import("../../src/oidc/store.js");
 

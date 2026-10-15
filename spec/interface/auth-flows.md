@@ -111,6 +111,48 @@ sequenceDiagram
 - `bootstrap-admin` は admin と active を同時に付ける。審査待ちの申請は 15 分ごとに件数だけ admin へ通知する。
 - ロックアウトの下流サービスへの伝播 (失効イベント・オンライン認可) は未実装 (設計書 §3.5)。
 
+## サービスの権限確認 (同意、2026-10-15)
+
+設計: [../plan/2026-10-15-service-consent-design.md](../plan/2026-10-15-service-consent-design.md)。宣言の書き方は
+[../setup/service-registration.md §6](../setup/service-registration.md#6-権限の宣言-consent-と移行モード-consent_mode)。
+
+サービス向けの authCode (`audience = "service"`) は、`requireActiveUser` の直後に同意の関門
+(`server/src/consent/gate.ts`) を通る。判定は全経路で `consent/requirement.ts` の 1 か所。
+
+| `consent_mode` | 動作 |
+|---|---|
+| `off` (既定) | 判定しない。マージ時点で既存サービスのログインは変わらない |
+| `warn` | 判定し、未充足でも通す。`consent.would_block` を auth ログに記録 |
+| `enforce` | 未充足なら authCode を出さず `consent_required` を返す |
+
+### 経路ごとの応答
+
+| 経路 | 対象の特定 | 同意が要るときの応答 |
+|---|---|---|
+| ダッシュボード「開く」 WS `managed_project.open_url` | projectKey | `{ consentRequired: true, consentUrl }`。ダッシュボードは開いたタブで `consentUrl` を表示。同意後は `frontend_url?code=` へ遷移 |
+| popup / redirect `POST /api/auth/passkey/composite-login-finish` (`target`, `targetMode`) | `target` origin → `endpoint.frontend_url` の origin | `403 { error: "consent_required", code, consentRequired, consentUrl }`。popup はそのまま `/consent` を開き、同意後に opener へ `{ type: "cernere:auth", authCode }` を postMessage (redirect は `?code=`) |
+| silent SSO `POST /api/auth/composite-session-code` (`target`, `targetMode`) | `target` origin | 同上 (403 `consent_required`)。画面の無い呼び出し元は popup (対話) に切り替える |
+| project WS `auth.passkey-login-finish` | 接続の projectKey | 戻り値が `{ error: "consent_required", consentRequired: true, consentUrl }` (authCode なし)。サービスは `consentUrl` を popup で開き、同意後に frontend_url の origin へ postMessage される authCode を受け取る |
+| composite WS (`/auth/composite-ws`) | auth session の projectKey | `{ type: "consent_required", consentUrl }` を送って接続を閉じる |
+| edge assertion WS `auth.edge_assertion` (`returnTo` 任意) | 接続の projectKey | 戻り値が `{ error: "consent_required", consentRequired: true, consentUrl }`。Hub は `consentUrl` へ redirect。同意後は `returnTo` (無ければ frontend_url の origin) へ戻るので、Hub はアサーションを再送してログインし直す |
+| OIDC `/oidc/authorize` → `/oidc/consent` | client_id | 同意画面を `requirement.ts` の表示データで描く。`POST /api/auth/oidc/approve { request_id, recommended }`。保存済みで足りれば画面を省略して承認。`enforce` で選ばずに承認すると `403 consent_required` |
+
+- 対象を特定できない経路 (送り先の無い REST composite・未登録 origin) は判定しない (ログだけ)。
+- `consentUrl` は `<frontendUrl>/consent?ticket=<consentTicket>`。ticket は Redis に 10 分・使い切りで、
+  継続先 (postMessage の origin / redirect URL) は発行時に「composite 許可 origin + 対象サービスの frontend_url の origin」で
+  検証した値だけを持つ。`/consent` はクエリから戻り先を受け取らない (open redirect 防止)。
+- `/consent` の API: `GET /api/consent/ticket?ticket=` (表示データ)、`POST /api/consent/decide { ticket, decision: "grant" | "deny", recommended }`
+  (戻り値 `{ kind: "post_message", origin, message } | { kind: "redirect", url } | { kind: "none" }`)。
+  ブラウザ経路の ticket は Cernere の画面 (Origin) か本人の Bearer から、サービス経由 (project WS / edge) の ticket は
+  本人の Bearer が必須 (`401 consent_session_required`。画面はログインを求める)。サービスの backend に代理で同意させない。
+- 拒否 (`decision: "deny"`): 同意を保存せず、継続先へ `consent_denied` を返す (postMessage `{ type: "cernere:auth", error: "consent_denied" }`、
+  redirect `?error=consent_denied`)。OIDC の拒否は従来どおり `error=access_denied`。
+- 推奨の拒否はデータ提供側で効く: `profile.get` は渡さない / `profile.update` は 403、identity claim は `null` (逆引き不可)、
+  `user_data.module:*` は既存の module opt-out (列の NULL 化・読み出しも `null`)、OIDC は id_token / userinfo から claim を外す。
+- 利用開始後の見直しは `/data-optout` (「サービスの権限」) と WS `consent.list` / `consent.get` / `consent.decide` / `consent.revoke`
+  (decide / revoke は action proof `consent.decide` / `consent.revoke`、resource `<subjectKind>:<subjectKey>`)。
+  revoke は利用停止で、identity.basic 以外を全て拒否として反映し、次のログインで再び確認する。
+
 以下の「Passkey アカウント作成」「Passkey 他デバイス登録」は 2026-10-14 以前の記述。現行は上と設計書を正とする。
 
 ## Passkey アカウント作成

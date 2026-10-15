@@ -59,7 +59,7 @@ export function useCompositeLoginSession(args: CompositeLoginSessionArgs): Compo
 
   // adapter は WS を抱えるので、 ページと同じ寿命で 1 つだけ持ち unmount で閉じる。
   const adapter = useMemo(
-    () => new CernereCompositeAuthAdapter(apiBase, self ? null : (origin ?? redirectUri)),
+    () => new CernereCompositeAuthAdapter(apiBase, self ? null : (origin ?? redirectUri), origin ? "post_message" : "redirect"),
     [apiBase, self, origin, redirectUri],
   );
   useEffect(() => () => adapter.dispose(), [adapter]);
@@ -106,7 +106,7 @@ export function useCompositeLoginSession(args: CompositeLoginSessionArgs): Compo
           const res = await fetch(`${apiBase}/api/auth/composite-session-code`, {
             method: "POST",
             headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-            body: JSON.stringify({ target }),
+            body: JSON.stringify({ target, targetMode: origin ? "post_message" : "redirect" }),
           });
           if (!cancelled && res.ok) {
             const body = await res.json().catch(() => null) as { authCode?: string } | null;
@@ -114,7 +114,12 @@ export function useCompositeLoginSession(args: CompositeLoginSessionArgs): Compo
           }
           // ログイン済みでも許可待ち (許可制 案 A) ならサービスへは入れない。申請画面へ案内する。
           if (!cancelled && res.status === 403) {
-            const body = await res.json().catch(() => null) as { code?: string } | null;
+            const body = await res.json().catch(() => null) as { code?: string; consentUrl?: string } | null;
+            // サービスの権限への同意が要る: この画面 (popup / redirect) のまま /consent を表示する。
+            if (body?.code === "consent_required" && body.consentUrl) {
+              window.location.assign(body.consentUrl);
+              return;
+            }
             if (body?.code === "approval_required") {
               setBlockedReason("Cernere の利用許可を待っています。Cernere の「利用許可」画面 (/access) から申請し、許可されてからもう一度開いてください。");
               return;

@@ -52,12 +52,16 @@ export async function dispatchProjectCommand(
       const cfAuthorization = typeof payload.cfAuthorization === "string"
         ? payload.cfAuthorization
         : undefined;
+      const returnTo = typeof payload.returnTo === "string" ? payload.returnTo : undefined;
+      const { ConsentRequiredError, consentRequiredBody } = await import("../consent/gate.js");
       try {
-        const result = await authenticateEdgeAssertion({ projectKey, assertion, cfAuthorization });
+        const result = await authenticateEdgeAssertion({ projectKey, assertion, cfAuthorization, returnTo });
         // composite と同じく、 認証成立時に project_data_<key> の行を確保する。
         await ensureUserProjectRow(result.userId, projectKey);
         return { authCode: result.authCode, groups: result.groups };
       } catch (err) {
+        // 同意が要る: Hub は consentUrl へ redirect し、同意後に戻ってきたらアサーションを再送する。
+        if (err instanceof ConsentRequiredError) return consentRequiredBody(err);
         if (err instanceof EdgeAssertionError) {
           throw new Error(`edge_assertion_rejected: ${err.reason}`);
         }

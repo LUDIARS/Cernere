@@ -6,6 +6,7 @@ import { z } from "zod";
 import { serializeColumnDefault } from "./column-default.js";
 import { profileAccessSchema } from "./profile-access.js";
 import { onsiteMfaDefinitionSchema } from "./onsite-mfa.js";
+import { consentDeclarationSchema, consentModeSchema } from "../consent/declaration-schema.js";
 
 // ── カラム型 ─────────────────────────────────────────────────
 
@@ -136,6 +137,14 @@ export const projectDefinitionSchema = z.object({
   onsite_mfa: onsiteMfaDefinitionSchema.optional(),
   /** Administrator-owned service/user/field grants for common profiles. Missing means deny. */
   profile_access: profileAccessSchema.optional(),
+  /**
+   * 初回ログイン時に利用者へ見せる権限の宣言 (必須/推奨・目的・誰が読めるか)。サービスが update_schema で
+   * 宣言してよいが、上限 (profile_access / identity_claims / user_data の module) の外は保存しない。
+   * 上限との突き合わせは updateProjectSchema (consent/declaration.ts)。
+   */
+  consent: consentDeclarationSchema.optional(),
+  /** 同意の移行モード off / warn / enforce (管理者所有、未設定は off)。 */
+  consent_mode: consentModeSchema.optional(),
   /** ユーザーデータのカラム定義 (各カラムの module フィールドでモジュール帰属を管理) */
   user_data: z.object({
     columns: z.record(z.string(), columnDefinitionSchema),

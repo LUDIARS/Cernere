@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { optouts, managedProjects, type DataOptOutItem, type UserProjectData } from "../lib/api";
+import { ServicePermissionsSection } from "./ServicePermissionsSection";
 
 /**
  * Cernere コアプロフィールのデータカテゴリ。
@@ -120,12 +121,15 @@ export function DataOptOutPage() {
       <div style={{ maxWidth: 720, margin: "0 auto" }}>
         {/* ヘッダー */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
-          <h1 style={{ fontSize: "1.25rem", fontWeight: 600 }}>データ管理・オプトアウト</h1>
+          <h1 style={{ fontSize: "1.25rem", fontWeight: 600 }}>サービスの権限</h1>
           <div style={{ display: "flex", gap: "0.75rem" }}>
             <Link to="/profile" style={{ fontSize: "0.875rem" }}>← プロファイル</Link>
             <Link to="/" style={{ fontSize: "0.875rem" }}>ダッシュボード</Link>
           </div>
         </div>
+
+        {/* サービスごとの権限 (初回ログイン時の同意の見直し) */}
+        <ServicePermissionsSection />
 
         {/* 説明 */}
         <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "1.5rem", marginBottom: "1rem" }}>

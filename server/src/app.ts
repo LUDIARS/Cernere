@@ -14,6 +14,7 @@ import { registerWorkloadRoutes } from './http/workload-routes.js';
 import { handlePasskeyRoute } from "./http/passkey-handler.js";
 import { handleDeviceRoute } from "./http/device-handler.js";
 import { handleFaceConsentRoute } from "./http/face-consent-handler.js";
+import { handleConsentRoute } from "./http/consent-handler.js";
 import { handleFaceRevocationRoute } from "./http/face-revocation-handler.js";
 import { handleIdentityRosterRoute } from "./http/identity-roster-handler.js";
 import { handleActionAuthRoute } from "./http/action-auth-handler.js";
@@ -728,6 +729,32 @@ export function createApp() {
       jsonResponse(res, status, code ? { error: message, code } : { error: message });
     }
   });
+
+  // ── サービスの権限確認 (同意): /consent 画面 ───────────
+  // spec/plan/2026-10-15-service-consent-design.md §4.2。ticket は使い切りで、継続先は ticket の中だけ。
+  const registerConsentRoute = (method: "get" | "post", url: string, action: "ticket" | "decide") => {
+    const handler = async (res: uWS.HttpResponse, req: uWS.HttpRequest) => {
+      const authHeader = req.getHeader("authorization") ?? "";
+      const origin = req.getHeader("origin") ?? "";
+      const query = req.getQuery() ?? "";
+      let aborted = false;
+      if (method === "get") res.onAborted(() => { aborted = true; });
+      try {
+        const body = method === "post" ? await readBody(res, 16_384, () => { aborted = true; }) : "";
+        if (aborted) return;
+        const result = await handleConsentRoute(action, { body, query, authHeader, origin });
+        if (aborted) return;
+        jsonResponse(res, result.status, result.data);
+      } catch (err) {
+        if (aborted) return;
+        const { status, message, code } = classifyError(err);
+        jsonResponse(res, status, code ? { error: message, code } : { error: message });
+      }
+    };
+    if (method === "get") app.get(url, handler); else app.post(url, handler);
+  };
+  registerConsentRoute("get", "/api/consent/ticket", "ticket");
+  registerConsentRoute("post", "/api/consent/decide", "decide");
 
   // ── Composite Auth: GET /api/auth/composite/allowed-origins ──
   // フロント (CompositeLoginPage / CompositeCallbackPage) が authCode の送信先

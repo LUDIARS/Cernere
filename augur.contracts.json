@@ -149,7 +149,7 @@
     },
     {
       "id": "C-12",
-      "criterion": "C-12 splitAdminOwnedSchemaFields(payload): project client の update_schema から onsite_mfa を含む管理者所有フィールドを保存対象に残さない",
+      "criterion": "C-12 splitAdminOwnedSchemaFields(payload): project client の update_schema から onsite_mfa・consent_mode を含む管理者所有フィールドを保存対象に残さない",
       "symbol": "splitAdminOwnedSchemaFields",
       "file": "server/src/project/admin-owned-fields.ts",
       "module": "contracts/admin-owned-schema.contract.ts",
@@ -198,6 +198,42 @@
       "symbol": "backupDatabaseName",
       "file": "server/scripts/site-data/backup-name.ts",
       "module": "server/scripts/site-data/contracts/backup-name.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-23",
+      "criterion": "C-23 validateConsentDeclaration(raw, caps, previousVersion, previous): 受け付けた同意宣言は語彙内・管理者所有の上限内・版を下げず・identity.basic を必須のまま保ち、拒否には理由を付ける",
+      "symbol": "validateConsentDeclaration",
+      "file": "server/src/consent/declaration.ts",
+      "module": "server/src/consent/contracts/declaration.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-24",
+      "criterion": "C-24 evaluateConsentRequirement(input): 必須が全て許可済みかつ推奨が全て判断済みのときだけ satisfied を返し、identity.basic を必ず必須に表示する",
+      "symbol": "evaluateConsentRequirement",
+      "file": "server/src/consent/requirement.ts",
+      "module": "server/src/consent/contracts/requirement.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-25",
+      "criterion": "C-25 decideConsentGate(mode, satisfied): off と warn はログインを止めず、enforce は未充足のときだけ止める",
+      "symbol": "decideConsentGate",
+      "file": "server/src/consent/gate-policy.ts",
+      "module": "server/src/consent/contracts/gate-policy.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-26",
+      "criterion": "C-26 buildConsentContinuation(request, allowedOrigins): 同意後の継続先は許可 origin の内側だけで、それ以外は null にする (open redirect 防止)",
+      "symbol": "buildConsentContinuation",
+      "file": "server/src/consent/continuation.ts",
+      "module": "server/src/consent/contracts/continuation.contract.ts",
       "mode": "observe",
       "sample": 1
     }

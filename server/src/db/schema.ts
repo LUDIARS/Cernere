@@ -659,6 +659,9 @@ export const oidcClients = pgTable("oidc_clients", {
   isActive: boolean("is_active").notNull().default(true),
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  // 同意の移行モード (off / warn / enforce) と宣言 (管理者所有、migration 070)。
+  consentMode: text("consent_mode").notNull().default("off"),
+  consent: jsonb("consent"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
@@ -825,3 +828,30 @@ export const enterpriseIdentitySuggestions = pgTable("enterprise_identity_sugges
   firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.projectKey, t.subjectHash] })]);
+
+// ── Service consents (サービス初回ログイン時の権限確認、migration 070) ──
+// 利用者 × サービスの最新の同意。subject_kind は project / oidc_client。
+
+export const userServiceConsents = pgTable("user_service_consents", {
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  subjectKind: text("subject_kind").notNull(),
+  subjectKey: text("subject_key").notNull(),
+  declarationVersion: integer("declaration_version").notNull(),
+  granted: jsonb("granted").notNull(),
+  denied: jsonb("denied").notNull(),
+  decidedAt: timestamp("decided_at", { withTimezone: true }).notNull().defaultNow(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+}, (t) => [primaryKey({ columns: [t.userId, t.subjectKind, t.subjectKey] })]);
+
+/** 同意の判断の監査 (追記のみ)。 */
+export const consentDecisions = pgTable("consent_decisions", {
+  id: uuid("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  subjectKind: text("subject_kind").notNull(),
+  subjectKey: text("subject_key").notNull(),
+  declarationVersion: integer("declaration_version").notNull(),
+  action: text("action").notNull(),
+  granted: jsonb("granted").notNull(),
+  denied: jsonb("denied").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("idx_consent_decisions_user").on(t.userId, t.createdAt)]);

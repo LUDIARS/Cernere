@@ -4,6 +4,7 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 import { startRegistration } from "@simplewebauthn/browser";
 import type { PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
 import { authorizeAction } from "./action-auth";
+import type { ConsentView } from "./consent-api";
 
 // ── Token Management ──────────────────────────────
 
@@ -282,6 +283,8 @@ export interface OidcConsentInfo {
   redirectUri: string;
   reauthenticationRequired: boolean;
   authenticationMessage?: string;
+  /** サービスの権限確認 (consent_mode warn/enforce の RP)。off の RP は null で従来の表示 */
+  consent: { mode: "warn" | "enforce"; satisfied: boolean; view: ConsentView } | null;
 }
 
 export const oidc = {
@@ -296,13 +299,14 @@ export const oidc = {
     return data;
   },
 
-  async approve(requestId: string): Promise<{ redirectTo: string }> {
+  /** recommended: 許可した推奨の権限キー。省略は保存済みの同意で進める (consent_mode off の RP は無視される) */
+  async approve(requestId: string, recommended?: string[]): Promise<{ redirectTo: string }> {
     const token = getAccessToken();
     const res = await fetch(`${API_BASE}/api/auth/oidc/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       credentials: "include",
-      body: JSON.stringify({ request_id: requestId }),
+      body: JSON.stringify({ request_id: requestId, ...(recommended ? { recommended } : {}) }),
     });
     const data = await res.json() as { redirectTo: string; error?: string };
     if (!res.ok) throw new Error(data.error || "Authorization failed");

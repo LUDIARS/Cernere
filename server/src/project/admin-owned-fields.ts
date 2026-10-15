@@ -3,11 +3,15 @@
  *
  * project client が update_schema で自己申告しても保存しない。 自己付与を許すと、
  * project が users の identity 列を開示対象にしたり (identity_claims)、 service token の
- * scope を広げたり (service_scopes)、 現地確認 MFA を外したり (onsite_mfa) できてしまう。
+ * scope を広げたり (service_scopes)、 現地確認 MFA を外したり (onsite_mfa)、 同意の関門を
+ * 止めたり (consent_mode) できてしまう。
+ *
+ * 同意の宣言 (consent) は project 所有で保存できるが、上限 (profile_access 等) の外は
+ * updateProjectSchema が拒否する。
  */
 
 export const ADMIN_OWNED_SCHEMA_FIELDS = [
-  "data_sharing", "identity_claims", "service_scopes", "profile_access", "onsite_mfa",
+  "data_sharing", "identity_claims", "service_scopes", "profile_access", "onsite_mfa", "consent_mode",
 ] as const;
 export type AdminOwnedSchemaField = (typeof ADMIN_OWNED_SCHEMA_FIELDS)[number];
 

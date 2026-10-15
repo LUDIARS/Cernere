@@ -20,6 +20,8 @@ import { getAllProjectStatus, getProjectConnections, getProjectStatus } from "..
 import { issueProjectSecret } from "./credentials.js";
 import type { DeliverProjectCredentials } from "./credential-delivery.js";
 import { toUserDataParameter } from "./user-data-parameter.js";
+import { validateConsentDeclaration } from "../consent/declaration.js";
+import { capsFromProjectDefinition } from "../consent/permission-keys.js";
 
 // ── Project definition helpers ───────────────────────────────
 
@@ -232,6 +234,8 @@ export async function registerProject(payload: unknown, userId?: string, deliver
     throw AppError.badRequest(`Invalid project definition: ${parsed.error.issues.map((i) => i.message).join(", ")}`);
   }
   definition = parsed.data;
+  // 登録 (管理者) でも同意の宣言は上限の内側に限る。
+  assertConsentDeclaration(definition, null);
 
   // 既存チェック
   const existing = await db.select().from(dbSchema.managedProjects)
@@ -356,7 +360,8 @@ export function withExistingProjectMeta(
 
 /**
  * partial update で省略された既存フィールドを保持する。
- * data_sharing / identity_claims / service_scopes / profile_access / onsite_mfa は管理者所有なので、project auto-sync で消さない。
+ * data_sharing / identity_claims / service_scopes / profile_access / onsite_mfa / consent_mode は管理者所有なので、project auto-sync で消さない。
+ * consent (同意の宣言) も user_data だけを送る auto-sync で消さない。
  */
 export function preserveExistingDefinitionFields(
   definition: ProjectDefinition,
@@ -390,7 +395,25 @@ export function preserveExistingDefinitionFields(
     ...(definition.onsite_mfa === undefined && existing.onsite_mfa !== undefined
       ? { onsite_mfa: existing.onsite_mfa }
       : {}),
+    ...(definition.consent === undefined && existing.consent !== undefined
+      ? { consent: existing.consent }
+      : {}),
+    ...(definition.consent_mode === undefined && existing.consent_mode !== undefined
+      ? { consent_mode: existing.consent_mode }
+      : {}),
   };
+}
+
+/**
+ * 同意の宣言を上限 (管理者所有フィールドを合成した後の定義) と保存済みの版で検証する。
+ * 上限外の権限・版の後退・版を据え置いた権限の変更は保存しない (設計書 §3)。
+ */
+export function assertConsentDeclaration(definition: ProjectDefinition, existing: ProjectDefinition | null | undefined): void {
+  if (definition.consent === undefined) return;
+  const previous = existing?.consent ?? null;
+  const checked = validateConsentDeclaration(definition.consent, capsFromProjectDefinition(definition),
+    previous?.version ?? null, previous);
+  if (!checked.ok) throw AppError.badRequest(`Invalid consent declaration: ${checked.errors.join("; ")}`);
 }
 
 export async function updateProjectSchema(key: string, payload: unknown, userId?: string) {
@@ -411,9 +434,12 @@ export async function updateProjectSchema(key: string, payload: unknown, userId?
     throw AppError.badRequest("Project key in body does not match request key");
   }
 
+  const oldDef = rows[0].schemaDefinition as ProjectDefinition;
+  // DDL より先に宣言を検証する (上限は管理者所有フィールドを合成した後の定義で見る)。
+  assertConsentDeclaration(preserveExistingDefinitionFields(definition, oldDef), oldDef);
+
   const result = await migrateProjectSchema(key, definition);
 
-  const oldDef = rows[0].schemaDefinition as ProjectDefinition;
   const oldColumns = oldDef?.user_data?.columns ?? {};
   const newColumns = definition.user_data?.columns ?? {};
 
@@ -727,7 +753,10 @@ export interface UserProjectOverview {
  * authCode を発行する。フロントから別タブで開き、遷移先で
  * `/api/auth/exchange { code }` を叩いて accessToken に交換する想定。
  */
-export async function issueProjectOpenUrl(userId: string, projectKey: string): Promise<{ url: string }> {
+export async function issueProjectOpenUrl(
+  userId: string,
+  projectKey: string,
+): Promise<{ url: string } | { consentRequired: true; consentUrl: string }> {
   const proj = await db.select().from(dbSchema.managedProjects)
     .where(eq(dbSchema.managedProjects.key, projectKey)).limit(1);
   if (proj.length === 0) throw AppError.notFound("Project not found");
@@ -738,7 +767,20 @@ export async function issueProjectOpenUrl(userId: string, projectKey: string): P
   if (!frontendUrl) throw AppError.badRequest("Project has no frontend_url configured");
 
   const { issueAuthCodeForUserId } = await import("../auth/auth-code.js");
-  const authCode = await issueAuthCodeForUserId(userId);
+  const { ConsentRequiredError } = await import("../consent/gate.js");
+  let authCode: string | null;
+  try {
+    // 同意後は同じ frontend_url へ ?code= 付きで遷移させる (継続先は関門が frontend_url の origin で検証)。
+    authCode = await issueAuthCodeForUserId(userId, {
+      subject: { projectKey },
+      continuation: { mode: "redirect", target: frontendUrl },
+      channel: "browser",
+    });
+  } catch (error) {
+    // ダッシュボードは consentUrl を開いたタブで /consent を表示する。
+    if (error instanceof ConsentRequiredError) return { consentRequired: true, consentUrl: error.consentUrl };
+    throw error;
+  }
   if (!authCode) throw AppError.forbidden("User not found");
 
   // ユーザ × プロジェクトの初回 "use" を確定: Cernere DB に空行を作る
@@ -901,6 +943,14 @@ export async function getUserColumns(
 
   if (targetCols.length === 0) return {};
 
+  // opt-out (同意で外した推奨 user_data.module:<m> を含む) 中の module の列は値を渡さない。
+  // opt-out 時に NULL 化済みだが、その後に書かれた値があっても読ませない。
+  const optedOutModules = new Set<string>();
+  for (const module of new Set(targetCols.map((c) => schemaColumns[c].module).filter((m): m is string => !!m))) {
+    if (await isOptedOut(userId, projectKey, module)) optedOutModules.add(module);
+  }
+  const masked = (c: string) => optedOutModules.has(schemaColumns[c].module ?? "");
+
   const { default: postgres } = await import("postgres");
   const sqlClient = postgres(config.databaseUrl, { max: 1 });
   try {
@@ -916,7 +966,7 @@ export async function getUserColumns(
       return empty;
     }
     const result: Record<string, unknown> = {};
-    for (const c of targetCols) result[c] = rows[0][c] ?? null;
+    for (const c of targetCols) result[c] = masked(c) ? null : rows[0][c] ?? null;
     return result;
   } catch (err) {
     console.warn(`[project-data] getUserColumns failed (${projectKey}):`, err);

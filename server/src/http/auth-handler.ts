@@ -24,9 +24,10 @@ import { devLog } from "../logging/dev-logger.js";
 import { issueAuthCodeForUserId } from "../auth/auth-code.js";
 import { readAuthenticationEvidence } from "../lib/authentication-evidence.js";
 import { isCompositeTargetAllowed } from "../auth/composite-redirect.js";
+import { ConsentRequiredError, consentRequiredBody } from "../consent/gate.js";
+import { isCernereFrontendOrigin } from "./cernere-origin.js";
 import { AppError } from "../error.js";
 import { APPROVAL_REQUIRED, requireActiveUser } from "../auth/user-access.js";
-import { config } from "../config.js";
 import { retiredLoginResult } from "../auth/retired-login.js";
 import { removeAlertTarget } from "../notify/alert-targets.js";
 import { actionProofStore, httpActionBinding } from "../auth/action-proof.js";
@@ -188,12 +189,6 @@ async function verify(p: Record<string, unknown>, ctx: RequestCtx): Promise<Rout
   }
 }
 
-/** Cernere 自身の画面の origin。cernere 向けの authCode はここからの交換だけを受け付ける。 */
-function isCernereFrontendOrigin(origin: string | undefined): boolean {
-  if (!origin) return false;
-  try { return new URL(origin).origin === new URL(config.frontendUrl).origin; } catch { return false; }
-}
-
 async function exchange(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
   // M-3: authcode は user の access/refresh token を取り出す bearer ticket。
   // 以前は code の先頭 8 文字を平文 console.log に書いていた。 値はログに残さず、
@@ -210,6 +205,7 @@ async function exchange(p: Record<string, unknown>, ctx: RequestCtx): Promise<Ro
   if (!raw) throw new Error("Unauthorized: Invalid or expired auth code");
   const parsed = JSON.parse(raw);
   // Cernere 自身の /login 用 (許可待ちでも発行) は、サービスのバックエンドからは交換させない (許可制 案 A)。
+  // Cernere 自身の画面の origin からの交換だけを受け付ける (isCernereFrontendOrigin)。
   // 用途の無い旧形式はサービス向けとして扱い、発行時の active 確認に任せる。
   if (parsed.audience === "cernere" && !isCernereFrontendOrigin(ctx.origin)) {
     throw AppError.withCode(403, APPROVAL_REQUIRED, "This sign-in code can only be used by Cernere");
@@ -257,7 +253,19 @@ async function compositeSessionCode(
     return { status: "403 Forbidden", data: { error: "target_not_allowed" } };
   }
 
-  const authCode = await issueAuthCodeForUserId(userId, source);
+  // 同意が要るときは authCode を出さず consent_required を返す。呼び出し元 (popup) は consentUrl を開く。
+  // 画面の無い silent SSO は対話 (popup) に切り替える (spec/interface/auth-flows.md)。
+  let authCode: string | null;
+  try {
+    authCode = await issueAuthCodeForUserId(userId, {
+      subject: { origin: target },
+      continuation: { mode: p.targetMode === "redirect" ? "redirect" : "post_message", target },
+      channel: "browser",
+    }, source);
+  } catch (error) {
+    if (error instanceof ConsentRequiredError) return { status: "403 Forbidden", data: consentRequiredBody(error) };
+    throw error;
+  }
   if (!authCode) return { status: "401 Unauthorized", data: { error: "user_not_found" } };
 
   devLog("auth.compositeSessionCode.issued", { userId });

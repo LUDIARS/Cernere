@@ -38,7 +38,10 @@ export type ProtectedAction =
   | "managed_project.rotate_secret"
   | "oidc_client.rotate_secret"
   | "oidc_client.update_redirect_uris"
-  | "oidc_client.disable";
+  | "oidc_client.disable"
+  | "oidc_client.update_consent"
+  | "consent.decide"
+  | "consent.revoke";
 
 interface ActionAuthBegin {
   ceremonyId: string;
@@ -109,7 +112,12 @@ export function resolveBrowserActionTarget(
     case "oidc_client.rotate_secret":
     case "oidc_client.update_redirect_uris":
     case "oidc_client.disable":
+    case "oidc_client.update_consent":
       return { action: name, resource: requiredString(p, "clientId") };
+    // サービスの権限 (同意) の変更・取り消しはサービス単位で本人確認する。
+    case "consent.decide":
+    case "consent.revoke":
+      return { action: name, resource: joinResource(p, "subjectKind", "subjectKey") };
     default:
       return null;
   }

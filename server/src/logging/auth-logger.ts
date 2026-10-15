@@ -43,7 +43,11 @@ type AuthEventType =
   | "user.device.challenge.resent"
   | "user.device.challenge.failed"
   | "user.device.verify.success"
-  | "user.device.verify.failed";
+  | "user.device.verify.failed"
+  // サービスの権限確認 (同意)。spec/plan/2026-10-15-service-consent-design.md
+  | "consent.required"
+  | "consent.would_block"
+  | "consent.decided";
 
 interface AuthEventBase {
   event: AuthEventType;

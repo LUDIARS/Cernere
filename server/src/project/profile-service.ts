@@ -6,6 +6,7 @@ import { AppError } from "../error.js";
 import { resolveProfileAccess, resolveProfileReadFields, assertProfileWriteFields, PERSONALITY_FIELDS,
   type ProfileAccess, type ProfileReadField } from "./profile-access.js";
 import { parseProfileInput, profileReadSchema, profileWriteSchema } from "./profile-input.js";
+import { deniedPermissionKeys } from "../consent/denials.js";
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -38,6 +39,8 @@ export async function getServiceProfile(projectKey: string, payload: unknown): P
       .where(eq(schema.users.id, p.userId)).limit(1);
     if (!row) throw AppError.notFound("User not found");
     const blocked = await personalityOptedOut(tx, projectKey, p.userId);
+    // 同意で外された推奨 (profile.<field>) は渡さない (共通プロフィールそのものは消さない)。
+    const denied = await deniedPermissionKeys(p.userId, projectKey);
     const privacy = row.profile?.privacy as Record<string, unknown> | null | undefined;
     const values: Record<ProfileReadField, unknown> = {
       login: row.login, displayName: row.displayName, email: row.email, avatarUrl: row.avatarUrl,
@@ -48,6 +51,7 @@ export async function getServiceProfile(projectKey: string, payload: unknown): P
     for (const field of fields) {
       // Existing rows require an explicit public flag; malformed privacy never exposes a value.
       if (PERSONALITY_FIELDS.has(field) && (blocked || (row.profile && privacy?.[field] !== true))) continue;
+      if (denied.has(`profile.${field}`)) continue;
       result[field] = values[field];
     }
     return result;
@@ -60,6 +64,10 @@ export async function updateServiceProfile(projectKey: string, payload: unknown)
   if (fields.length === 0) throw AppError.badRequest("No profile fields to update");
   return db.transaction(async (tx) => {
     assertProfileWriteFields(await loadGrant(tx, projectKey, p.userId), fields);
+    const denied = await deniedPermissionKeys(p.userId, projectKey);
+    if (fields.some((field) => denied.has(`profile.${field}`))) {
+      throw AppError.forbidden("User did not grant this service access to these profile fields");
+    }
     if (fields.some((field) => PERSONALITY_FIELDS.has(field)) && await personalityOptedOut(tx, projectKey, p.userId)) {
       throw AppError.forbidden("User opted out of personality data updates");
     }

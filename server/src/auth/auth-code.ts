@@ -16,6 +16,7 @@ import { generateTokenPair, REFRESH_TOKEN_DAYS } from "./jwt.js";
 import { hashRefreshToken } from "./token-hash.js";
 import { redis } from "../redis.js";
 import { requireActiveUser } from "./user-access.js";
+import { enforceServiceConsent, type ServiceConsentRequest } from "../consent/gate.js";
 
 import type { AuthenticationEvidence } from "../lib/authentication-evidence.js";
 import type { UserSessionState } from "./user-session-state.js";
@@ -39,12 +40,25 @@ export interface AuthCodeUser {
   displayName: string;
   email: string | null;
   role: string;
+  /**
+   * サービス向け (audience = "service") では必須: どのサービスへ渡すか。
+   * 同意の関門 (spec/plan/2026-10-15-service-consent-design.md §4.1) がこれで判定する。
+   */
+  service?: ServiceConsentRequest;
 }
 
 export async function issueAuthCode(user: AuthCodeUser): Promise<string> {
   const audience = user.audience ?? "service";
-  // 許可待ち・停止中のユーザーをサービスへ入れない。refresh 行を作る前に止める。
-  if (audience === "service") await requireActiveUser(user.userId);
+  if (audience === "service") {
+    // 許可待ち・停止中のユーザーをサービスへ入れない。refresh 行を作る前に止める。
+    await requireActiveUser(user.userId);
+    if (!user.service) throw new Error("issueAuthCode: a service target is required for service auth codes");
+    // 同意が要るなら authCode を出さず ConsentRequiredError を投げる (consent_mode 既定 off)。
+    await enforceServiceConsent({
+      userId: user.userId, displayName: user.displayName, email: user.email, role: user.role,
+      authentication: user.authentication, authEpoch: user.authEpoch, deviceId: user.deviceId,
+    }, user.service);
+  }
   const { accessToken, refreshToken, authEpoch } = await generateTokenPair(user.userId, user.role, user.authentication, { authEpoch: user.authEpoch, deviceId: user.deviceId });
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
@@ -68,8 +82,12 @@ export async function issueAuthCode(user: AuthCodeUser): Promise<string> {
   return authCode;
 }
 
-/** userId から users テーブルを引いて authCode を発行する */
-export async function issueAuthCodeForUserId(userId: string, source?: UserSessionState): Promise<string | null> {
+/** userId から users テーブルを引いて、サービス向けの authCode を発行する */
+export async function issueAuthCodeForUserId(
+  userId: string,
+  service: ServiceConsentRequest,
+  source?: UserSessionState,
+): Promise<string | null> {
   if (source && source.sub !== userId) throw new Error("Auth code source mismatch");
   const rows = await db.select({
     id: schema.users.id,
@@ -85,5 +103,6 @@ export async function issueAuthCodeForUserId(userId: string, source?: UserSessio
     displayName: u.displayName ?? "",
     email: u.email,
     role: u.role ?? "general",
+    service,
   });
 }

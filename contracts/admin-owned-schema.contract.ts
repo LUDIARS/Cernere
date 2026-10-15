@@ -1,5 +1,5 @@
 // C-12: a project client's update_schema payload never keeps an administrator-owned field.
-const ADMIN_OWNED = ['data_sharing', 'identity_claims', 'service_scopes', 'profile_access', 'onsite_mfa'];
+const ADMIN_OWNED = ['data_sharing', 'identity_claims', 'service_scopes', 'profile_access', 'onsite_mfa', 'consent_mode'];
 
 export default {
   post: (result: { readonly projectOwned: Record<string, unknown> }): true | string => {

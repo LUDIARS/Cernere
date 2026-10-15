@@ -12,6 +12,7 @@ import { CompositeLoginPage } from "./pages/composite/CompositeLoginPage";
 import { CompositeCallbackPage } from "./pages/composite/CompositeCallbackPage";
 import { DeviceRegisterPage } from "./pages/DeviceRegisterPage";
 import { OidcConsentPage } from "./pages/oidc/OidcConsentPage";
+import { ConsentPage } from "./pages/consent/ConsentPage";
 import { CheckinPage } from "./pages/CheckinPage";
 import { OnboardingPage } from "./pages/onboarding/OnboardingPage";
 import { onboardingUrl } from "./pages/onboarding/onboarding-return";
@@ -59,6 +60,9 @@ function AppRoutes() {
 
       {/* OIDC: 認可同意 (Cernere を IdP とする RP の consent) */}
       <Route path="/oidc/consent" element={<OidcConsentPage />} />
+
+      {/* サービス初回ログイン時の権限確認 (consentTicket。popup / 別タブで開く、アプリシェルなし) */}
+      <Route path="/consent" element={<ConsentPage />} />
 
       {/* 会場チェックイン (session ベース、 passkey 再入力なし。 QR/クエリで gateway を渡す) */}
       <Route path="/checkin" element={<CheckinPage />} />
