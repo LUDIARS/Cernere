@@ -21,6 +21,7 @@ import { resolveDecision, type ConsentView } from "./requirement.js";
 import { getConsentRecord, recordDenial, type FieldsDecision } from "./store.js";
 import type { SignupFieldView } from "../signup-fields/requirement.js";
 import { consumeConsentTicket, getConsentTicket, type ConsentTicket } from "./ticket.js";
+import { serviceSubjectId } from "../federation/subject.js";
 
 export const CONSENT_SESSION_REQUIRED = "consent_session_required";
 
@@ -71,7 +72,8 @@ export async function describeConsentTicket(ticketId: string, viewer: ConsentVie
   const ticket = await loadTicket(ticketId);
   assertViewer(ticket, viewer);
   const resolved = await resolveTicketSubject(ticket);
-  const userId = ticket.authUser.userId;
+  // 同意記録・サインアップ入力は連携番号で持つ (account-federation §3)。
+  const userId = await serviceSubjectId(ticket.authUser.userId);
   const requirement = await evaluateForUser(userId, resolved);
   return {
     serviceName: resolved.name,
@@ -113,7 +115,8 @@ async function prepareFields(
 export async function decideConsentTicket(ticketId: string, input: TicketDecision, viewer: ConsentViewer): Promise<ContinuationOutcome> {
   const peeked = await loadTicket(ticketId);
   assertViewer(peeked, viewer);
-  const userId = peeked.authUser.userId;
+  // 同意記録・サインアップ入力は連携番号で持つ (account-federation §3)。authCode はログインしたアカウントで出す。
+  const userId = await serviceSubjectId(peeked.authUser.userId);
   const resolved = await resolveTicketSubject(peeked);
   const requirement = await evaluateForUser(userId, resolved);
   const decision = input.decision === "grant" ? resolveDecision(requirement, input.recommended) : null;

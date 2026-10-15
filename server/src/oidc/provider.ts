@@ -21,7 +21,7 @@ import { signIdToken } from "../auth/oidc-keys.js";
 import { config } from "../config.js";
 import { devLog } from "../logging/dev-logger.js";
 import { assertUserSessionCurrent, currentUserSessionState, type UserSessionState } from "../auth/user-session-state.js";
-import { requireActiveUser } from "../auth/user-access.js";
+import { requireServiceAccess, resolveServiceSubject, serviceSubjectId } from "../federation/subject.js";
 import { readAuthenticationEvidence } from "../lib/authentication-evidence.js";
 import { oidcConsentInfo, settleOidcConsent, withoutDeniedScopes, type OidcConsentInfo } from "../consent/oidc-consent.js";
 import {
@@ -73,13 +73,18 @@ function appendQuery(base: string, params: Record<string, string | undefined>): 
   return url.toString();
 }
 
+/**
+ * RP へ渡す利用者。sub は連携番号、claims (名前・メール等) は主のもの
+ * (spec/plan/2026-10-15-account-federation-design.md §3)。
+ */
 async function loadClaimUser(userId: string): Promise<ClaimSourceUser | null> {
+  const resolved = await resolveServiceSubject(userId);
   const rows = await db.select().from(schema.users)
-    .where(eq(schema.users.id, userId)).limit(1);
+    .where(eq(schema.users.id, resolved.primaryUserId)).limit(1);
   if (rows.length === 0) return null;
   const u = rows[0];
   return {
-    id: u.id,
+    id: resolved.subject,
     email: u.email,
     displayName: u.displayName,
     login: u.login,
@@ -207,7 +212,7 @@ export async function getConsentInfo(requestId: string, claims?: JwtClaims): Pro
   }
   return { clientName: client.name, scopes: req.scope, redirectUri: req.redirectUri,
     reauthenticationRequired: !claims || !!authenticationMessage, authenticationMessage,
-    consent: await oidcConsentInfo(req.clientId, claims?.sub ?? null) };
+    consent: await oidcConsentInfo(req.clientId, claims ? await serviceSubjectId(claims.sub) : null) };
 }
 
 /** 承認は main の provenance 検査 (authEpoch/デバイス失効) と、 企業接続ポリシーの両方を通す。
@@ -218,15 +223,16 @@ export async function approveAuthorization(requestId: string, userId: string, au
   const authorization = source ?? { ...await currentUserSessionState(userId), authentication: readAuthenticationEvidence(authentication) };
   if (authorization.sub !== userId) throw AppError.unauthorized("OIDC session user mismatch");
   await assertUserSessionCurrent(authorization);
-  // 外部の RP へ身元を渡すのは許可済みのユーザーだけ (許可制 案 A)。
-  await requireActiveUser(userId);
+  // 外部の RP へ身元を渡すのは許可済みのユーザーだけ (許可制 案 A。連携していれば主の許可状態)。
+  const { subject } = await requireServiceAccess(userId);
   const req = await getAuthRequest(requestId);
   if (!req) throw AppError.badRequest("Invalid or expired authorization request");
   const client = await getClientByClientId(req.clientId);
   if (!client?.isActive || !isRedirectUriAllowed(client, req.redirectUri)) throw AppError.forbidden("OIDC client changed");
   const facts = await checkOidcAuthentication(req.clientId, userId, authorization.authentication, req);
   // 同意 (consent_mode warn/enforce の RP): 判断を保存し、拒否した scope は code に載せない。
-  const scope = await settleOidcConsent(userId, req.clientId, req.scope, chosenRecommended);
+  // 同意記録は連携番号で持つ (どのアカウントで入っても同じ同意)。
+  const scope = await settleOidcConsent(subject, req.clientId, req.scope, chosenRecommended);
   if (!await consumeAuthRequest(requestId)) throw AppError.badRequest("Authorization request already used");
 
   const code = await putAuthCode({
@@ -300,7 +306,7 @@ export async function exchangeToken(params: TokenRequestParams): Promise<TokenRe
   const record = await consumeAuthCode(params.code);
   if (!record) throw new OidcError("invalid_grant", "code is invalid, expired, or already used");
   if (!record.authorization || record.authorization.sub !== record.userId) throw new OidcError("invalid_grant", "Session provenance is unavailable");
-  try { await assertUserSessionCurrent(record.authorization); await requireActiveUser(record.userId); }
+  try { await assertUserSessionCurrent(record.authorization); await requireServiceAccess(record.userId); }
   catch { throw new OidcError("invalid_grant", "Authorizing session was revoked"); }
 
   if (record.clientId !== client.clientId) {
@@ -347,7 +353,8 @@ export async function exchangeToken(params: TokenRequestParams): Promise<TokenRe
 
   const accessToken = await putAccessToken({
     authorization: record.authorization,
-    userId: user.id,
+    // access token はアカウントのセッションに束縛する (userinfo が authorization.sub と照合する)。sub は claims 側。
+    userId: record.userId,
     clientId: client.clientId,
     scope,
     enterprise: record.enterprise,
@@ -373,7 +380,7 @@ export async function userinfo(accessToken: string | null): Promise<Record<strin
   if (!record) throw AppError.unauthorized("invalid or expired access token");
   if (!record.authorization || record.authorization.sub !== record.userId) throw AppError.unauthorized("Session provenance is unavailable");
   await assertUserSessionCurrent(record.authorization);
-  await requireActiveUser(record.userId);
+  await requireServiceAccess(record.userId);
   const client = await getClientByClientId(record.clientId);
   if (!client?.isActive) throw AppError.unauthorized("OIDC client is disabled");
   await checkOidcAuthentication(record.clientId, record.userId, record.authorization.authentication, undefined, record.enterprise);

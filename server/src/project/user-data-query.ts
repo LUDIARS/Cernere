@@ -145,7 +145,7 @@ export async function listUserData(
   const sqlClient = postgres(config.databaseUrl, { max: 1 });
   try {
     const rows = await sqlClient.unsafe(
-      `SELECT ${projected} FROM "${table}" d JOIN users u ON u.id = d.user_id ${whereSql} LIMIT ${limit}`,
+      `SELECT ${projected} FROM "${table}" d LEFT JOIN account_federations f ON f.subject_id = d.user_id JOIN users u ON u.id = COALESCE(f.primary_user_id, d.user_id) ${whereSql} LIMIT ${limit}`,
       params,
     );
     const result = rows as unknown as Array<Record<string, unknown>>;

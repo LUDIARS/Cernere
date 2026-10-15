@@ -8,6 +8,7 @@
  * どちらかが静かに復活する。 そのため両方を 1 本の経路として検証する。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("../../src/federation/subject.js", async () => (await import("../federation/unfederated-subject.js")).unfederatedSubject);
 import jwt from "jsonwebtoken";
 import { completedAuthentication } from "../../src/lib/authentication-evidence.js";
 

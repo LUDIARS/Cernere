@@ -4,10 +4,15 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const calls = vi.hoisted(() => ({ order: [] as string[], gate: [] as unknown[], block: false }));
+const calls = vi.hoisted(() => ({ order: [] as string[], gate: [] as unknown[], block: false, stored: [] as string[] }));
 
-vi.mock("../../src/auth/user-access.js", () => ({
-  requireActiveUser: async () => { calls.order.push("active"); },
+// 連携していれば番号は連携番号・名前は主 (account-federation §3)。ここでは連携済みのアカウントとして返す。
+vi.mock("../../src/federation/subject.js", () => ({
+  requireServiceAccess: async () => { calls.order.push("active"); },
+  loadServiceIdentity: async () => ({
+    subject: "99999999-9999-4999-8999-999999999999", primaryUserId: "88888888-8888-4888-8888-888888888888",
+    displayName: "Primary", email: "primary@example.com", role: "general",
+  }),
 }));
 vi.mock("../../src/consent/gate.js", () => ({
   enforceServiceConsent: async (_user: unknown, request: unknown) => {
@@ -24,7 +29,7 @@ vi.mock("../../src/db/connection.js", () => ({
   db: { insert: () => ({ values: async () => { calls.order.push("refresh-row"); } }) },
 }));
 vi.mock("../../src/redis.js", () => ({
-  redis: { set: async () => { calls.order.push("authcode"); } },
+  redis: { set: async (_key: string, value: string) => { calls.order.push("authcode"); calls.stored.push(value); } },
 }));
 
 const { issueAuthCode } = await import("../../src/auth/auth-code.js");
@@ -35,6 +40,7 @@ beforeEach(() => {
   calls.order = [];
   calls.gate = [];
   calls.block = false;
+  calls.stored = [];
 });
 
 describe("issueAuthCode — 同意の関門", () => {
@@ -59,5 +65,16 @@ describe("issueAuthCode — 同意の関門", () => {
   it("Cernere 自身 (audience = cernere) は判定しない", async () => {
     await issueAuthCode({ ...user, audience: "cernere" });
     expect(calls.order).toEqual(["tokens", "refresh-row", "authcode"]);
+    // Cernere 自身にはアカウントそのものを渡す。
+    expect(JSON.parse(calls.stored[0]).user.id).toBe(user.userId);
+  });
+
+  it("サービス向けの user.id は連携番号、名前・email は主のもの。内部のアカウント id は accountId に分ける", async () => {
+    await issueAuthCode({ ...user, service: { subject: { projectKey: "svc" }, channel: "browser" } });
+    const stored = JSON.parse(calls.stored[0]);
+    expect(stored.user).toEqual({
+      id: "99999999-9999-4999-8999-999999999999", displayName: "Primary", email: "primary@example.com", role: "general",
+    });
+    expect(stored.accountId).toBe(user.userId);
   });
 });

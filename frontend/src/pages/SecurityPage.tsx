@@ -37,6 +37,9 @@ const EVENT_LABEL: Record<string, string> = {
   "session.revoke_all": "すべての端末からログアウト",
   "alert_target.added": "通知の宛先の追加",
   "alert_target.removed": "通知の宛先の削除",
+  "federation.joined": "新しい端末の連携",
+  "federation.left": "連携から端末を外した",
+  "federation.primary_changed": "連携の主の切り替え",
 };
 
 export function SecurityPage() {

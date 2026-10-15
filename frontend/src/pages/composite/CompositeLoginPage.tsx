@@ -19,7 +19,7 @@
 import type { CSSProperties } from "react";
 import { CompositeLogin } from "@ludiars/cernere-composite/ui";
 import { useCompositeLoginSession } from "../../hooks/useCompositeLoginSession";
-import { startUrl } from "../onboarding/onboarding-return";
+import { continueMenuUrl } from "../continue/continue-links";
 import { CERNERE_LOGIN_LABELS } from "./composite-login-labels";
 
 const API_BASE = "";
@@ -67,10 +67,10 @@ export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
     apiBase: API_BASE,
   });
 
-  // パスキーが無かったら、はじめての方の画面へ。ここでは何も作らない。アカウントはその画面の
-  // 「はじめる」でパスキーを作成し終えたときにできる (StartPage)。
+  // 押したログインでパスキーが見つからなかったら、引き継ぎメニューへ (account-federation §4)。
+  // ここでは何も作らない。メニューから ① 別の端末で入る / ② この端末を引き継ぐ / ③ はじめて使う を選ぶ。
   const createAccount = () => {
-    window.location.assign(startUrl(returnTarget(self, params)));
+    window.location.assign(continueMenuUrl(returnTarget(self, params), window.location.pathname + window.location.search));
   };
 
   if (session.blockedReason) {

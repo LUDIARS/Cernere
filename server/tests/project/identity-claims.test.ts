@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+vi.mock("../../src/federation/subject.js", async () => (await import("../federation/unfederated-subject.js")).unfederatedSubject);
 import type { ProjectDefinition } from "../../src/project/schema.js";
 
 // db.select().from(managedProjects).where(...).limit(1) だけを差し替える。

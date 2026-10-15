@@ -671,6 +671,9 @@ export async function deleteUserAccount(
     await tx.update(dbSchema.projectDefinitionHistory)
       .set({ appliedBy: null })
       .where(eq(dbSchema.projectDefinitionHistory.appliedBy, userId));
+    // 連携から外す (主のまま消すと primary_user_id の FK で止まる。account-federation §4.3)。
+    const { detachForAccountDeletion } = await import("../federation/store.js");
+    await detachForAccountDeletion(tx, userId);
     // users 削除で残りは CASCADE 連鎖。
     await tx.delete(dbSchema.users).where(eq(dbSchema.users.id, userId));
   });
@@ -891,6 +894,10 @@ export async function listAllUserProjectData(userId: string) {
  * (本筋の認証フローを巻き込まないため).
  */
 export async function ensureUserProjectRow(userId: string, projectKey: string): Promise<void> {
+  // 行の user_id はサービスへ渡す番号 (連携していれば連携番号、spec/plan/2026-10-15-account-federation-design.md §3)。
+  // 呼び出し元はアカウントの id を渡す。番号の解決は冪等なので、番号を渡されても同じ行になる。
+  const { serviceSubjectId } = await import("../federation/subject.js");
+  const subject = await serviceSubjectId(userId);
   let proj;
   try {
     proj = await db.select().from(dbSchema.managedProjects)
@@ -912,7 +919,7 @@ export async function ensureUserProjectRow(userId: string, projectKey: string): 
   try {
     await sqlClient.unsafe(
       `INSERT INTO "${tableName}" (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`,
-      [userId],
+      [subject],
     );
   } catch (err) {
     console.warn(`[project-data] ensureUserProjectRow failed (${projectKey}):`, err);

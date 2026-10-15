@@ -15,6 +15,7 @@ import { auth as authApi, getAccessToken } from "../lib/api";
 import { CernereCompositeAuthAdapter } from "../lib/composite-auth-adapter";
 import { CompositeAuthHandoff } from "../lib/composite-auth-handoff";
 import { fetchAllowedOrigins, isTargetAllowed } from "../lib/composite-redirect";
+import { wantsCrossDevice } from "../pages/continue/continue-links";
 
 export interface CompositeLoginSessionArgs {
   /** Cernere 単独フロントの /login (authCode を自分のトークンに交換) */
@@ -59,7 +60,9 @@ export function useCompositeLoginSession(args: CompositeLoginSessionArgs): Compo
 
   // adapter は WS を抱えるので、 ページと同じ寿命で 1 つだけ持ち unmount で閉じる。
   const adapter = useMemo(
-    () => new CernereCompositeAuthAdapter(apiBase, self ? null : (origin ?? redirectUri), origin ? "post_message" : "redirect"),
+    () => new CernereCompositeAuthAdapter(apiBase, self ? null : (origin ?? redirectUri), origin ? "post_message" : "redirect",
+      // 引き継ぎメニューの ①: 別の端末のパスキー (QR) を先に出させる。
+      wantsCrossDevice(window.location.search)),
     [apiBase, self, origin, redirectUri],
   );
   useEffect(() => () => adapter.dispose(), [adapter]);

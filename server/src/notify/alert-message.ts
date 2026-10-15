@@ -28,6 +28,9 @@ const HEADLINES: Record<SecurityEventKind, string> = {
   "access.locked": "アカウントが停止されました",
   "access.unlocked": "アカウントの停止が解除されました",
   "access.requests_pending": "利用申請が審査を待っています",
+  "federation.joined": "新しい端末がアカウントに連携しました",
+  "federation.left": "アカウントの連携から端末が外れました",
+  "federation.primary_changed": "連携の主のアカウントが切り替わりました",
 };
 
 const GUIDANCE: Partial<Record<SecurityEventKind, string>> = {
@@ -35,6 +38,7 @@ const GUIDANCE: Partial<Record<SecurityEventKind, string>> = {
   "passkey.pairing_requested": "心当たりがなければ、元の端末で承認せずに拒否してください。",
   "passkey.added": "心当たりがなければ、すぐにログインして追加されたパスキーを削除してください。",
   "session.new": "心当たりがなければ、ログインして該当する端末を失効させてください。",
+  "federation.joined": "心当たりがなければ、設定の「アカウントの連携」から該当する端末を外してください。",
 };
 
 export interface AlertMessage {

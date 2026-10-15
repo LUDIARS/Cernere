@@ -75,7 +75,7 @@ import {
 } from "../auth/passkey-rate-limit.js";
 import { publicPasskeyCompositeError } from "../auth/passkey-public-error.js";
 import { AppError } from "../error.js";
-import { requireActiveUser } from "../auth/user-access.js";
+import { requireServiceAccess } from "../federation/subject.js";
 import { summarizeUserAgent } from "../lib/user-agent-summary.js";
 import { recordSecurityEvent } from "../notify/security-events.js";
 import { requireUserId } from "./bearer-user.js";
@@ -117,7 +117,15 @@ export const DISPLAY_NAME_SOURCE_UNSET = "unset";
 const signupFinishSchema = z.object({
   signupId: z.string().uuid(),
   response: z.unknown(),
+  /**
+   * 引き継ぎ (spec/plan/2026-10-15-account-federation-design.md §4.1-4): 承認済みの引き継ぎ要求で
+   * この端末用のアカウントを作り、同じトランザクションで承認者の連携へ加える。
+   */
+  federation: z.object({ requestId: z.string().uuid(), deviceSecret: z.string().min(16).max(512) }).strict().optional(),
 }).strict();
+
+/** 連携で作ったアカウントの表示名の出所。名前は主のものを使うので名前入力へ送らない。 */
+export const DISPLAY_NAME_SOURCE_FEDERATION = "federation";
 
 interface PendingPasskeySignup {
   challenge: string;
@@ -373,33 +381,89 @@ async function finalizePasskeySignup(
   return account;
 }
 
+/**
+ * 引き継ぎ要求の完了権を取る (承認済み・1 回限り)。新しい端末のアカウントはまだ無いので joiner は null。
+ * 失敗したら abort して、別の試行 (WebAuthn の取消後の再試行) で使えるようにする。
+ */
+async function beginFederatedSignup(p: Record<string, unknown>) {
+  const parsed = signupFinishSchema.safeParse(p);
+  const federation = parsed.success ? parsed.data.federation : undefined;
+  if (!federation) return null;
+  const { joinRequestStore } = await import("../federation/join-request-instance.js");
+  const record = await joinRequestStore.beginCompletion(federation.requestId, federation.deviceSecret, null);
+  if (record.kind !== "new_device") {
+    await joinRequestStore.abortCompletion(federation.requestId);
+    throw AppError.badRequest("This sign-in transfer adds an existing account; finish it from that account");
+  }
+  return { store: joinRequestStore, record };
+}
+
 /** REST: 作成したアカウントの JWT ペアを返す (Cernere 自身の /login や device 登録が使う)。 */
 async function signupFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
   let tokens: Awaited<ReturnType<typeof generateTokenPair>> | null = null;
-  const account = await finalizePasskeySignup(p, ctx, async (tx, created) => {
-    tokens = await generateTokenPair(created.userId, created.role, undefined, { database: tx });
+  const federated = await beginFederatedSignup(p);
+  let federatedName: string | null = null;
+  let account: SignedUpAccount;
+  try {
+    account = await finalizePasskeySignup(p, ctx, async (tx, created) => {
+      if (federated) {
+        const { joinFederation } = await import("../federation/store.js");
+        const joined = await joinFederation(tx, {
+          approverUserId: federated.record.approverUserId!, joinerUserId: created.userId,
+          via: "qr_new_device", device: federated.record.device ?? undefined,
+        });
+        // 名前は聞かない (主のプロフィールを使う、§4.1-5)。この端末のアカウントにも主の名前を写しておく。
+        const primary = (await tx.select({ displayName: schema.users.displayName }).from(schema.users)
+          .where(eq(schema.users.id, joined.primaryUserId)).limit(1))[0];
+        federatedName = primary?.displayName ?? "";
+        await tx.update(schema.users).set({
+          displayName: federatedName, displayNameSource: DISPLAY_NAME_SOURCE_FEDERATION, updatedAt: new Date(),
+        }).where(eq(schema.users.id, created.userId));
+      }
+      await issueSignupSession(tx, created);
+    });
+  } catch (error) {
+    if (federated) await federated.store.abortCompletion(federated.record.id);
+    throw error;
+  }
+  if (federated) await federated.store.finishCompletion(federated.record);
+  return signupResponse(account, tokens, federated ? federatedName : null);
+
+  async function issueSignupSession(tx: SignupTx, created: SignedUpAccount): Promise<void> {
+    const pair = await generateTokenPair(created.userId, created.role, undefined, { database: tx });
     await tx.insert(schema.refreshSessions).values({
-      authEpoch: tokens.authEpoch, id: crypto.randomUUID(),
+      authEpoch: pair.authEpoch, id: crypto.randomUUID(),
       userId: created.userId,
-      refreshToken: hashRefreshToken(tokens.refreshToken),
+      refreshToken: hashRefreshToken(pair.refreshToken),
       expiresAt: new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000),
     });
-  });
+    tokens = pair;
+  }
+}
+
+function signupResponse(
+  account: SignedUpAccount,
+  tokens: { accessToken: string; refreshToken: string } | null,
+  /** 引き継ぎで作ったときの名前 (主の名前)。通常の signup は null */
+  federatedName: string | null,
+): RouteResult {
+  const federated = federatedName !== null;
   // withinTx は transaction 成功時に必ず走るため、 ここで null なら実装上の不整合。
   if (!tokens) throw new Error("Passkey signup did not issue a session");
-  const issued: { accessToken: string; refreshToken: string } = tokens;
   return {
     status: "201 Created",
     data: {
       user: {
         id: account.userId,
-        displayName: null,
+        displayName: federatedName || null,
         email: null,
         role: account.role,
-        needsProfile: true,
+        // 引き継ぎで作ったアカウントは主の名前を使うので名前入力へ送らない (§4.1-5)。
+        needsProfile: !federated,
+        federated,
       },
-      accessToken: issued.accessToken,
-      refreshToken: issued.refreshToken,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
     },
   };
 }
@@ -409,6 +473,8 @@ async function signupFinish(p: Record<string, unknown>, ctx: RequestCtx): Promis
  * 呼び出し元サービスは自分の backend 経由で /api/auth/exchange して service_token を得る。
  */
 async function compositeSignupFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
+  // 引き継ぎ (連携) は Cernere 自身の画面 (/federate) からだけ行う。
+  if (p.federation !== undefined) throw AppError.badRequest("Finish the sign-in transfer in Cernere");
   const account = await finalizePasskeySignup(p, ctx);
   try {
     await ensureProjectRowForComposite(account.userId, ctx);
@@ -684,7 +750,7 @@ async function compositeLoginFinish(p: Record<string, unknown>, ctx: RequestCtx)
   // 送り先 (popup / redirect の target) があるか、サービス経由 (project WS) なら、authCode はサービスへ渡る。
   // 送り先の無い REST は Cernere 自身の /login (許可待ちでも入れる。交換は Cernere の画面からだけ)。
   const audience = ctx.projectKey || (typeof p.target === "string" && p.target) ? "service" : "cernere";
-  if (audience === "service") await requireActiveUser(user.id);
+  if (audience === "service") await requireServiceAccess(user.id);
   let authCode: string;
   try {
     authCode = await issueAuthCode({

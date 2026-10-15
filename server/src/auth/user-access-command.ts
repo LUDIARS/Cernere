@@ -27,7 +27,12 @@ const applySchema = z.object({ purpose: z.string() }).strict();
 
 export async function userAccessCommand(userId: string, action: string, payload: unknown): Promise<unknown> {
   switch (action) {
-    case "status": return getMyAccess(userId);
+    case "status": {
+      // 連携しているアカウントは主の許可状態で表示する (account-federation §3)。
+      const view = await getMyAccess(userId);
+      const { effectiveAccessStatus } = await import("../federation/subject.js");
+      return { ...view, status: await effectiveAccessStatus(userId) };
+    }
     case "apply": {
       const parsed = applySchema.safeParse(payload);
       if (!parsed.success) throw AppError.badRequest("purpose is required");

@@ -18,6 +18,7 @@ import { handleConsentRoute } from "./http/consent-handler.js";
 import { handleFaceRevocationRoute } from "./http/face-revocation-handler.js";
 import { handleIdentityRosterRoute } from "./http/identity-roster-handler.js";
 import { handleActionAuthRoute } from "./http/action-auth-handler.js";
+import { handleFederationRoute } from "./http/federation-handler.js";
 import { handleAuthCodeExchange } from "./http/auth-code-exchange-handler.js";
 import { exportProjectSchemas } from "./http/project-schema-handler.js";
 import { getPublicKeys } from "./auth/paseto.js";
@@ -438,6 +439,32 @@ export function createApp() {
     } catch (err) {
       if (aborted) return;
       const { status, message, code } = classifyError(err);
+      jsonResponse(res, status, code ? { error: message, code } : { error: message });
+    }
+  });
+
+  // ── アカウント連携 (引き継ぎメニュー): POST /api/federation/:action ──
+  // spec/plan/2026-10-15-account-federation-design.md §4。device 側の一部は未ログインで呼べる (IP レート制限)。
+  app.post("/api/federation/:action", async (res, req) => {
+    const action = req.getParameter(0) ?? "";
+    const authHeader = req.getHeader("authorization") ?? "";
+    const actionProof = req.getHeader("x-cernere-action-proof") ?? "";
+    const userAgent = req.getHeader("user-agent") ?? undefined;
+    const ip = getRemoteIp(res);
+    let aborted = false;
+
+    try {
+      const raw = await readBody(res, 8192, () => { aborted = true; });
+      if (aborted) return;
+      let body: unknown;
+      try { body = JSON.parse(raw || "{}"); } catch { throw AppError.badRequest("Invalid JSON"); }
+      const result = await handleFederationRoute(action, body, authHeader, actionProof, { ip, userAgent });
+      // 引き継ぎの token / deviceSecret / 4 桁を返す応答があるので保存させない。
+      jsonResponse(res, result.status, result.data, [], NO_STORE_HEADERS);
+    } catch (err) {
+      if (aborted) return;
+      const { status, message, code } = classifyError(err);
+      if (status === "500 Internal Server Error") devError("http.federation.500", err, { action, ip });
       jsonResponse(res, status, code ? { error: message, code } : { error: message });
     }
   });

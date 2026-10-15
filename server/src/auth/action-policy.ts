@@ -46,6 +46,11 @@ export const protectedActionSchema = z.enum([
   "consent.decide",
   "consent.revoke",
   "oidc_client.update_consent",
+  // アカウント連携 (spec/plan/2026-10-15-account-federation-design.md §4)。HTTP (/api/federation/*) だけで使う。
+  "federation.approve",
+  "federation.join",
+  "federation.set_primary",
+  "federation.remove",
 ]);
 
 export type ProtectedAction = z.infer<typeof protectedActionSchema>;

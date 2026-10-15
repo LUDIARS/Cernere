@@ -859,3 +859,31 @@ export const consentDecisions = pgTable("consent_decisions", {
   denied: jsonb("denied").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index("idx_consent_decisions_user").on(t.userId, t.createdAt)]);
+
+// ── Account federation (spec/plan/2026-10-15-account-federation-design.md §2, migration 073) ──
+
+/** 複数のアカウントのまとまり。subject_id はサービスへ渡す固定の利用者番号 (最初のアカウントの user id)。 */
+export const accountFederations = pgTable("account_federations", {
+  id: uuid("id").primaryKey(),
+  subjectId: uuid("subject_id").notNull().unique(),
+  primaryUserId: uuid("primary_user_id").notNull().references(() => users.id),
+  revision: integer("revision").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const accountFederationMembers = pgTable("account_federation_members", {
+  federationId: uuid("federation_id").notNull().references(() => accountFederations.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+  joinedVia: text("joined_via").notNull(),
+  joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.federationId, t.userId] })]);
+
+/** 連携の監査 (追記のみ)。 */
+export const accountFederationEvents = pgTable("account_federation_events", {
+  id: uuid("id").primaryKey(),
+  federationId: uuid("federation_id").notNull(),
+  actorUserId: uuid("actor_user_id"),
+  targetUserId: uuid("target_user_id"),
+  action: text("action").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});

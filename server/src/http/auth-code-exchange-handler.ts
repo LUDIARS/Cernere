@@ -37,6 +37,8 @@ interface StoredAuthCode {
   audience?: unknown;
   accessToken?: unknown;
   refreshToken?: unknown;
+  /** 発行したアカウント (連携していてもアカウント自身)。顔の同意はアカウント単位なのでこちらを返す。 */
+  accountId?: unknown;
   user?: { id?: unknown } | null;
 }
 
@@ -50,7 +52,10 @@ export async function handleAuthCodeExchange(body: string, authHeader: string): 
   if (!raw) throw AppError.unauthorized("Invalid or expired auth code");
 
   const stored = parseStored(raw);
-  const userId = typeof stored.user?.id === "string" ? stored.user.id : null;
+  // 顔の同意 (POST /api/identity/face-consent) は accessToken のアカウントで記録されるので、
+  // kiosk へ返す userId も同じアカウントにそろえる (連携番号ではない)。旧形式は user.id。
+  const userId = typeof stored.accountId === "string" ? stored.accountId
+    : typeof stored.user?.id === "string" ? stored.user.id : null;
   const accessToken = typeof stored.accessToken === "string" ? stored.accessToken : null;
   if (!userId || !accessToken) throw AppError.unauthorized("Invalid or expired auth code");
   // Cernere 自身の /login 用の code (許可待ちでも出る) は kiosk に渡さない (許可制 案 A)。

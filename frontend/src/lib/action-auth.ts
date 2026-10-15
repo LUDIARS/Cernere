@@ -41,7 +41,11 @@ export type ProtectedAction =
   | "oidc_client.disable"
   | "oidc_client.update_consent"
   | "consent.decide"
-  | "consent.revoke";
+  | "consent.revoke"
+  | "federation.approve"
+  | "federation.join"
+  | "federation.set_primary"
+  | "federation.remove";
 
 interface ActionAuthBegin {
   ceremonyId: string;

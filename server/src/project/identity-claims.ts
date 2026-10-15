@@ -18,6 +18,7 @@ import { config } from "../config.js";
 import { AppError } from "../error.js";
 import { IDENTITY_CLAIMS, type IdentityClaim, type ProjectDefinition } from "./schema.js";
 import { deniedPermissionKeys } from "../consent/denials.js";
+import { primaryUserIdForSubject, serviceSubjectId } from "../federation/subject.js";
 
 const CLAIM_SET: ReadonlySet<string> = new Set(IDENTITY_CLAIMS);
 
@@ -77,7 +78,8 @@ export async function getIdentityClaims(
   try {
     const rows = await sqlClient.unsafe(
       `SELECT ${selectCols} FROM users WHERE id = $1 LIMIT 1`,
-      [userId],
+      // userId はサービスの持つ番号 (連携番号)。値は主のアカウントから読む (account-federation §3)。
+      [await primaryUserIdForSubject(userId)],
     );
     const denied = await deniedPermissionKeys(userId, projectKey);
     const result: Record<string, unknown> = {};
@@ -106,7 +108,9 @@ export async function resolveUserByClaim(
       `SELECT id AS "userId", display_name AS "displayName" FROM users WHERE "${allowed}" = $1 LIMIT 1`,
       [value],
     );
-    const found = (rows[0] as unknown as { userId: string; displayName: string } | undefined) ?? null;
+    const row = (rows[0] as unknown as { userId: string; displayName: string } | undefined) ?? null;
+    // サービスへはアカウントの id ではなくサービスの番号 (連携していれば連携番号) を返す (account-federation §3)。
+    const found = row ? { ...row, userId: await serviceSubjectId(row.userId) } : null;
     // この claim を渡すことを外した利用者は、claim の値から引かせない。
     if (found && (await deniedPermissionKeys(found.userId, projectKey)).has(`identity_claim.${allowed}`)) return null;
     return found;

@@ -4,6 +4,7 @@ import { publicKeyPem } from './fixture.js';
 
 const fake = createFakeDb();
 vi.mock('../../src/db/connection.js', () => ({ db: fake.db }));
+vi.mock('../../src/federation/subject.js', async () => (await import('../federation/unfederated-subject.js')).unfederatedSubject);
 vi.mock('../../src/project/credentials.js', () => ({ hashProjectSecret: vi.fn(async () => 'hashed-secret') }));
 const session = vi.fn(async () => ({ userId: 'admin' }));
 const state = vi.fn(async (): Promise<{ state: string } | null> => ({ state: 'logged_in' }));

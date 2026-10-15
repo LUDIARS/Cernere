@@ -17,7 +17,8 @@ import { db } from "./db/connection.js";
 import * as schema from "./db/schema.js";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { APPROVAL_REQUIRED, getAccessStatus } from "./auth/user-access.js";
+import { APPROVAL_REQUIRED } from "./auth/user-access.js";
+import { effectiveAccessStatus } from "./federation/subject.js";
 import { isAllowedWhilePending } from "./auth/pending-allowlist.js";
 import { userAccessCommand } from "./auth/user-access-command.js";
 import { AppError } from "./error.js";
@@ -65,7 +66,8 @@ export async function dispatch(
         throw AppError.forbidden(`Session not active (state=${state.state})`);
       }
       // 許可待ちは本人用の操作だけ (許可制 案 A)。locked は getSession の時点で拒否済み。
-      if (await getAccessStatus(userId) !== "active" && !isAllowedWhilePending(userId, module, action, payload)) {
+      // 連携しているアカウントは主の許可状態に従う (spec/plan/2026-10-15-account-federation-design.md §3)。
+      if (await effectiveAccessStatus(userId) !== "active" && !isAllowedWhilePending(userId, module, action, payload)) {
         throw AppError.withCode(403, APPROVAL_REQUIRED, "This account is waiting for approval. Request access from Cernere.");
       }
     }
@@ -133,13 +135,16 @@ async function execute(
     case "oidc_keys": return oidcKeysCmd(userId, action, payload);
     case "consent": {
       // 本人の「サービスの権限」。decide / revoke は action proof (ws/handler) を通ってからここへ来る。
+      // 同意記録は連携番号で持つ (spec/plan/2026-10-15-account-federation-design.md §3)。
       const { consentCommand } = await import("./consent/command.js");
-      return consentCommand(userId, action, payload);
+      const { serviceSubjectId } = await import("./federation/subject.js");
+      return consentCommand(await serviceSubjectId(userId), action, payload);
     }
     case "signup_fields": {
       // サービス経由で始めた人のオンボーディング (戻り先のサービスの入力項目)。本人の行だけを読み書きする。
       const { signupFieldsCommand } = await import("./signup-fields/command.js");
-      return signupFieldsCommand(userId, action, payload);
+      // サインアップ入力はサービスのデータ (project_data の行) と同意記録に結び付くので連携番号で扱う (account-federation §3)。
+      return signupFieldsCommand(await subjectOf(userId), action, payload);
     }
     default:
       throw AppError.badRequest(`Unknown module: ${module}`);
@@ -550,6 +555,11 @@ async function profileCmd(userId: string, action: string, p?: Record<string, unk
 
 // -- ManagedProject (WS session only) --
 
+async function subjectOf(userId: string): Promise<string> {
+  const { serviceSubjectId } = await import("./federation/subject.js");
+  return serviceSubjectId(userId);
+}
+
 async function managedProjectCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
   const svc = await import("./project/service.js");
 
@@ -580,20 +590,21 @@ async function managedProjectCmd(userId: string, action: string, p?: Record<stri
     }
     case "definition_history":
       return svc.getDefinitionHistory(requireStr(p, "key"));
+    // サービスのデータとモジュールの opt-out はサービスへ渡す番号 (連携番号) で持つ (account-federation §3)。
     case "list_optouts":
-      return svc.listModuleOptouts(userId, requireStr(p, "projectKey"));
+      return svc.listModuleOptouts(await subjectOf(userId), requireStr(p, "projectKey"));
     case "optout": {
-      return svc.setModuleOptout(userId, requireStr(p, "projectKey"), requireStr(p, "moduleKey"));
+      return svc.setModuleOptout(await subjectOf(userId), requireStr(p, "projectKey"), requireStr(p, "moduleKey"));
     }
     case "remove_optout": {
-      return svc.removeModuleOptout(userId, requireStr(p, "projectKey"), requireStr(p, "moduleKey"));
+      return svc.removeModuleOptout(await subjectOf(userId), requireStr(p, "projectKey"), requireStr(p, "moduleKey"));
     }
     case "my_data":
-      return svc.getUserProjectData(userId, requireStr(p, "projectKey"));
+      return svc.getUserProjectData(await subjectOf(userId), requireStr(p, "projectKey"));
     case "my_data_all":
-      return svc.listAllUserProjectData(userId);
+      return svc.listAllUserProjectData(await subjectOf(userId));
     case "overview":
-      return svc.listUserProjectsOverview(userId);
+      return svc.listUserProjectsOverview(await subjectOf(userId));
     case "open_url":
       return svc.issueProjectOpenUrl(userId, requireStr(p, "projectKey"));
     case "connections":

@@ -28,7 +28,7 @@ import { ConsentRequiredError, consentRequiredBody } from "../consent/gate.js";
 import { isCernereFrontendOrigin } from "./cernere-origin.js";
 import { checkExchangeAudience } from "../auth/auth-code-audience.js";
 import { AppError } from "../error.js";
-import { requireActiveUser } from "../auth/user-access.js";
+import { loadServiceIdentity, requireServiceAccess } from "../federation/subject.js";
 import { retiredLoginResult } from "../auth/retired-login.js";
 import { removeAlertTarget } from "../notify/alert-targets.js";
 import { actionProofStore, httpActionBinding } from "../auth/action-proof.js";
@@ -174,15 +174,15 @@ async function verify(p: Record<string, unknown>, ctx: RequestCtx): Promise<Rout
   // ユーザートークンとして検証
   try {
     const claims = await verifyToken(token);
-    const rows = await db.select().from(schema.users)
-      .where(eq(schema.users.id, claims.sub)).limit(1);
-    if (!rows[0]) return { status: "200 OK", data: { valid: false } };
+    // 呼び出し元はサービス (packages/id-cache)。利用者は連携番号と主の名前で返す (account-federation §3)。
+    const identity = await loadServiceIdentity(claims.sub);
+    if (!identity) return { status: "200 OK", data: { valid: false } };
     return {
       status: "200 OK",
       data: {
         valid: true,
         tokenType: "user",
-        user: { id: rows[0].id, name: rows[0].displayName, email: rows[0].email, role: rows[0].role },
+        user: { id: identity.subject, name: identity.displayName, email: identity.email, role: identity.role },
       },
     };
   } catch {
@@ -211,6 +211,8 @@ async function exchange(p: Record<string, unknown>, ctx: RequestCtx): Promise<Ro
   const mismatch = checkExchangeAudience(parsed.audience, isCernereFrontendOrigin(ctx.origin));
   if (mismatch) throw AppError.withCode(403, mismatch.code, mismatch.message);
   await verifyToken(parsed.accessToken);
+  // 内部のアカウント id はサービスへ返さない (サービスは user.id = 連携番号で扱う)。
+  delete parsed.accountId;
   devLog("auth.exchange.done", {
     userId: parsed.user?.id ?? "(none)",
     hasAccessToken: !!parsed.accessToken,
@@ -418,8 +420,8 @@ async function projectUserToken(
   const token = extractBearerToken(authHeader);
   if (!token) throw new Error("Unauthorized: No token provided");
   const claims = await verifyToken(token);
-  // サービスへの user×project token は許可済みのユーザーにだけ出す (許可制 案 A)。
-  await requireActiveUser(claims.sub);
+  // サービスへの user×project token は許可済みのユーザーにだけ出す (許可制 案 A。連携していれば主の許可状態)。
+  await requireServiceAccess(claims.sub);
 
   const projectKey = (p.project_key as string | undefined) ?? (p.project_id as string | undefined);
   if (!projectKey || typeof projectKey !== "string") {
@@ -435,10 +437,13 @@ async function projectUserToken(
     throw new Error(`project '${projectKey}' not found or inactive`);
   }
 
+  // sub は連携番号、role・表示名は主のもの (account-federation §3)。
+  const identity = await loadServiceIdentity(claims.sub);
+  if (!identity) throw new Error("Unauthorized: User not found");
   const userRows = await db.select().from(schema.users)
-    .where(eq(schema.users.id, claims.sub)).limit(1);
+    .where(eq(schema.users.id, identity.primaryUserId)).limit(1);
   if (!userRows[0]) throw new Error("Unauthorized: User not found");
-  const user = userRows[0];
+  const user = { ...userRows[0], id: identity.subject };
 
   // hub_url (= 受け取る service の URL) を PASETO の aud claim に入れる。 これは
   // confused-deputy 防御の要 (「service A 向け token を service B が受理」を防ぐ) なので

@@ -8,6 +8,7 @@ const navItems = [
   { path: "/profile", label: "Profile" },
   { path: "/devices", label: "端末" },
   { path: "/security", label: "セキュリティ" },
+  { path: "/settings/federation", label: "アカウントの連携" },
   { path: "/access", label: "利用許可" },
   { path: "/admin/access", label: "審査", adminOnly: true },
   { path: "/account-recovery", label: "回復", adminOnly: true },

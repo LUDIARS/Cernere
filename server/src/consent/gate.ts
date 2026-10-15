@@ -19,6 +19,7 @@ import { buildConsentContinuation, type ConsentContinuation, type ContinuationRe
 import { decideConsentGate } from "./gate-policy.js";
 import { resolveProjectSubject, resolveSubjectByOrigin, type ResolvedConsentSubject } from "./project-resolver.js";
 import { evaluateConsentRequirement, type ConsentRequirement } from "./requirement.js";
+import { serviceSubjectId } from "../federation/subject.js";
 import { getConsentRecord } from "./store.js";
 import { createConsentTicket, type ConsentChannel, type TicketAuthUser } from "./ticket.js";
 
@@ -102,10 +103,12 @@ export async function enforceServiceConsent(authUser: TicketAuthUser, request: S
     devLog("consent.gate.noSubject", { userId: authUser.userId, reason: request.reason ?? "unresolved" });
     return;
   }
-  const fieldsMissing = await hasMissingSignupFields(authUser.userId, resolved);
+  // 同意記録・サインアップ入力は連携番号で持つ (account-federation §3)。ticket はログインしたアカウントのまま。
+  const subjectId = await serviceSubjectId(authUser.userId);
+  const fieldsMissing = await hasMissingSignupFields(subjectId, resolved);
   if (resolved.mode === "off" && !fieldsMissing) return;
 
-  const requirement = await evaluateForUser(authUser.userId, resolved);
+  const requirement = await evaluateForUser(subjectId, resolved);
   const action = fieldsMissing ? "block" : decideConsentGate(resolved.mode, requirement.satisfied);
   if (action === "pass") return;
   if (action === "warn") {

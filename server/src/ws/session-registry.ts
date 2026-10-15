@@ -7,6 +7,13 @@ import type { WsUserData } from "../app.js";
 import { getSession } from "../redis.js";
 import type { ServerMessage, RelayTarget } from "./protocol.js";
 
+/** relay の届け先になる同じ利用者のアカウント群 (連携していなければ自分だけ)。 */
+export interface RelayGroup {
+  /** サービスへ渡す番号 (連携番号、未連携なら自分の id) */
+  subject: string;
+  accountIds: readonly string[];
+}
+
 export interface RegisteredSession {
   sessionId: string;
   userId: string;
@@ -100,27 +107,34 @@ class SessionRegistry {
 
   /**
    * relay は同一ユーザーのセッション間に限る (RULE §1.2 Step 4 / 脅威モデル「クロスユーザーリレーの悪用」)。
-   * 他人のユーザー・セッションを宛先にした要求は false を返し、何も送らない。
+   * 連携しているアカウントは同じ利用者として扱う (spec/plan/2026-10-15-account-federation-design.md §3):
+   * 宛先 user は連携番号でも各アカウントの id でも受け、連携の全アカウントのセッションへ配る。
+   * それ以外のユーザー・セッションを宛先にした要求は false を返し、何も送らない。
    */
-  relay(fromSessionId: string, fromUserId: string, target: RelayTarget, payload: unknown): boolean {
+  relay(fromSessionId: string, fromUserId: string, target: RelayTarget, payload: unknown,
+    group: RelayGroup = { subject: fromUserId, accountIds: [fromUserId] }): boolean {
     const msg: ServerMessage = { type: "relayed", from_session: fromSessionId, payload };
+    const accounts = new Set([fromUserId, ...group.accountIds]);
+    const deliverToGroup = () => {
+      for (const userId of accounts) {
+        for (const session of this.getByUser(userId)) {
+          if (session.sessionId !== fromSessionId) this.send(session.ws, msg);
+        }
+      }
+    };
 
     if (target === "broadcast") {
-      for (const session of this.getByUser(fromUserId)) {
-        if (session.sessionId !== fromSessionId) this.send(session.ws, msg);
-      }
+      deliverToGroup();
       return true;
     }
     if ("user" in target) {
-      if (target.user !== fromUserId) return false;
-      for (const session of this.getByUser(fromUserId)) {
-        if (session.sessionId !== fromSessionId) this.send(session.ws, msg);
-      }
+      if (target.user !== group.subject && !accounts.has(target.user)) return false;
+      deliverToGroup();
       return true;
     }
     if ("session" in target) {
       const destination = this.sessions.get(target.session);
-      if (!destination || destination.userId !== fromUserId) return false;
+      if (!destination || !accounts.has(destination.userId)) return false;
       this.send(destination.ws, msg);
       return true;
     }

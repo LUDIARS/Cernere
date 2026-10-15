@@ -35,6 +35,8 @@ export function OnboardingPage() {
   const { user } = useAuth();
   const returnTo = readReturnPath(window.location.search);
   const mobile = isMobileDevice();
+  // 引き継ぎで作った端末のアカウント (account-federation §4.1-5): 名前は主のものを使い、端末の追加も済んでいる。
+  const federated = new URLSearchParams(window.location.search).get("federated") === "1";
   const [step, setStep] = useState<Step>(user?.name ? "recovery" : "name");
   const [recovery, setRecovery] = useState<RecoveryStatus | null>(null);
   const [saved, setSaved] = useState(false);
@@ -88,7 +90,7 @@ export function OnboardingPage() {
     }
     window.location.assign(returnTo);
   };
-  const afterRecovery = () => setStep(mobile ? "alerts" : "phone");
+  const afterRecovery = () => setStep(mobile || federated ? "alerts" : "phone");
 
   return (
     <main style={pageStyle}>

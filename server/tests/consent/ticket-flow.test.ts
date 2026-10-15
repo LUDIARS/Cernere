@@ -3,6 +3,7 @@
  * 値だけ、使い切り、拒否で consent_denied。DB / Redis / authCode 発行はモックする。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("../../src/federation/subject.js", async () => (await import("../federation/unfederated-subject.js")).unfederatedSubject);
 import type { ConsentTicket } from "../../src/consent/ticket.js";
 
 const USER = "11111111-1111-4111-8111-111111111111";

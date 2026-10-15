@@ -42,10 +42,15 @@ export class CernereCompositeAuthAdapter implements CompositeAuthApi {
     private readonly target: string | null = null,
     /** target の種類。同意後にどう戻すか (postMessage / redirect) をサーバが決めるのに使う */
     private readonly targetMode: "post_message" | "redirect" = "post_message",
+    /** 引き継ぎメニューの ① (別の端末のパスキーで入る)。WebAuthn の hints で QR (hybrid) を先に出させる */
+    private readonly crossDevice: boolean = false,
   ) {}
 
-  passkeyLoginBegin(): Promise<PasskeyLoginBeginResult> {
-    return postJson(`${this.apiBase}/api/auth/passkey/login-begin`, {}, "Passkey login start failed");
+  async passkeyLoginBegin(): Promise<PasskeyLoginBeginResult> {
+    const begin = await postJson<PasskeyLoginBeginResult>(`${this.apiBase}/api/auth/passkey/login-begin`, {}, "Passkey login start failed");
+    if (!this.crossDevice) return begin;
+    // hints は WebAuthn Level 3。対応していないブラウザは無視し、通常の選択画面 (別の端末も選べる) を出す。
+    return { ...begin, options: { ...begin.options, hints: ["hybrid"] } } as PasskeyLoginBeginResult;
   }
 
   async passkeyLoginFinish(params: { challengeOwner: string; response: AuthenticationResponseJSON }): Promise<CompositeAuthResponse> {

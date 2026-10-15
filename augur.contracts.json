@@ -272,6 +272,51 @@
       "module": "server/src/signup-fields/contracts/return-target.contract.ts",
       "mode": "observe",
       "sample": 1
+    },
+    {
+      "id": "C-31",
+      "criterion": "C-31 pickServiceSubject(userId, membership, ownsForeignSubject): 未連携は自分の id、連携中は連携番号と主を返し、連携番号を残して外れた founder だけを detachedFounder にする",
+      "symbol": "pickServiceSubject",
+      "file": "server/src/federation/policy.ts",
+      "module": "server/src/federation/contracts/service-subject.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-32",
+      "criterion": "C-32 decideFederationJoin(input): 自分自身・連携済み・他連携の番号を持つアカウント・10 を超える加入を拒否し、新しい連携の番号は承認者の id にする",
+      "symbol": "decideFederationJoin",
+      "file": "server/src/federation/policy.ts",
+      "module": "server/src/federation/contracts/join.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-33",
+      "criterion": "C-33 decideSetPrimary(input): 主の切替は現在の主だけが連携のメンバーへ expected revision 一致のときだけ行える",
+      "symbol": "decideSetPrimary",
+      "file": "server/src/federation/policy.ts",
+      "module": "server/src/federation/contracts/set-primary.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-34",
+      "criterion": "C-34 decideFederationRemoval(input): 本人の離脱か主による取り外しだけを許し、主が外れたら残りのメンバーを主にし、残りが 1 以下なら連携を閉じる",
+      "symbol": "decideFederationRemoval",
+      "file": "server/src/federation/policy.ts",
+      "module": "server/src/federation/contracts/removal.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-35",
+      "criterion": "C-35 checkJoinCode(expected, actual, previousAttempts): 4 桁が完全一致のときだけ承認し、不一致は試行回数の上限で失効させる",
+      "symbol": "checkJoinCode",
+      "file": "server/src/federation/policy.ts",
+      "module": "server/src/federation/contracts/join-code.contract.ts",
+      "mode": "observe",
+      "sample": 1
     }
   ]
 }

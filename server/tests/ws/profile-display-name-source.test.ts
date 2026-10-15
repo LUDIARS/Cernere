@@ -9,6 +9,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("../../src/federation/subject.js", async () => (await import("../federation/unfederated-subject.js")).unfederatedSubject);
 
 interface UpdateCall {
   table: unknown;

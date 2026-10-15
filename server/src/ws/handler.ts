@@ -216,7 +216,10 @@ export async function handleWsMessage(
     return;
   }
   if (msg.type === "relay") {
-    if (!sessionRegistry.relay(data.sessionId, data.userId, msg.target, msg.payload)) {
+    // 連携しているアカウントのセッションも同じ利用者として届ける (account-federation §3)。
+    const { accountIdsForSubjectOrUser, serviceSubjectId } = await import("../federation/subject.js");
+    const group = { subject: await serviceSubjectId(data.userId), accountIds: await accountIdsForSubjectOrUser(data.userId) };
+    if (!sessionRegistry.relay(data.sessionId, data.userId, msg.target, msg.payload, group)) {
       send(ws, { type: "error", code: "relay_forbidden", message: "Relay is limited to your own sessions" });
     }
   }

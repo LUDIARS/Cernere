@@ -58,7 +58,8 @@ describe("listUserData (declared columns only, no service name hardcoded)", () =
     });
 
     const [sqlText, params] = mockUnsafe.mock.calls[0];
-    expect(sqlText).toContain('FROM "project_data_somesvc" d JOIN users u ON u.id = d.user_id');
+    // identity claim は主のアカウントから読む (連携番号の行は account_federations で主へ引き直す)。
+    expect(sqlText).toContain('FROM "project_data_somesvc" d LEFT JOIN account_federations f ON f.subject_id = d.user_id JOIN users u ON u.id = COALESCE(f.primary_user_id, d.user_id)');
     expect(sqlText).toContain('d."available_now" = $1');
     expect(sqlText).toContain('(d."available_until" IS NULL OR d."available_until" > now())');
     expect(params).toEqual([true]);

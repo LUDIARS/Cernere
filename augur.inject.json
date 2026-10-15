@@ -2,7 +2,8 @@
   "service": "cernere",
   "include": [
     "server/scripts/env/**/*.ts",
-    "server/src/consent/**/*.ts"
+    "server/src/consent/**/*.ts",
+    "server/src/federation/**/*.ts"
   ],
   "exclude": [
     "**/*.test.ts",

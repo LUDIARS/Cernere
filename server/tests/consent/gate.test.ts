@@ -3,6 +3,7 @@
  * consentTicket に入る継続先が検証済みの値だけであること。DB / Redis はモックする。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("../../src/federation/subject.js", async () => (await import("../federation/unfederated-subject.js")).unfederatedSubject);
 import type { ResolvedConsentSubject } from "../../src/consent/project-resolver.js";
 
 const resolver = vi.hoisted(() => ({ project: null as unknown, byOrigin: null as unknown }));

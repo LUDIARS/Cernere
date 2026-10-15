@@ -29,7 +29,10 @@ export type SecurityEventKind =
   | "access.rejected"
   | "access.locked"
   | "access.unlocked"
-  | "access.requests_pending";
+  | "access.requests_pending"
+  | "federation.joined"
+  | "federation.left"
+  | "federation.primary_changed";
 
 export type SecuritySeverity = "normal" | "high" | "critical";
 
@@ -51,6 +54,9 @@ const SEVERITY: Record<SecurityEventKind, SecuritySeverity> = {
   "access.locked": "critical",
   "access.unlocked": "high",
   "access.requests_pending": "normal",
+  "federation.joined": "high",
+  "federation.left": "high",
+  "federation.primary_changed": "high",
 };
 
 /** 通知に載せてよい概略だけ。秘密値・token・完全な IP・userId・メールは入れない。 */

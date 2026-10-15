@@ -15,7 +15,7 @@ import * as schema from "../db/schema.js";
 import { generateTokenPair, REFRESH_TOKEN_DAYS } from "./jwt.js";
 import { hashRefreshToken } from "./token-hash.js";
 import { redis } from "../redis.js";
-import { requireActiveUser } from "./user-access.js";
+import { loadServiceIdentity, requireServiceAccess } from "../federation/subject.js";
 import { enforceServiceConsent, type ServiceConsentRequest } from "../consent/gate.js";
 
 import type { AuthenticationEvidence } from "../lib/authentication-evidence.js";
@@ -49,9 +49,15 @@ export interface AuthCodeUser {
 
 export async function issueAuthCode(user: AuthCodeUser): Promise<string> {
   const audience = user.audience ?? "service";
+  // サービスへ渡す利用者 (§3 of spec/plan/2026-10-15-account-federation-design.md): 番号は連携番号、名前・email・role は主のもの。
+  // Cernere 自身の /login 用 (audience = cernere) はアカウントそのもの。
+  let exposed = { id: user.userId, displayName: user.displayName, email: user.email, role: user.role };
   if (audience === "service") {
-    // 許可待ち・停止中のユーザーをサービスへ入れない。refresh 行を作る前に止める。
-    await requireActiveUser(user.userId);
+    // 許可待ち・停止中のユーザーをサービスへ入れない (連携していれば主の許可状態で決める)。refresh 行を作る前に止める。
+    await requireServiceAccess(user.userId);
+    const identity = await loadServiceIdentity(user.userId);
+    if (!identity) throw new Error("issueAuthCode: user not found");
+    exposed = { id: identity.subject, displayName: identity.displayName, email: identity.email, role: identity.role };
     if (!user.service) throw new Error("issueAuthCode: a service target is required for service auth codes");
     // 同意が要るなら authCode を出さず ConsentRequiredError を投げる (consent_mode 既定 off)。
     await enforceServiceConsent({
@@ -72,12 +78,10 @@ export async function issueAuthCode(user: AuthCodeUser): Promise<string> {
     audience,
     accessToken,
     refreshToken,
-    user: {
-      id: user.userId,
-      displayName: user.displayName,
-      email: user.email,
-      role: user.role,
-    },
+    // accessToken / refreshToken は Cernere 内部のアカウントのもの。kiosk の限定交換口 (顔の同意) だけが使い、
+    // 公開の交換口はサービスへ返す前に外す。
+    accountId: user.userId,
+    user: exposed,
   }), "EX", AUTH_CODE_TTL);
   return authCode;
 }

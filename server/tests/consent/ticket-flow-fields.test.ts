@@ -3,6 +3,7 @@
  * 権限と入力値を同じトランザクションで保存し、入力の誤りでは何も保存せず ticket も使い切らない。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("../../src/federation/subject.js", async () => (await import("../federation/unfederated-subject.js")).unfederatedSubject);
 import type { ConsentTicket } from "../../src/consent/ticket.js";
 import { columns, consent, declaration } from "../signup-fields/fixtures.js";
 

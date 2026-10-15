@@ -25,6 +25,10 @@ import { DeviceSessionsPage } from "./pages/DeviceSessionsPage";
 import { PasskeyRecoveryPage } from "./pages/PasskeyRecoveryPage";
 import { AccountRecoveryPage } from "./pages/admin/AccountRecoveryPage";
 import { OnsiteKiosksPage } from "./pages/admin/OnsiteKiosksPage";
+import { ContinueMenuPage } from "./pages/continue/ContinueMenuPage";
+import { JoinRequestPage } from "./pages/federate/JoinRequestPage";
+import { ApprovePage } from "./pages/federate/ApprovePage";
+import { FederationPage } from "./pages/settings/FederationPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -72,6 +76,11 @@ function AppRoutes() {
       <Route path="/device-register" element={<DeviceRegisterPage />} />
 
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
+      {/* 引き継ぎメニュー (押したログインでパスキーが見つからなかったとき)。account-federation §4 */}
+      <Route path="/continue" element={<ContinueMenuPage />} />
+      {/* 引き継ぎ: 加わる側 (新しい端末 / 既存アカウント) と承認する側 (使っている端末) */}
+      <Route path="/federate/join" element={<JoinRequestPage />} />
+      <Route path="/federate/approve" element={<ApprovePage />} />
       {/* はじめての方: 名前 →「はじめる」でパスキーとアカウントを作る。ログイン済みなら不要 */}
       <Route path="/start" element={user ? <Navigate to="/" replace /> : <StartPage />} />
       {/* 新しく始めた直後の設定 (名前・リカバリー QR・別端末・通知)。アプリシェルの外 */}
@@ -82,6 +91,7 @@ function AppRoutes() {
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/devices" element={<DeviceSessionsPage />} />
         <Route path="/security" element={<SecurityPage />} />
+        <Route path="/settings/federation" element={<FederationPage />} />
         <Route path="/access" element={<AccessPage />} />
         <Route path="/admin/access" element={<AccessReviewPage />} />
         <Route path="/account-recovery" element={<AccountRecoveryPage />} />
