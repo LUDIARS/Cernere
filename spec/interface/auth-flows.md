@@ -108,7 +108,7 @@ sequenceDiagram
   Cernere 自身の `/login` 用 (`cernere`) は pending でも出すが、`/api/auth/exchange` は Origin が Cernere の画面のときだけ受け付け、kiosk 交換は拒否する。
 - user×project token と OIDC の同意・トークン交換・userinfo は active 必須。
 - WS `user_access`: 本人の `status` / `apply` / `withdraw`、admin の `list` / `decide` (action proof `user_access.decide`、expected revision)。
-- `bootstrap-admin` は admin と active を同時に付ける。審査待ちの申請は 15 分ごとに件数だけ admin へ通知する。
+- `bootstrap-admin` は admin と active を同時に付ける。migration 071 は 068 適用前からいた pending の利用者を active にする (監査 `pre_approval_backfill`、068 以降の登録者は対象外)。審査待ちの申請は 15 分ごとに件数だけ admin へ通知する。
 - ロックアウトの下流サービスへの伝播 (失効イベント・オンライン認可) は未実装 (設計書 §3.5)。
 
 ## サービスの権限確認 (同意、2026-10-15)
