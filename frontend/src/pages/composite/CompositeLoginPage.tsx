@@ -19,8 +19,7 @@
 import type { CSSProperties } from "react";
 import { CompositeLogin } from "@ludiars/cernere-composite/ui";
 import { useCompositeLoginSession } from "../../hooks/useCompositeLoginSession";
-import { signupWithPasskey } from "../../lib/passkey-account-api";
-import { onboardingUrl } from "../onboarding/onboarding-return";
+import { startUrl } from "../onboarding/onboarding-return";
 import { CERNERE_LOGIN_LABELS } from "./composite-login-labels";
 
 const API_BASE = "";
@@ -68,10 +67,10 @@ export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
     apiBase: API_BASE,
   });
 
-  const createAccount = async () => {
-    await signupWithPasskey();
-    // AuthContext に新しいセッションを読ませるため、全体を読み直して遷移する。
-    window.location.assign(onboardingUrl(returnTarget(self, params)));
+  // パスキーが無かったら、はじめての方の画面へ。ここでは何も作らない。アカウントはその画面の
+  // 「はじめる」でパスキーを作成し終えたときにできる (StartPage)。
+  const createAccount = () => {
+    window.location.assign(startUrl(returnTarget(self, params)));
   };
 
   if (session.blockedReason) {

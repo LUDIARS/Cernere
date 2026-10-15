@@ -15,6 +15,12 @@ export function onboardingUrl(returnTo: string): string {
   return `/onboarding?${params.toString()}`;
 }
 
+/** アカウント作成前の入口 (名前 →「はじめる」でパスキー作成とアカウント作成)。 */
+export function startUrl(returnTo: string): string {
+  const params = new URLSearchParams({ [RETURN_PARAM]: safeReturnPath(returnTo) });
+  return `/start?${params.toString()}`;
+}
+
 export function readReturnPath(search: string): string {
   return safeReturnPath(new URLSearchParams(search).get(RETURN_PARAM));
 }

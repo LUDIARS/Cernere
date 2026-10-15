@@ -19,6 +19,9 @@ import { useAuth } from "../../contexts/AuthContext";
 import { isMobileDevice } from "../../lib/device-kind";
 import { recoveryCode, type RecoveryStatus } from "../../lib/passkey-account-api";
 import { userAccess } from "../../lib/user-access-api";
+import { clearPendingDisplayName, takePendingDisplayName } from "../../lib/pending-display-name";
+import { getStoredUser, profile, setStoredUser } from "../../lib/api";
+import { signalCurrentUserName } from "../../lib/webauthn-signal";
 import { NameStep } from "./NameStep";
 import { readReturnPath } from "./onboarding-return";
 
@@ -36,6 +39,22 @@ export function OnboardingPage() {
   useEffect(() => {
     recoveryCode.status().then(setRecovery).catch((e) => setError((e as Error).message));
   }, []);
+
+  // 「はじめる」の前に入れた名前を保存する。失敗したら名前入力をそのまま出す。
+  useEffect(() => {
+    if (user?.name) return;
+    const pending = takePendingDisplayName();
+    if (!pending) return;
+    profile.setDisplayName(pending).then(() => {
+      clearPendingDisplayName();
+      const stored = getStoredUser();
+      if (stored) {
+        setStoredUser({ ...stored, name: pending });
+        void signalCurrentUserName(stored.id, pending);
+      }
+      setStep((current) => (current === "name" ? "recovery" : current));
+    }).catch(() => { /* 名前入力で入れ直す */ });
+  }, [user?.name]);
 
   // 許可待ちなら、サービスへ戻っても入れないので申請画面へ (許可制 案 A)。
   const finish = async () => {
@@ -95,7 +114,7 @@ export function OnboardingPage() {
           <AlertTargetsPanel />
           <p style={bodyTextStyle}>通知はあとからでも「セキュリティ」画面で設定できます。</p>
           <button type="button" onClick={() => { void finish(); }} style={{ ...primaryButton(false), marginTop: "1rem" }}>
-            はじめる
+            完了
           </button>
         </>
       )}

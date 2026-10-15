@@ -15,6 +15,7 @@ import { OidcConsentPage } from "./pages/oidc/OidcConsentPage";
 import { ConsentPage } from "./pages/consent/ConsentPage";
 import { CheckinPage } from "./pages/CheckinPage";
 import { OnboardingPage } from "./pages/onboarding/OnboardingPage";
+import { StartPage } from "./pages/onboarding/StartPage";
 import { onboardingUrl } from "./pages/onboarding/onboarding-return";
 import { SecurityPage } from "./pages/SecurityPage";
 import { AccessPage } from "./pages/AccessPage";
@@ -71,6 +72,8 @@ function AppRoutes() {
       <Route path="/device-register" element={<DeviceRegisterPage />} />
 
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
+      {/* はじめての方: 名前 →「はじめる」でパスキーとアカウントを作る。ログイン済みなら不要 */}
+      <Route path="/start" element={user ? <Navigate to="/" replace /> : <StartPage />} />
       {/* 新しく始めた直後の設定 (名前・リカバリー QR・別端末・通知)。アプリシェルの外 */}
       <Route path="/onboarding" element={user ? <OnboardingPage /> : <Navigate to="/login" replace />} />
       {/* 認証済みページは AppLayout 内で描画 — WS 接続を維持 */}
