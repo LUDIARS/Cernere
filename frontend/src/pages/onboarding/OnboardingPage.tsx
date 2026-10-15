@@ -2,6 +2,8 @@
  * 新しく始めた直後のオンボーディング (SPEC-PASSKEY-ONBOARDING)。
  *
  *   1. 名前 (SPEC-DISPLAY-NAME-DEFERRED)
+ *   1b. サービス経由で始めたなら「<サービス名> で使う情報」(spec/plan/2026-10-15-service-signup-fields-design.md §4.2)。
+ *       戻り先 (?return=) からサービスを解決できたときだけ出す
  *   2. リカバリー QR のダウンロード (SPEC-RECOVERY-QR)。ダウンロードするまで次へ進めない
  *   3. PC ならスマホの追加 (SPEC-FIRST-LOGIN-PHONE-QR)。スマホなら出さない。「スマホを持っていない」で飛ばせる
  *   4. ログイン通知 (任意)
@@ -21,11 +23,13 @@ import { recoveryCode, type RecoveryStatus } from "../../lib/passkey-account-api
 import { userAccess } from "../../lib/user-access-api";
 import { clearPendingDisplayName, takePendingDisplayName } from "../../lib/pending-display-name";
 import { getStoredUser, profile, setStoredUser } from "../../lib/api";
+import { signupFieldsApi, type SignupFieldsForService } from "../../lib/signup-fields-api";
 import { signalCurrentUserName } from "../../lib/webauthn-signal";
 import { NameStep } from "./NameStep";
+import { ServiceFieldsStep } from "./ServiceFieldsStep";
 import { readReturnPath } from "./onboarding-return";
 
-type Step = "name" | "recovery" | "phone" | "alerts";
+type Step = "name" | "service" | "recovery" | "phone" | "alerts";
 
 export function OnboardingPage() {
   const { user } = useAuth();
@@ -35,10 +39,29 @@ export function OnboardingPage() {
   const [recovery, setRecovery] = useState<RecoveryStatus | null>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  // 戻り先のサービスの入力項目。checked になるまでリカバリー QR を出さない (入力を先に聞くため)。
+  const [service, setService] = useState<SignupFieldsForService | null>(null);
+  const [serviceChecked, setServiceChecked] = useState(false);
+  const [serviceDone, setServiceDone] = useState(false);
 
   useEffect(() => {
     recoveryCode.status().then(setRecovery).catch((e) => setError((e as Error).message));
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    signupFieldsApi.forReturn(returnTo)
+      .then((result) => { if (!cancelled && result && result.fields.length > 0) setService(result); })
+      // 解決できない (Cernere 単独で始めた・通信失敗) ときは出さない。サービスへ戻った後に /consent で聞かれる。
+      .catch(() => undefined)
+      .finally(() => { if (!cancelled) setServiceChecked(true); });
+    return () => { cancelled = true; };
+  }, [returnTo]);
+
+  // 名前の次 (= リカバリー QR の前) にサービスの入力を挟む。
+  useEffect(() => {
+    if (serviceChecked && service && !serviceDone && step === "recovery") setStep("service");
+  }, [serviceChecked, service, serviceDone, step]);
 
   // 「はじめる」の前に入れた名前を保存する。失敗したら名前入力をそのまま出す。
   useEffect(() => {
@@ -75,7 +98,11 @@ export function OnboardingPage() {
 
       {step === "name" && <NameStep onDone={() => setStep("recovery")} />}
 
-      {step === "recovery" && recovery && (
+      {step === "service" && service && (
+        <ServiceFieldsStep service={service} onDone={() => { setServiceDone(true); setStep("recovery"); }} />
+      )}
+
+      {step === "recovery" && recovery && serviceChecked && (
         <>
           {recovery.hasActiveCode && !saved ? (
             <p style={bodyTextStyle}>リカバリー QR は発行済みです。</p>

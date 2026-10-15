@@ -841,6 +841,10 @@ export const userServiceConsents = pgTable("user_service_consents", {
   denied: jsonb("denied").notNull(),
   decidedAt: timestamp("decided_at", { withTimezone: true }).notNull().defaultNow(),
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  /** 入力項目 (signup_fields) を見せた版。NULL = まだ見せていない (migration 072) */
+  fieldsVersion: integer("fields_version"),
+  /** その版で見せた列 (版上げで未表示の新項目だけ聞くため) */
+  fieldsSeen: jsonb("fields_seen"),
 }, (t) => [primaryKey({ columns: [t.userId, t.subjectKind, t.subjectKey] })]);
 
 /** 同意の判断の監査 (追記のみ)。 */

@@ -8,6 +8,8 @@
  * - 必須を拒否するとログインを中止し、サービスへ consent_denied を返す
  * - 推奨は既定オフ。外したまま進められる
  * - サービス経由の ticket は本人の Cernere ログインを求める (未ログインならログイン画面を出す)
+ * - サービスが入力項目 (signup_fields) を宣言していれば「<サービス名> で使う情報」を権限の下に出し、
+ *   権限の判断と入力値を 1 回で送る (spec/plan/2026-10-15-service-signup-fields-design.md §4.1)
  */
 
 import { useEffect, useState, type CSSProperties } from "react";
@@ -15,12 +17,19 @@ import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { LoginPage } from "../LoginPage";
 import { PermissionList, initialRecommendedSelection } from "../../components/consent/PermissionList";
+import { SignupFieldsForm } from "../../components/signup-fields/SignupFieldsForm";
 import {
   ConsentApiError,
   consentTicketApi,
   deliverConsentOutcome,
   type ConsentTicketInfo,
 } from "../../lib/consent-api";
+import {
+  initialSignupValues,
+  requiredFilled,
+  type SignupFieldErrors,
+  type SignupFieldValue,
+} from "../../lib/signup-fields-api";
 
 const shellStyle: CSSProperties = {
   minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)",
@@ -39,6 +48,8 @@ export function ConsentPage() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [info, setInfo] = useState<ConsentTicketInfo | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [values, setValues] = useState<Record<string, SignupFieldValue>>({});
+  const [fieldErrors, setFieldErrors] = useState<SignupFieldErrors>({});
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -56,6 +67,7 @@ export function ConsentPage() {
         if (cancelled) return;
         setInfo(result);
         setSelected(initialRecommendedSelection(result.view));
+        setValues(initialSignupValues(result.signupFields?.fields ?? []));
         setPhase("ready");
       })
       .catch((e: unknown) => {
@@ -73,19 +85,28 @@ export function ConsentPage() {
   const decide = async (decision: "grant" | "deny") => {
     setBusy(true);
     setMessage("");
+    setFieldErrors({});
     try {
-      const outcome = await consentTicketApi.decide(ticket, decision, [...selected]);
+      const fields = decision === "grant" && info?.signupFields ? values : undefined;
+      const outcome = await consentTicketApi.decide(ticket, decision, [...selected], fields);
       if (deliverConsentOutcome(outcome)) return;
       setMessage(decision === "grant"
         ? "許可しました。サービスの画面に戻り、もう一度ログインしてください。"
         : "許可しなかったため、このサービスにはログインしませんでした。");
       setPhase("done");
     } catch (e) {
+      if (e instanceof ConsentApiError && e.fieldErrors) {
+        setFieldErrors(e.fieldErrors);
+        setMessage("入力内容を確認してください。");
+        return;
+      }
       setMessage(e instanceof Error ? e.message : "処理に失敗しました");
     } finally {
       setBusy(false);
     }
   };
+
+  const fieldsReady = requiredFilled(info?.signupFields?.fields ?? [], values);
 
   if (loading || phase === "loading") {
     return <div style={shellStyle}><span style={{ color: "var(--text-muted)" }}>Loading...</span></div>;
@@ -100,6 +121,7 @@ export function ConsentPage() {
         {info && (
           <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", textAlign: "center", marginBottom: "1.25rem" }}>
             <strong style={{ color: "var(--text)" }}>{info.serviceName}</strong> を使うために、次の権限を確認してください。
+            {info.signupFields && info.signupFields.fields.length > 0 && "あわせて、このサービスで使う情報を入力してください。"}
             {info.view.reconsent && <><br />前回の確認から権限が増えています。</>}
           </p>
         )}
@@ -122,6 +144,16 @@ export function ConsentPage() {
                 return next;
               })}
             />
+            {info.signupFields && (
+              <SignupFieldsForm
+                serviceName={info.serviceName}
+                fields={info.signupFields.fields}
+                values={values}
+                errors={fieldErrors}
+                disabled={busy}
+                onChange={(column, value) => setValues((prev) => ({ ...prev, [column]: value }))}
+              />
+            )}
             <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "1rem" }}>
               あとから Cernere の「サービスの権限」で推奨の取り消しや、このサービスの利用停止ができます。
             </p>
@@ -130,7 +162,7 @@ export function ConsentPage() {
                 style={{ flex: 1, padding: "0.6rem", background: "var(--bg-surface-2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text)" }}>
                 許可しない
               </button>
-              <button type="button" className="primary" disabled={busy} onClick={() => void decide("grant")} style={{ flex: 1, padding: "0.6rem" }}>
+              <button type="button" className="primary" disabled={busy || !fieldsReady} onClick={() => void decide("grant")} style={{ flex: 1, padding: "0.6rem" }}>
                 {busy ? "処理中..." : "許可して続ける"}
               </button>
             </div>

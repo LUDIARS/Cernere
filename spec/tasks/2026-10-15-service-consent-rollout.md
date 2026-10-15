@@ -45,6 +45,15 @@ Cernere でログインする全サービスで `consent_mode: enforce` にす�
 3. `consent_denied` で「権限が許可されなかったため利用できません」を表示する。
 4. 推奨を外した項目が null / 拒否で返る前提で画面が壊れない。
 5. 管理者が `consent_mode` を `warn` にし、`consent.would_block` のログで漏れが無いことを確かめてから `enforce` にする。
+6. ログイン時に利用者ごとのデータ (所属・学籍番号など) を聞くサービスは `schema_definition.signup_fields` を宣言する
+   ([入力項目の設計](../plan/2026-10-15-service-signup-fields-design.md))。自前の「初回設定画面」で同じ項目を
+   聞いていたら外す (二重入力を避ける)。必須の未入力は `consent_mode` に関係なく `consent_required` になる。
+
+### サービスごとの入力項目
+
+| サービス | 宣言する項目 (signup_fields) | 外す自前画面 |
+|----------|------------------------------|--------------|
+| GLAB | 所属・学籍番号など、GLAB のメンバー管理で使う列 (列が無ければ `user_data.columns` に足す) | ログイン後の初回設定画面の同じ項目 |
 
 ## 完了条件
 

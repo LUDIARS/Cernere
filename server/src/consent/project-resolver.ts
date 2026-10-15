@@ -5,7 +5,7 @@
  *   target origin       → managed_projects.schema_definition.endpoint.frontend_url の origin で逆引き
  *   OIDC client_id      → oidc_clients
  *
- * 解決結果には判定に要るもの (移行モード・宣言・上限・data_sharing の共有先) をまとめて載せる。
+ * 解決結果には判定に要るもの (移行モード・宣言・上限・data_sharing の共有先・入力項目の宣言) をまとめて載せる。
  */
 
 import { eq } from "drizzle-orm";
@@ -16,6 +16,9 @@ import { readConsentDeclaration, readConsentMode, type ConsentDeclaration, type 
 import { originOf } from "./continuation.js";
 import { capsFromOidcScopes, capsFromProjectDefinition, type ConsentCaps } from "./permission-keys.js";
 import type { SharingTarget } from "./requirement.js";
+import { readSignupFieldsDeclaration, type SignupFieldsDeclaration } from "../signup-fields/declaration-schema.js";
+import type { SignupColumns } from "../signup-fields/declaration.js";
+import { storageTableFromRow } from "../project/storage-resolver.js";
 import type { ConsentSubject } from "./store.js";
 
 export interface ResolvedConsentSubject {
@@ -27,12 +30,20 @@ export interface ResolvedConsentSubject {
   sharing: SharingTarget[];
   /** project の frontend_url の origin。継続先の許可に使う */
   frontendOrigin: string | null;
+  /** ログイン時に聞く入力項目 (spec/plan/2026-10-15-service-signup-fields-design.md)。未宣言・OIDC は null */
+  signupFields?: SignupFieldsDeclaration | null;
+  /** user_data.columns (入力項目の突き合わせ用) */
+  userColumns?: SignupColumns;
+  /** project_data_<storage_slug>。入力項目を宣言したサービスだけ解決する */
+  storageTable?: string | null;
 }
 
 type ProjectRow = typeof schema.managedProjects.$inferSelect;
 
 interface DefinitionShape {
   consent?: unknown;
+  signup_fields?: unknown;
+  user_data?: { columns?: unknown };
   consent_mode?: unknown;
   endpoint?: { frontend_url?: unknown };
   data_sharing?: Array<{ project_key?: unknown; modules?: unknown }>;
@@ -64,8 +75,14 @@ async function sharingTargets(def: DefinitionShape): Promise<SharingTarget[]> {
   return targets;
 }
 
+function userColumnsOf(def: DefinitionShape): SignupColumns {
+  const columns = def.user_data?.columns;
+  return columns && typeof columns === "object" ? columns as SignupColumns : {};
+}
+
 async function fromProjectRow(row: ProjectRow): Promise<ResolvedConsentSubject> {
   const def = definitionOf(row);
+  const signupFields = readSignupFieldsDeclaration(def.signup_fields);
   return {
     subject: { kind: "project", key: row.key },
     name: row.name,
@@ -74,6 +91,9 @@ async function fromProjectRow(row: ProjectRow): Promise<ResolvedConsentSubject> 
     caps: capsFromProjectDefinition(def),
     sharing: await sharingTargets(def),
     frontendOrigin: frontendOriginOf(def),
+    signupFields,
+    userColumns: userColumnsOf(def),
+    storageTable: signupFields ? storageTableFromRow(row) : null,
   };
 }
 
@@ -126,6 +146,9 @@ export async function resolveOidcSubject(clientId: string): Promise<ResolvedCons
     caps: capsFromOidcScopes(scopes),
     sharing: [],
     frontendOrigin: null,
+    signupFields: null,
+    userColumns: {},
+    storageTable: null,
   };
 }
 

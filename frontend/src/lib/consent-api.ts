@@ -7,6 +7,7 @@
 
 import { getAccessToken } from "./browser-token-store";
 import { wsClient } from "./ws-client";
+import type { SignupFieldErrors, SignupFieldsDescription, SignupFieldValue } from "./signup-fields-api";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -44,6 +45,8 @@ export interface ConsentTicketInfo {
   subjectKind: "project" | "oidc_client";
   view: ConsentView;
   satisfied: boolean;
+  /** そのサービスで使う情報の入力欄。宣言の無いサービスは null */
+  signupFields: SignupFieldsDescription | null;
 }
 
 export type ConsentOutcome =
@@ -53,7 +56,7 @@ export type ConsentOutcome =
 
 /** API のエラー。code で「Cernere へのログインが要る」等を見分ける。 */
 export class ConsentApiError extends Error {
-  constructor(message: string, readonly code?: string, readonly status?: number) {
+  constructor(message: string, readonly code?: string, readonly status?: number, readonly fieldErrors?: SignupFieldErrors) {
     super(message);
     this.name = "ConsentApiError";
   }
@@ -69,8 +72,8 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
-  const data = await res.json().catch(() => ({})) as T & { error?: string; code?: string };
-  if (!res.ok) throw new ConsentApiError(data.error ?? "Request failed", data.code, res.status);
+  const data = await res.json().catch(() => ({})) as T & { error?: string; code?: string; fieldErrors?: SignupFieldErrors };
+  if (!res.ok) throw new ConsentApiError(data.error ?? "Request failed", data.code, res.status, data.fieldErrors);
   return data;
 }
 
@@ -78,8 +81,14 @@ export const consentTicketApi = {
   get(ticket: string): Promise<ConsentTicketInfo> {
     return call(`/api/consent/ticket?ticket=${encodeURIComponent(ticket)}`);
   },
-  decide(ticket: string, decision: "grant" | "deny", recommended: string[]): Promise<ConsentOutcome> {
-    return call("/api/consent/decide", { method: "POST", body: JSON.stringify({ ticket, decision, recommended }) });
+  /** 権限の判断と入力値を 1 回で送る。入力の誤りは ConsentApiError (code: signup_fields_invalid, fieldErrors)。 */
+  decide(
+    ticket: string,
+    decision: "grant" | "deny",
+    recommended: string[],
+    fields?: Record<string, SignupFieldValue>,
+  ): Promise<ConsentOutcome> {
+    return call("/api/consent/decide", { method: "POST", body: JSON.stringify({ ticket, decision, recommended, fields }) });
   },
 };
 
@@ -92,16 +101,25 @@ export interface ServiceConsentItem {
   revokedAt: string | null;
   satisfied: boolean;
   view: ConsentView;
+  /** そのサービスで使う情報 (聞ける全項目と現在の値)。宣言の無いサービスは null */
+  signupFields: SignupFieldsDescription | null;
 }
 
 export const serviceConsents = {
   list(): Promise<ServiceConsentItem[]> {
     return wsClient.sendCommand<ServiceConsentItem[]>("consent", "list");
   },
-  /** 推奨の許可を変える。ws-client が action proof (consent.decide) を取る。 */
-  decide(item: Pick<ServiceConsentItem, "subjectKind" | "subjectKey">, recommended: string[]): Promise<ServiceConsentItem> {
-    return wsClient.sendCommand<ServiceConsentItem>("consent", "decide", {
-      subjectKind: item.subjectKind, subjectKey: item.subjectKey, recommended,
+  /**
+   * 推奨の許可と入力値を変える。ws-client が action proof (consent.decide) を取る。
+   * 入力の誤りは { fieldErrors } が返り、何も保存されない。
+   */
+  decide(
+    item: Pick<ServiceConsentItem, "subjectKind" | "subjectKey">,
+    recommended: string[],
+    fields?: Record<string, SignupFieldValue>,
+  ): Promise<ServiceConsentItem | { fieldErrors: SignupFieldErrors }> {
+    return wsClient.sendCommand<ServiceConsentItem | { fieldErrors: SignupFieldErrors }>("consent", "decide", {
+      subjectKind: item.subjectKind, subjectKey: item.subjectKey, recommended, ...(fields ? { fields } : {}),
     });
   },
   /** 同意を取り消す (= そのサービスの利用停止)。 */

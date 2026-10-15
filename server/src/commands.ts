@@ -136,6 +136,11 @@ async function execute(
       const { consentCommand } = await import("./consent/command.js");
       return consentCommand(userId, action, payload);
     }
+    case "signup_fields": {
+      // サービス経由で始めた人のオンボーディング (戻り先のサービスの入力項目)。本人の行だけを読み書きする。
+      const { signupFieldsCommand } = await import("./signup-fields/command.js");
+      return signupFieldsCommand(userId, action, payload);
+    }
     default:
       throw AppError.badRequest(`Unknown module: ${module}`);
   }

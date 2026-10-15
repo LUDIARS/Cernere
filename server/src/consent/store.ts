@@ -6,7 +6,7 @@
  */
 
 import { and, eq } from "drizzle-orm";
-import { db } from "../db/connection.js";
+import { db, type Database } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import type { ConsentRecordState } from "./requirement.js";
 
@@ -24,6 +24,19 @@ export interface StoredConsent extends ConsentRecordState {
   subject: ConsentSubject;
   decidedAt: string;
   revokedAt: string | null;
+  /** 入力項目を見せた版 (NULL = まだ見せていない) と、その時に見せた列 */
+  fieldsVersion: number | null;
+  fieldsSeen: string[];
+}
+
+/** 同意と同じトランザクションで行う入力項目の保存 (signup-fields/store.ts)。 */
+export type ConsentTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+export interface FieldsDecision {
+  version: number;
+  seen: string[];
+  /** project_data_<slug> への書き込み。失敗すれば同意の保存も戻る */
+  write?: (tx: ConsentTransaction) => Promise<void>;
 }
 
 function stringArray(value: unknown): string[] {
@@ -39,6 +52,8 @@ function toStored(row: typeof schema.userServiceConsents.$inferSelect): StoredCo
     revoked: row.revokedAt !== null,
     decidedAt: row.decidedAt.toISOString(),
     revokedAt: row.revokedAt ? row.revokedAt.toISOString() : null,
+    fieldsVersion: row.fieldsVersion ?? null,
+    fieldsSeen: stringArray(row.fieldsSeen),
   };
 }
 
@@ -80,24 +95,30 @@ function auditRow(userId: string, subject: ConsentSubject, action: ConsentAction
   };
 }
 
-/** 許可 (初回 grant / 変更 update) を保存する。取り消し済みの行は復活させる。 */
+/**
+ * 許可 (初回 grant / 変更 update) を保存する。取り消し済みの行は復活させる。
+ * `fields` を渡すと、入力値の書き込みと見せた版の記録を同じトランザクションで行う (設計書 §4.1)。
+ */
 export async function saveConsent(
   userId: string,
   subject: ConsentSubject,
   action: "grant" | "update",
   decision: Decision,
+  fields?: FieldsDecision,
 ): Promise<void> {
   await db.transaction(async (tx) => {
     const now = new Date();
+    const fieldsSet = fields ? { fieldsVersion: fields.version, fieldsSeen: fields.seen } : {};
     await tx.insert(schema.userServiceConsents).values({
       userId, subjectKind: subject.kind, subjectKey: subject.key,
       declarationVersion: decision.version, granted: decision.granted, denied: decision.denied,
-      decidedAt: now, revokedAt: null,
+      decidedAt: now, revokedAt: null, ...fieldsSet,
     }).onConflictDoUpdate({
       target: [schema.userServiceConsents.userId, schema.userServiceConsents.subjectKind, schema.userServiceConsents.subjectKey],
-      set: { declarationVersion: decision.version, granted: decision.granted, denied: decision.denied, decidedAt: now, revokedAt: null },
+      set: { declarationVersion: decision.version, granted: decision.granted, denied: decision.denied, decidedAt: now, revokedAt: null, ...fieldsSet },
     });
     await tx.insert(schema.consentDecisions).values(auditRow(userId, subject, action, decision));
+    if (fields?.write) await fields.write(tx);
   });
 }
 

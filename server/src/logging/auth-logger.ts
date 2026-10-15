@@ -47,7 +47,10 @@ type AuthEventType =
   // サービスの権限確認 (同意)。spec/plan/2026-10-15-service-consent-design.md
   | "consent.required"
   | "consent.would_block"
-  | "consent.decided";
+  | "consent.decided"
+  // サービス経由ログイン時の入力項目。spec/plan/2026-10-15-service-signup-fields-design.md
+  | "signup_fields.required"
+  | "signup_fields.saved";
 
 interface AuthEventBase {
   event: AuthEventType;

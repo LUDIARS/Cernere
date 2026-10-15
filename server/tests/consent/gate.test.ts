@@ -9,6 +9,7 @@ const resolver = vi.hoisted(() => ({ project: null as unknown, byOrigin: null as
 const records = vi.hoisted(() => ({ value: null as unknown, calls: 0 }));
 const tickets = vi.hoisted(() => ({ created: [] as unknown[] }));
 const events = vi.hoisted(() => ({ logged: [] as Array<{ event: string }> }));
+const signup = vi.hoisted(() => ({ missingRequired: [] as string[], calls: 0 }));
 
 vi.mock("../../src/consent/project-resolver.js", () => ({
   resolveProjectSubject: async () => resolver.project,
@@ -25,6 +26,9 @@ vi.mock("../../src/logging/auth-logger.js", () => ({
 }));
 vi.mock("../../src/auth/composite-redirect.js", () => ({
   compositeAllowedOrigins: () => ["https://popup-host.example.com"],
+}));
+vi.mock("../../src/signup-fields/evaluate.js", () => ({
+  evaluateSignupFieldsForUser: async () => { signup.calls += 1; return { missingRequired: signup.missingRequired }; },
 }));
 vi.mock("../../src/config.js", () => ({ config: { frontendUrl: "https://cernere.example.com/" } }));
 
@@ -55,6 +59,8 @@ beforeEach(() => {
   records.calls = 0;
   tickets.created = [];
   events.logged = [];
+  signup.missingRequired = [];
+  signup.calls = 0;
 });
 
 describe("enforceServiceConsent", () => {
@@ -135,5 +141,45 @@ describe("enforceServiceConsent", () => {
       expect.objectContaining({ continuation: { kind: "post_message", origin: "https://svc.example.com" }, channel: "service" }),
       expect.objectContaining({ continuation: { kind: "redirect", url: "https://svc.example.com/" }, deliverAuthCode: false }),
     ]);
+  });
+});
+
+describe("enforceServiceConsent — 入力項目 (signup_fields)", () => {
+  const declared = (mode: "off" | "warn" | "enforce"): ResolvedConsentSubject => ({
+    ...subject(mode),
+    signupFields: { version: 1, fields: [{ column: "affiliation", label: "所属", required: true, input: "text" }] },
+  });
+
+  it("宣言の無いサービスは入力を見ずに素通り", async () => {
+    resolver.project = subject("off");
+    signup.missingRequired = ["affiliation"];
+    await expect(enforceServiceConsent(user, { subject: { projectKey: "svc" }, channel: "browser" })).resolves.toBeUndefined();
+    expect(signup.calls).toBe(0);
+  });
+
+  it("必須が未入力なら consent_mode=off でも authCode を出さず /consent へ (同じ consent_required)", async () => {
+    resolver.project = declared("off");
+    signup.missingRequired = ["affiliation"];
+    const error = await enforceServiceConsent(user, { subject: { projectKey: "svc" }, channel: "browser" }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ConsentRequiredError);
+    expect((error as InstanceType<typeof ConsentRequiredError>).code).toBe("consent_required");
+    expect(tickets.created).toHaveLength(1);
+    expect(events.logged.map((e) => e.event)).toEqual(["signup_fields.required"]);
+  });
+
+  it("必須の不足は warn でも止める (同意の充足に関係なく)", async () => {
+    resolver.project = declared("warn");
+    records.value = satisfiedRecord;
+    signup.missingRequired = ["affiliation"];
+    await expect(enforceServiceConsent(user, { subject: { projectKey: "svc" }, channel: "browser" }))
+      .rejects.toBeInstanceOf(ConsentRequiredError);
+  });
+
+  it("任意だけが未入力なら止めない", async () => {
+    resolver.project = declared("off");
+    await expect(enforceServiceConsent(user, { subject: { projectKey: "svc" }, channel: "browser" })).resolves.toBeUndefined();
+    expect(signup.calls).toBe(1);
+    expect(records.calls).toBe(0);
+    expect(tickets.created).toEqual([]);
   });
 });

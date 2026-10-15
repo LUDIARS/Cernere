@@ -13,6 +13,8 @@ describe("pending users get only self-service commands (registration approval A)
     ["security_event", "list"],
     ["user_access", "apply"],
     ["user_access", "status"],
+    ["signup_fields", "for_return"],
+    ["signup_fields", "save"],
   ])("allows %s.%s", (module, action) => {
     expect(isAllowedWhilePending(me, module, action, {})).toBe(true);
   });

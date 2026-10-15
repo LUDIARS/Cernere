@@ -3,11 +3,15 @@
  *
  * 推奨の許可を変える (consent.decide) と、同意の取り消し = そのサービスの利用停止 (consent.revoke)。
  * どちらも本人確認 (パスキーの action proof) を通す。必須は外せない (外したいときは利用停止)。
+ * サービスが入力項目 (signup_fields) を宣言していれば「<サービス名> で使う情報」も同じ保存で直せる
+ * (spec/plan/2026-10-15-service-signup-fields-design.md §3)。
  */
 
 import { useCallback, useEffect, useState } from "react";
 import { PermissionList, initialRecommendedSelection } from "../components/consent/PermissionList";
+import { SignupFieldsForm } from "../components/signup-fields/SignupFieldsForm";
 import { serviceConsents, type ServiceConsentItem } from "../lib/consent-api";
+import { initialSignupValues, type SignupFieldErrors, type SignupFieldValue } from "../lib/signup-fields-api";
 
 function itemKey(item: Pick<ServiceConsentItem, "subjectKind" | "subjectKey">): string {
   return `${item.subjectKind}:${item.subjectKey}`;
@@ -18,9 +22,14 @@ function ServiceConsentCard(props: { item: ServiceConsentItem; onChanged: (item:
   const [selected, setSelected] = useState<Set<string>>(() => initialRecommendedSelection(item.view));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [values, setValues] = useState<Record<string, SignupFieldValue>>(() => initialSignupValues(item.signupFields?.fields ?? []));
+  const [fieldErrors, setFieldErrors] = useState<SignupFieldErrors>({});
   const revoked = item.revokedAt !== null;
 
-  useEffect(() => { setSelected(initialRecommendedSelection(item.view)); }, [item]);
+  useEffect(() => {
+    setSelected(initialRecommendedSelection(item.view));
+    setValues(initialSignupValues(item.signupFields?.fields ?? []));
+  }, [item]);
 
   const run = async (kind: "decide" | "revoke") => {
     if (kind === "revoke" && !window.confirm(
@@ -28,10 +37,16 @@ function ServiceConsentCard(props: { item: ServiceConsentItem; onChanged: (item:
     )) return;
     setBusy(true);
     setMessage("");
+    setFieldErrors({});
     try {
       const updated = kind === "decide"
-        ? await serviceConsents.decide(item, [...selected])
+        ? await serviceConsents.decide(item, [...selected], item.signupFields ? values : undefined)
         : await serviceConsents.revoke(item);
+      if ("fieldErrors" in updated) {
+        setFieldErrors(updated.fieldErrors);
+        setMessage("入力内容を確認してください。");
+        return;
+      }
       onChanged(updated);
       setMessage(kind === "decide" ? "保存しました。" : "利用を停止しました。");
     } catch (e) {
@@ -60,6 +75,16 @@ function ServiceConsentCard(props: { item: ServiceConsentItem; onChanged: (item:
           return next;
         })}
       />
+      {item.signupFields && !revoked && (
+        <SignupFieldsForm
+          serviceName={item.serviceName}
+          fields={item.signupFields.fields}
+          values={values}
+          errors={fieldErrors}
+          disabled={busy}
+          onChange={(column, value) => setValues((prev) => ({ ...prev, [column]: value }))}
+        />
+      )}
       {message && <p role="status" style={{ fontSize: "0.8rem", margin: "0 0 0.5rem" }}>{message}</p>}
       <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
         {!revoked && (
@@ -70,7 +95,7 @@ function ServiceConsentCard(props: { item: ServiceConsentItem; onChanged: (item:
         )}
         <button type="button" className="primary" disabled={busy} onClick={() => void run("decide")}
           style={{ fontSize: "0.8rem", padding: "0.3rem 0.75rem" }}>
-          {revoked ? "許可して再開" : "推奨の選択を保存"}
+          {revoked ? "許可して再開" : item.signupFields ? "保存" : "推奨の選択を保存"}
         </button>
       </div>
     </div>

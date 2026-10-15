@@ -236,6 +236,42 @@
       "module": "server/src/consent/contracts/continuation.contract.ts",
       "mode": "observe",
       "sample": 1
+    },
+    {
+      "id": "C-27",
+      "criterion": "C-27 validateSignupFieldsDeclaration(raw, columns, consent, previousVersion): 存在しない列・論理削除済みの列・型と input の不一致・推奨 module の列を必須にする宣言を拒否する",
+      "symbol": "validateSignupFieldsDeclaration",
+      "file": "server/src/signup-fields/declaration.ts",
+      "module": "server/src/signup-fields/contracts/declaration.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-28",
+      "criterion": "C-28 evaluateSignupFields(input): 未入力の必須だけを不足に数え、入力済みの列と拒否された module の列は聞かず、任意は同じ版で一度見せたら再表示しない",
+      "symbol": "evaluateSignupFields",
+      "file": "server/src/signup-fields/requirement.ts",
+      "module": "server/src/signup-fields/contracts/requirement.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-29",
+      "criterion": "C-29 validateSignupFieldValues(fields, input): 聞いた列以外の値は捨て、必須の空欄・型や選択肢の外れを項目ごとのエラーにし、エラーがあれば値を 1 つも返さない",
+      "symbol": "validateSignupFieldValues",
+      "file": "server/src/signup-fields/values.ts",
+      "module": "server/src/signup-fields/contracts/values.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-30",
+      "criterion": "C-30 returnTargetOf(returnTo): Cernere 内のパスだけを受け付け、/composite/login の origin か redirect_uri の値を返し、それ以外は null にする",
+      "symbol": "returnTargetOf",
+      "file": "server/src/signup-fields/return-target.ts",
+      "module": "server/src/signup-fields/contracts/return-target.contract.ts",
+      "mode": "observe",
+      "sample": 1
     }
   ]
 }

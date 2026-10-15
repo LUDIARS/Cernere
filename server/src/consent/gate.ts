@@ -4,6 +4,10 @@
  * issueAuthCode (audience = "service") が requireActiveUser の直後に呼ぶ。対象サービスを解決し、
  * consent_mode に従って判定する。enforce で未充足なら authCode を出さず ConsentRequiredError
  * (consentTicket と /consent の URL 付き) を投げる。各経路はそれを consent_required 応答へ変える。
+ *
+ * 入力項目 (signup_fields、spec/plan/2026-10-15-service-signup-fields-design.md §3) を宣言したサービスは、
+ * 必須が未入力なら consent_mode に関係なく同じ ConsentRequiredError で /consent へ送る
+ * (応答のコードは consent_required のまま)。任意だけの未入力では止めない。
  */
 
 import { config } from "../config.js";
@@ -84,16 +88,25 @@ function resolveContinuation(request: ServiceConsentRequest, resolved: ResolvedC
   return null;
 }
 
+/** 入力項目の必須に未入力があるか。宣言の無いサービスは本人の行を読まない。 */
+async function hasMissingSignupFields(userId: string, resolved: ResolvedConsentSubject): Promise<boolean> {
+  if (!resolved.signupFields) return false;
+  const { evaluateSignupFieldsForUser } = await import("../signup-fields/evaluate.js");
+  // 必須の判定は見せた記録 (fields_version) に依らないので同意の行は読まない。
+  return (await evaluateSignupFieldsForUser(userId, resolved, null)).missingRequired.length > 0;
+}
+
 export async function enforceServiceConsent(authUser: TicketAuthUser, request: ServiceConsentRequest): Promise<void> {
   const resolved = await resolveRequestSubject(request);
   if (!resolved) {
     devLog("consent.gate.noSubject", { userId: authUser.userId, reason: request.reason ?? "unresolved" });
     return;
   }
-  if (resolved.mode === "off") return;
+  const fieldsMissing = await hasMissingSignupFields(authUser.userId, resolved);
+  if (resolved.mode === "off" && !fieldsMissing) return;
 
   const requirement = await evaluateForUser(authUser.userId, resolved);
-  const action = decideConsentGate(resolved.mode, requirement.satisfied);
+  const action = fieldsMissing ? "block" : decideConsentGate(resolved.mode, requirement.satisfied);
   if (action === "pass") return;
   if (action === "warn") {
     logAuthEvent({ event: "consent.would_block", userId: authUser.userId, projectKey: resolved.subject.key });
@@ -108,6 +121,10 @@ export async function enforceServiceConsent(authUser: TicketAuthUser, request: S
     declarationVersion: requirement.view.version,
     deliverAuthCode: request.deliverAuthCode ?? true,
   });
-  logAuthEvent({ event: "consent.required", userId: authUser.userId, projectKey: resolved.subject.key });
+  logAuthEvent({
+    event: fieldsMissing ? "signup_fields.required" : "consent.required",
+    userId: authUser.userId,
+    projectKey: resolved.subject.key,
+  });
   throw new ConsentRequiredError(ticket, consentPageUrl(ticket));
 }

@@ -22,6 +22,7 @@ import type { DeliverProjectCredentials } from "./credential-delivery.js";
 import { toUserDataParameter } from "./user-data-parameter.js";
 import { validateConsentDeclaration } from "../consent/declaration.js";
 import { capsFromProjectDefinition } from "../consent/permission-keys.js";
+import { validateSignupFieldsDeclaration } from "../signup-fields/declaration.js";
 
 // ── Project definition helpers ───────────────────────────────
 
@@ -236,6 +237,7 @@ export async function registerProject(payload: unknown, userId?: string, deliver
   definition = parsed.data;
   // 登録 (管理者) でも同意の宣言は上限の内側に限る。
   assertConsentDeclaration(definition, null);
+  assertSignupFieldsDeclaration(definition, definition, null);
 
   // 既存チェック
   const existing = await db.select().from(dbSchema.managedProjects)
@@ -361,7 +363,7 @@ export function withExistingProjectMeta(
 /**
  * partial update で省略された既存フィールドを保持する。
  * data_sharing / identity_claims / service_scopes / profile_access / onsite_mfa / consent_mode は管理者所有なので、project auto-sync で消さない。
- * consent (同意の宣言) も user_data だけを送る auto-sync で消さない。
+ * consent (同意の宣言)・signup_fields (入力項目の宣言) も user_data だけを送る auto-sync で消さない。
  */
 export function preserveExistingDefinitionFields(
   definition: ProjectDefinition,
@@ -401,6 +403,9 @@ export function preserveExistingDefinitionFields(
     ...(definition.consent_mode === undefined && existing.consent_mode !== undefined
       ? { consent_mode: existing.consent_mode }
       : {}),
+    ...(definition.signup_fields === undefined && existing.signup_fields !== undefined
+      ? { signup_fields: existing.signup_fields }
+      : {}),
   };
 }
 
@@ -414,6 +419,22 @@ export function assertConsentDeclaration(definition: ProjectDefinition, existing
   const checked = validateConsentDeclaration(definition.consent, capsFromProjectDefinition(definition),
     previous?.version ?? null, previous);
   if (!checked.ok) throw AppError.badRequest(`Invalid consent declaration: ${checked.errors.join("; ")}`);
+}
+
+/**
+ * 入力項目の宣言を列定義と同意の宣言で検証する (spec/plan/2026-10-15-service-signup-fields-design.md §2)。
+ * 送られてきた宣言だけを見る。保存済みの宣言を残す auto-sync で列が消えても更新は止めない
+ * (消えた列は判定 (signup-fields/requirement.ts) で聞かなくなる)。
+ */
+export function assertSignupFieldsDeclaration(
+  submitted: ProjectDefinition,
+  merged: ProjectDefinition,
+  existing: ProjectDefinition | null | undefined,
+): void {
+  if (submitted.signup_fields === undefined) return;
+  const checked = validateSignupFieldsDeclaration(submitted.signup_fields, submitted.user_data?.columns ?? {},
+    merged.consent ?? null, existing?.signup_fields?.version ?? null);
+  if (!checked.ok) throw AppError.badRequest(`Invalid signup_fields declaration: ${checked.errors.join("; ")}`);
 }
 
 export async function updateProjectSchema(key: string, payload: unknown, userId?: string) {
@@ -436,7 +457,9 @@ export async function updateProjectSchema(key: string, payload: unknown, userId?
 
   const oldDef = rows[0].schemaDefinition as ProjectDefinition;
   // DDL より先に宣言を検証する (上限は管理者所有フィールドを合成した後の定義で見る)。
-  assertConsentDeclaration(preserveExistingDefinitionFields(definition, oldDef), oldDef);
+  const merged = preserveExistingDefinitionFields(definition, oldDef);
+  assertConsentDeclaration(merged, oldDef);
+  assertSignupFieldsDeclaration(definition, merged, oldDef);
 
   const result = await migrateProjectSchema(key, definition);
 

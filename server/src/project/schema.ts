@@ -7,6 +7,7 @@ import { serializeColumnDefault } from "./column-default.js";
 import { profileAccessSchema } from "./profile-access.js";
 import { onsiteMfaDefinitionSchema } from "./onsite-mfa.js";
 import { consentDeclarationSchema, consentModeSchema } from "../consent/declaration-schema.js";
+import { signupFieldsDeclarationSchema } from "../signup-fields/declaration-schema.js";
 
 // ── カラム型 ─────────────────────────────────────────────────
 
@@ -145,6 +146,11 @@ export const projectDefinitionSchema = z.object({
   consent: consentDeclarationSchema.optional(),
   /** 同意の移行モード off / warn / enforce (管理者所有、未設定は off)。 */
   consent_mode: consentModeSchema.optional(),
+  /**
+   * サービス経由の初回ログインで利用者に入力させる項目 (user_data の列)。サービスが update_schema で
+   * 宣言してよい。列定義・consent との突き合わせは updateProjectSchema (signup-fields/declaration.ts)。
+   */
+  signup_fields: signupFieldsDeclarationSchema.optional(),
   /** ユーザーデータのカラム定義 (各カラムの module フィールドでモジュール帰属を管理) */
   user_data: z.object({
     columns: z.record(z.string(), columnDefinitionSchema),
