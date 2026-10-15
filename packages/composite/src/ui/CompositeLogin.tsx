@@ -22,8 +22,9 @@ import { useState, type CSSProperties, type ReactElement, type ReactNode } from 
 import type { CompositeAuthApi, CompositeAuthResponse } from "./auth-api.js";
 import { LoginDivider } from "./LoginDivider.js";
 import { DEFAULT_LABELS, type CompositeLoginLabels } from "./login-labels.js";
-import { hintStyle, secondaryButtonStyle, subtleLinkStyle } from "./login-styles.js";
+import { hintStyle, subtleLinkStyle } from "./login-styles.js";
 import { PasskeyLoginSection } from "./PasskeyLoginSection.js";
+import { passkeyAbortOutcome } from "./passkey-continue.js";
 import { usePasskeyLogin } from "./usePasskeyLogin.js";
 
 // 旧 import 経路 (./CompositeLogin.js からの型 import) を壊さないための再 export。
@@ -86,19 +87,8 @@ export function CompositeLogin(props: CompositeLoginProps): ReactElement {
     throw new Error(r.error ?? "Unexpected authentication response");
   };
 
-  const passkey = usePasskeyLogin({
-    api: authApi,
-    autoStartReady: passkeyAutoStart,
-    onResponse: (r) => {
-      try { handleResponse(r); } catch (err) { setError(err instanceof Error ? err.message : "Authentication failed"); }
-    },
-    onError: setError,
-  });
-
-  // 取消・パスキー無しの後にだけ選択肢を出す。最初から並べると、別端末にアカウントが
-  // ある人が「新しく始める」を押して二重アカウントを作りやすい。
-  const showChoices = passkey.phase === "fallback" || passkey.phase === "unsupported";
-
+  // 入口は「パスキーで続ける」1 つ。押してパスキーが無ければ、そのまま作成ダイアログへ進む
+  // (passkey-continue.ts)。アカウントができるのは作成を完了したときだけ。
   const startCreate = async () => {
     if (!onCreateAccount) return;
     setError("");
@@ -111,6 +101,21 @@ export function CompositeLogin(props: CompositeLoginProps): ReactElement {
       setCreating(false);
     }
   };
+
+  const passkey = usePasskeyLogin({
+    api: authApi,
+    autoStartReady: passkeyAutoStart,
+    onResponse: (r) => {
+      try { handleResponse(r); } catch (err) { setError(err instanceof Error ? err.message : "Authentication failed"); }
+    },
+    onError: setError,
+    onManualAbort: () => {
+      if (passkeyAbortOutcome({ manual: true, canCreate: Boolean(onCreateAccount) }) === "create") void startCreate();
+    },
+  });
+
+  // 取消・パスキー無しの後にだけ、別端末・リカバリーの案内を出す。
+  const showChoices = passkey.phase === "fallback" || passkey.phase === "unsupported";
 
   return (
     <div
@@ -151,18 +156,7 @@ export function CompositeLogin(props: CompositeLoginProps): ReactElement {
             </p>
           )}
           {onCreateAccount && (
-            <>
-              <LoginDivider label={l.orContinueWith} />
-              <button
-                type="button"
-                onClick={() => { void startCreate(); }}
-                disabled={creating}
-                style={secondaryButtonStyle(creating)}
-              >
-                {creating ? l.processing : l.createAccount}
-              </button>
-              <p style={{ ...hintStyle, marginTop: "0.5rem", textAlign: "center" }}>{l.createAccountHint}</p>
-            </>
+            <p style={{ ...hintStyle, marginTop: "0.5rem" }}>{creating ? l.processing : l.createAccountHint}</p>
           )}
         </div>
       )}

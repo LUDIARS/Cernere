@@ -43,5 +43,5 @@ export const DEFAULT_LABELS: CompositeLoginLabels = {
   otherDeviceHint: "Try again and choose \"use a phone or another device\" in the browser prompt, then scan the QR code with that device.",
   recoverWithQr: "Lost all your devices? Recover with your recovery QR",
   createAccount: "Start a new account",
-  createAccountHint: "Only if you have never used Cernere. A new passkey is created on this device.",
+  createAccountHint: "New to Cernere? Press \"Continue with passkey\" again and create a passkey when asked. Nothing is created until you finish that step.",
 };

@@ -48,6 +48,11 @@ export interface UsePasskeyLoginArgs {
   onResponse: (response: CompositeAuthResponse) => void;
   /** 利用者取消 / credential 不在以外の明確な失敗 */
   onError: (message: string) => void;
+  /**
+   * 利用者が自分で押した ceremony が取消 / 候補なしで終わったとき。
+   * 自動起動の取消では呼ばない (passkey-continue.ts)。
+   */
+  onManualAbort?: () => void;
 }
 
 export interface UsePasskeyLoginResult {
@@ -74,6 +79,7 @@ export function usePasskeyLogin({
   autoStartReady,
   onResponse,
   onError,
+  onManualAbort,
 }: UsePasskeyLoginArgs): UsePasskeyLoginResult {
   const [phase, setPhase] = useState<PasskeyLoginPhase>("idle");
   const [hasAttempted, setHasAttempted] = useState(false);
@@ -90,10 +96,12 @@ export function usePasskeyLogin({
   // 最新の callback を掴む (effect の依存に入れて再発火させないため)
   const onResponseRef = useRef(onResponse);
   const onErrorRef = useRef(onError);
+  const onManualAbortRef = useRef(onManualAbort);
   onResponseRef.current = onResponse;
   onErrorRef.current = onError;
+  onManualAbortRef.current = onManualAbort;
 
-  const run = useCallback(async (): Promise<void> => {
+  const run = useCallback(async (manual: boolean): Promise<void> => {
     if (!api || inFlightRef.current) return;
     inFlightRef.current = true;
     setPhase("running");
@@ -116,7 +124,10 @@ export function usePasskeyLogin({
       setPhase("fallback");
       // 利用者取消 / credential 不在だけを静かに明示導線へ戻す。
       // 通信・サーバ障害まで隠すと「パスキーが無い」と誤案内するため、起動方法を問わず表示する。
-      if (isPasskeyUserAbort(err)) return;
+      if (isPasskeyUserAbort(err)) {
+        if (manual) onManualAbortRef.current?.();
+        return;
+      }
       onErrorRef.current(err instanceof Error ? err.message : "Passkey login failed");
     } finally {
       inFlightRef.current = false;
@@ -132,7 +143,7 @@ export function usePasskeyLogin({
       setPhase("unsupported");
       return;
     }
-    void run();
+    void run(false);
   }, [api, autoStartReady, run]);
 
   const start = useCallback(() => {
@@ -147,7 +158,7 @@ export function usePasskeyLogin({
       setPhase("unsupported");
       return;
     }
-    void run();
+    void run(true);
   }, [api, run]);
 
   return { phase, hasAttempted, start };

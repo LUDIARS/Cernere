@@ -19,5 +19,5 @@ export const CERNERE_LOGIN_LABELS: Partial<CompositeLoginLabels> = {
   otherDeviceHint: "もう一度試し、ブラウザの画面で「スマートフォンまたは別のデバイスを使用」を選んで、表示される QR をその端末で読み取ってください。",
   recoverWithQr: "すべての端末をなくした場合は、リカバリー QR で戻す",
   createAccount: "新しく始める",
-  createAccountHint: "Cernere を一度も使ったことがない場合だけ押してください。この端末に新しいパスキーを作ります。",
+  createAccountHint: "はじめての方は、もう一度「パスキーで続ける」を押し、表示される画面でパスキーを作成してください。作成を終えるまでアカウントはできません。",
 };
