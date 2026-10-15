@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
 import { auth as authApi, getStoredUser, getAccessToken, setTokens, setStoredUser } from "../lib/api";
 import { usesDeviceSession } from "../lib/browser-token-store";
+import { toAuthUser } from "../lib/me-user";
 import { refreshBrowserAccessToken } from "../lib/browser-refresh";
 import { wsClient } from "../lib/ws-client";
 
@@ -104,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (stored || (accessToken && refreshToken)) {
       authApi.me()
         .then((me) => {
-          const u = { id: me.id, name: me.displayName, email: me.email || "", role: me.role };
+          const u = toAuthUser(me);
           setUser(u);
           setStoredUser(u);
         })

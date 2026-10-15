@@ -55,8 +55,8 @@ export function setStoredUser(user: { id: string; name: string; email: string; r
 
 interface UserProfile {
   id: string;
-  name?: string;
-  displayName: string;
+  /** 表示名。サーバーの me はこの名前で返す (displayName ではない) */
+  name: string | null;
   email: string | null;
   role: string;
   hasGoogleAuth: boolean;
