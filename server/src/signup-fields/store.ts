@@ -11,6 +11,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import { consentServiceId, deniedPermissionKeys } from "../consent/denials.js";
 import type { ConsentSubject, ConsentTransaction } from "../consent/store.js";
+import type { SignupTableGroup } from "./targets.js";
 import type { SignupValue } from "./values.js";
 
 const MODULE_PERMISSION_PREFIX = "user_data.module:";
@@ -67,4 +68,13 @@ export async function writeSignupValues(
   ], sql`, `);
   await executor.execute(sql`INSERT INTO ${sql.identifier(tableName)} (user_id, ${columnList(columns)}) VALUES (${userId}, ${params})
     ON CONFLICT (user_id) DO UPDATE SET ${updates}`);
+}
+
+/** 保存先表ごとに書く (同じ executor = 同じトランザクション)。groups は targets.ts の valuesByTable。 */
+export async function writeSignupValueGroups(
+  executor: Executor,
+  userId: string,
+  groups: ReadonlyArray<SignupTableGroup<SignupValue>>,
+): Promise<void> {
+  for (const group of groups) await writeSignupValues(executor, group.table, userId, group.values);
 }

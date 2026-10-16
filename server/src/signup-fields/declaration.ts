@@ -7,6 +7,7 @@
 
 import type { ConsentDeclaration } from "../consent/declaration-schema.js";
 import { signupFieldsDeclarationSchema, type SignupFieldInput, type SignupFieldsDeclaration } from "./declaration-schema.js";
+import { fieldSourceProject, writableSharedColumns, type SharedProjectDefinition } from "./shared-source.js";
 import { contract } from '@ludiars/log-weaver'; /* augur-inject:import:589c5618 */
 import augurContract_f5dc0751 from './contracts/declaration.contract.js'; /* augur-inject:contract-predicate:cb670dc8 */
 
@@ -18,6 +19,15 @@ export interface SignupColumn {
 }
 
 export type SignupColumns = Readonly<Record<string, SignupColumn>>;
+
+/**
+ * 共有を受けている列の検証材料 (設計書 §8)。ownKey は宣言する project、sources は宣言が参照する
+ * 共有元 project の定義 (存在しない・無効な project は null)。
+ */
+export interface SignupSharing {
+  ownKey: string;
+  sources: Readonly<Record<string, SharedProjectDefinition | null>>;
+}
 
 export type SignupFieldsCheck =
   | { ok: true; declaration: SignupFieldsDeclaration }
@@ -49,9 +59,36 @@ function recommendedModules(consent: ConsentDeclaration | null): Set<string> {
   return modules;
 }
 
+/** 共有元 project の列。readwrite grant の範囲外・存在しない列は理由を report して null。 */
+function sharedColumn(
+  name: string,
+  project: string,
+  sharing: SignupSharing | undefined,
+  report: (message: string) => void,
+): SignupColumn | null {
+  const definition = sharing && Object.prototype.hasOwnProperty.call(sharing.sources, project) ? sharing.sources[project] : null;
+  if (!sharing || !definition) {
+    report(`project: ${project} is not an active project`);
+    return null;
+  }
+  if (!activeColumn(definition.columns, name)) {
+    report(`column: ${name} is not an active user_data column of ${project}`);
+    return null;
+  }
+  const writable = writableSharedColumns(definition, sharing.ownKey);
+  if (!writable) {
+    report(`project: ${project} has no readwrite data_sharing grant for ${sharing.ownKey}`);
+    return null;
+  }
+  const column = activeColumn(writable, name);
+  if (!column) report(`column: ${name} of ${project} is outside the data_sharing grant for ${sharing.ownKey}`);
+  return column;
+}
+
 /**
  * 宣言を検証する。`previousVersion` は保存済みの宣言の版 (無ければ null)。版を下げる更新は拒否する
  * (fields_version で「この版は見せた」を記録しているため、下げると聞き直しが起きなくなる)。
+ * `project` を書いた field は sharing の共有元で、readwrite grant の範囲内にある有効な列だけを受け付ける。
  * 契約 C-27 (server/src/signup-fields/contracts/declaration.contract.ts) は augur inject が包む。
  */
 export function validateSignupFieldsDeclaration(
@@ -59,6 +96,7 @@ export function validateSignupFieldsDeclaration(
   columns: SignupColumns,
   consent: ConsentDeclaration | null,
   previousVersion: number | null,
+  sharing?: SignupSharing,
 ): SignupFieldsCheck {
   const parsed = signupFieldsDeclarationSchema.safeParse(raw);
   if (!parsed.success) {
@@ -72,15 +110,19 @@ export function validateSignupFieldsDeclaration(
     const where = `signup_fields.fields.${index}`;
     if (seen.has(field.column)) errors.push(`${where}.column: duplicate column ${field.column}`);
     seen.add(field.column);
-    const column = activeColumn(columns, field.column);
+    const source = fieldSourceProject(field, sharing?.ownKey ?? null);
+    const column = source === null
+      ? activeColumn(columns, field.column)
+      : sharedColumn(field.column, source, sharing, (message) => errors.push(`${where}.${message}`));
     if (!column) {
-      errors.push(`${where}.column: ${field.column} is not an active user_data column`);
+      if (source === null) errors.push(`${where}.column: ${field.column} is not an active user_data column`);
       continue;
     }
     if (!COLUMN_TYPES_BY_INPUT[field.input].includes(column.type)) {
       errors.push(`${where}.input: ${field.input} does not fit column type ${column.type}`);
     }
-    if (field.required && column.module && recommended.has(column.module)) {
+    // 共有元の module はこのサービスの consent 宣言とは別物 (§8.1)。
+    if (source === null && field.required && column.module && recommended.has(column.module)) {
       errors.push(`${where}.required: ${field.column} belongs to recommended module ${column.module} and cannot be required`);
     }
     const values = (field.options ?? []).map((o) => o.value);

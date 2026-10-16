@@ -16,7 +16,8 @@ import { invalidate as invalidateUserDataCache } from "../project/user-data-cach
 import { SignupFieldsInvalidError } from "./errors.js";
 import { evaluateSignupFieldsForUser, type PendingConsentDecision } from "./evaluate.js";
 import type { SignupFieldsRequirement } from "./requirement.js";
-import { writeSignupValues } from "./store.js";
+import { writeSignupValueGroups } from "./store.js";
+import { valuesByTable } from "./targets.js";
 import { validateSignupFieldValues } from "./values.js";
 
 /** asked: 画面で聞いた項目だけ (/consent・オンボーディング) / all: 聞ける全項目 (プロフィールの見直し) */
@@ -24,6 +25,11 @@ export type SignupFieldsScope = "asked" | "all";
 
 function targetsOf(requirement: SignupFieldsRequirement, scope: SignupFieldsScope) {
   return scope === "asked" ? requirement.fields : requirement.all;
+}
+
+/** 検証済みの値を保存先表 (自分 / 共有元) ごとに分ける (設計書 §8.2)。 */
+function groupsOf(resolved: ResolvedConsentSubject, table: string, values: Parameters<typeof valuesByTable>[0], views: SignupFieldsRequirement["all"]) {
+  return valuesByTable(values, views, { projectKey: resolved.subject.key, storageTable: table }, resolved.signupSources ?? {});
 }
 
 /**
@@ -41,19 +47,23 @@ export async function prepareConsentFields(
   if (!resolved.signupFields || !table) return null;
   const record = await getConsentRecord(userId, resolved.subject);
   const requirement = await evaluateSignupFieldsForUser(userId, resolved, record, pending);
-  const check = validateSignupFieldValues(targetsOf(requirement, scope), input);
+  const targets = targetsOf(requirement, scope);
+  const check = validateSignupFieldValues(targets, input);
   if (!check.ok) throw new SignupFieldsInvalidError(check.errors);
+  const groups = groupsOf(resolved, table, check.values, targets);
   const previous = record && !record.revoked && record.fieldsVersion !== null ? record.fieldsSeen : [];
   return {
     version: requirement.version,
     seen: [...new Set([...previous, ...requirement.all.map((f) => f.column)])],
-    write: (tx) => writeSignupValues(tx, table, userId, check.values),
+    write: (tx) => writeSignupValueGroups(tx, userId, groups),
   };
 }
 
-/** 保存後に、サービスが読む user_data のキャッシュを捨てる。 */
+/** 保存後に、サービス (と共有元 project) が読む user_data のキャッシュを捨てる。 */
 export async function afterSignupFieldsSaved(userId: string, resolved: ResolvedConsentSubject): Promise<void> {
-  if (resolved.signupFields) await invalidateUserDataCache(userId, resolved.subject.key);
+  if (!resolved.signupFields) return;
+  await invalidateUserDataCache(userId, resolved.subject.key);
+  for (const projectKey of Object.keys(resolved.signupSources ?? {})) await invalidateUserDataCache(userId, projectKey);
 }
 
 /** オンボーディングでの保存。画面で聞いた項目だけを書く。 */
@@ -68,7 +78,9 @@ export async function saveSignupFields(
   const requirement = await evaluateSignupFieldsForUser(userId, resolved, record);
   const check = validateSignupFieldValues(requirement.fields, input);
   if (!check.ok) throw new SignupFieldsInvalidError(check.errors);
-  await writeSignupValues(db, table, userId, check.values);
+  const groups = groupsOf(resolved, table, check.values, requirement.fields);
+  // 自分の表と共有元の表をまとめて書く (片方だけ残さない)。
+  await db.transaction((tx) => writeSignupValueGroups(tx, userId, groups));
   await afterSignupFieldsSaved(userId, resolved);
   return evaluateSignupFieldsForUser(userId, resolved, record);
 }

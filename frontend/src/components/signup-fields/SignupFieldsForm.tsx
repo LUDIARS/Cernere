@@ -3,7 +3,8 @@
  * /consent・オンボーディング・サービスの権限で共用する。描画と項目ごとのエラー表示だけを持ち、送信は呼び出し側。
  *
  * - 宣言の順に並べ、必須に印を付ける
- * - 各欄に「誰が読めるか」(その列の module の consent 宣言。無ければ「このサービス」)
+ * - 各欄に「誰が読めるか」(その列の module の consent 宣言。無ければ「このサービス」)。
+ *   共有を受けている列は Cernere が計算した共有先 (このサービス + 他のサービス)
  */
 
 import type { CSSProperties } from "react";
@@ -17,7 +18,12 @@ const inputStyle: CSSProperties = {
 };
 const noteStyle: CSSProperties = { color: "var(--text-muted)", fontSize: "0.75rem", marginTop: "0.2rem" };
 
-function visibilityText(visibleTo: SignupFieldVisibility[] | null): string {
+function visibilityText(visibleTo: SignupFieldVisibility[] | null, sharedWith: string[] | null): string {
+  if (sharedWith) {
+    return sharedWith.length === 0
+      ? "このサービス"
+      : `このサービス / ${audienceLabel({ audience: "other_services", source: "cernere", services: sharedWith })}`;
+  }
   if (!visibleTo || visibleTo.length === 0) return "このサービス";
   return visibleTo.map((audience) => audienceLabel({ audience, source: "service" })).join(" / ");
 }
@@ -88,7 +94,7 @@ export function SignupFieldsForm(props: {
               onChange={(value) => onChange(field.column, value)} />
             {error && <div role="alert" style={{ color: "var(--red)", fontSize: "0.78rem", marginTop: "0.2rem" }}>{error}</div>}
             {field.help && <div style={noteStyle}>{field.help}</div>}
-            <div style={noteStyle}>誰が読めるか: {visibilityText(field.visibleTo)}</div>
+            <div style={noteStyle}>誰が読めるか: {visibilityText(field.visibleTo, field.sharedWith)}</div>
           </div>
         );
       })}

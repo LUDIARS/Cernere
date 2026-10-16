@@ -18,6 +18,7 @@ import { capsFromOidcScopes, capsFromProjectDefinition, type ConsentCaps } from 
 import type { SharingTarget } from "./requirement.js";
 import { readSignupFieldsDeclaration, type SignupFieldsDeclaration } from "../signup-fields/declaration-schema.js";
 import type { SignupColumns } from "../signup-fields/declaration.js";
+import { resolveSignupSources, type ResolvedSignupSource } from "../signup-fields/sources.js";
 import { storageTableFromRow } from "../project/storage-resolver.js";
 import type { ConsentSubject } from "./store.js";
 
@@ -36,6 +37,8 @@ export interface ResolvedConsentSubject {
   userColumns?: SignupColumns;
   /** project_data_<storage_slug>。入力項目を宣言したサービスだけ解決する */
   storageTable?: string | null;
+  /** 共有を受けている列の保存先 (設計書 §8)。共有元 project key → 表名・いま書ける列・他の共有先 */
+  signupSources?: Readonly<Record<string, ResolvedSignupSource>>;
 }
 
 type ProjectRow = typeof schema.managedProjects.$inferSelect;
@@ -94,6 +97,7 @@ async function fromProjectRow(row: ProjectRow): Promise<ResolvedConsentSubject> 
     signupFields,
     userColumns: userColumnsOf(def),
     storageTable: signupFields ? storageTableFromRow(row) : null,
+    signupSources: signupFields ? await resolveSignupSources(row.key, signupFields) : {},
   };
 }
 
@@ -149,6 +153,7 @@ export async function resolveOidcSubject(clientId: string): Promise<ResolvedCons
     signupFields: null,
     userColumns: {},
     storageTable: null,
+    signupSources: {},
   };
 }
 

@@ -48,6 +48,10 @@ vi.mock("../../src/signup-fields/store.js", () => ({
   deniedSignupModules: async () => new Set<string>(),
   loadSignupValues: async () => ({}),
   writeSignupValues: async (...args: unknown[]) => { state.writes.push([...args, state.inTransaction]); },
+  // 保存先表ごとの書き込み (設計書 §8.2)。表ごとに writeSignupValues と同じ形で記録する。
+  writeSignupValueGroups: async (tx: unknown, userId: string, groups: Array<{ table: string; values: unknown }>) => {
+    for (const group of groups) state.writes.push([tx, group.table, userId, group.values, state.inTransaction]);
+  },
 }));
 vi.mock("../../src/db/connection.js", () => ({ db: {} }));
 vi.mock("../../src/project/user-data-cache.js", () => ({ invalidate: async () => undefined }));

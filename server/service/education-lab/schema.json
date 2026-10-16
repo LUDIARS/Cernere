@@ -7,12 +7,21 @@
 
   "endpoint": {
     "url": "http://localhost:5187",
-    "frontend_url": "http://localhost:5187",
+    "frontend_url": "https://glab.ai-run-do.com",
     "same_server": true,
     "bridge_path": "/EducationLab"
   },
 
   "data_sharing": [],
+
+  "signup_fields": {
+    "version": 1,
+    "fields": [
+      { "project": "vantan_user", "column": "name", "label": "名前", "required": true, "input": "text", "max_length": 200 },
+      { "project": "vantan_user", "column": "role_title", "label": "役職", "required": true, "input": "text", "max_length": 200 },
+      { "project": "vantan_user", "column": "department_name", "label": "学科", "required": true, "input": "text", "max_length": 200 }
+    ]
+  },
 
   "user_data": {
     "columns": {}

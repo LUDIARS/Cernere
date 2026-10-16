@@ -24,6 +24,8 @@ const optionSchema = z.object({
 }).strict();
 
 export const signupFieldSchema = z.object({
+  /** 保存先 project (共有を受けている列、設計書 §8)。省略時は自分の project の列 */
+  project: z.string().min(1).max(128).optional(),
   column: z.string().min(1).max(128),
   label: z.string().trim().min(1, "label is required").max(MAX_SIGNUP_LABEL),
   required: z.boolean().default(false),

@@ -6,9 +6,9 @@
 import { devLog } from "../logging/dev-logger.js";
 import type { ResolvedConsentSubject } from "../consent/project-resolver.js";
 import type { StoredConsent } from "../consent/store.js";
-import { activeColumn } from "./declaration.js";
 import { evaluateSignupFields, type SignupFieldsRequirement, type SignupFieldsSeen } from "./requirement.js";
 import { deniedSignupModules, loadSignupValues } from "./store.js";
+import { readableColumnsByTable } from "./targets.js";
 
 const MODULE_PERMISSION_PREFIX = "user_data.module:";
 
@@ -36,6 +36,8 @@ export async function evaluateSignupFieldsForUser(
   const declaration = resolved.signupFields ?? null;
   const columns = resolved.userColumns ?? {};
   const consent = resolved.declaration;
+  const ownKey = resolved.subject.key;
+  const sources = resolved.signupSources ?? {};
   if (!declaration || !resolved.storageTable) {
     return evaluateSignupFields({ declaration: null, columns, values: {}, deniedModules: new Set(), seen: seenOf(null), consent });
   }
@@ -46,14 +48,19 @@ export async function evaluateSignupFieldsForUser(
     for (const module of modulesOf(pending.denied)) deniedModules.add(module);
   }
 
-  // 識別子にするのは宣言と列定義を照合した有効な列だけ。
-  const readable = declaration.fields.map((f) => f.column).filter((c) => activeColumn(columns, c) !== null);
-  let values: Record<string, unknown> = {};
-  try {
-    values = await loadSignupValues(resolved.storageTable, userId, readable);
-  } catch (err) {
-    // 表が未作成等。未入力として扱う (必須があれば画面で聞き、保存時に誤りが見える)。
-    devLog("signup_fields.loadFailed", { projectKey: resolved.subject.key, error: (err as Error).message });
+  // 識別子にするのは宣言と列定義 (共有元は grant の範囲) を照合した有効な列だけ。
+  const groups = readableColumnsByTable(declaration,
+    { projectKey: ownKey, storageTable: resolved.storageTable, columns }, sources);
+  const values: Record<string, unknown> = {};
+  for (const group of groups) {
+    try {
+      Object.assign(values, await loadSignupValues(group.table, userId, group.columns));
+    } catch (err) {
+      // 表が未作成等。未入力として扱う (必須があれば画面で聞き、保存時に誤りが見える)。
+      devLog("signup_fields.loadFailed", { projectKey: ownKey, source: group.projectKey, error: (err as Error).message });
+    }
   }
-  return evaluateSignupFields({ declaration, columns, values, deniedModules, seen: seenOf(record), consent });
+  return evaluateSignupFields({
+    declaration, columns, ownKey, sources, values, deniedModules, seen: seenOf(record), consent,
+  });
 }

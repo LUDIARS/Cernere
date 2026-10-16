@@ -23,6 +23,7 @@ import { toUserDataParameter } from "./user-data-parameter.js";
 import { validateConsentDeclaration } from "../consent/declaration.js";
 import { capsFromProjectDefinition } from "../consent/permission-keys.js";
 import { validateSignupFieldsDeclaration } from "../signup-fields/declaration.js";
+import { loadSharedProjectDefinitions, sourceProjectsOf } from "../signup-fields/sources.js";
 
 // ── Project definition helpers ───────────────────────────────
 
@@ -237,7 +238,7 @@ export async function registerProject(payload: unknown, userId?: string, deliver
   definition = parsed.data;
   // 登録 (管理者) でも同意の宣言は上限の内側に限る。
   assertConsentDeclaration(definition, null);
-  assertSignupFieldsDeclaration(definition, definition, null);
+  await assertSignupFieldsDeclaration(definition, definition, null);
 
   // 既存チェック
   const existing = await db.select().from(dbSchema.managedProjects)
@@ -425,15 +426,18 @@ export function assertConsentDeclaration(definition: ProjectDefinition, existing
  * 入力項目の宣言を列定義と同意の宣言で検証する (spec/plan/2026-10-15-service-signup-fields-design.md §2)。
  * 送られてきた宣言だけを見る。保存済みの宣言を残す auto-sync で列が消えても更新は止めない
  * (消えた列は判定 (signup-fields/requirement.ts) で聞かなくなる)。
+ * `project` を書いた項目 (共有を受けている列、§8) は共有元の現在の定義で検証する。
  */
-export function assertSignupFieldsDeclaration(
+export async function assertSignupFieldsDeclaration(
   submitted: ProjectDefinition,
   merged: ProjectDefinition,
   existing: ProjectDefinition | null | undefined,
-): void {
+): Promise<void> {
   if (submitted.signup_fields === undefined) return;
+  const ownKey = submitted.project.key;
+  const sources = await loadSharedProjectDefinitions(sourceProjectsOf(submitted.signup_fields, ownKey));
   const checked = validateSignupFieldsDeclaration(submitted.signup_fields, submitted.user_data?.columns ?? {},
-    merged.consent ?? null, existing?.signup_fields?.version ?? null);
+    merged.consent ?? null, existing?.signup_fields?.version ?? null, { ownKey, sources });
   if (!checked.ok) throw AppError.badRequest(`Invalid signup_fields declaration: ${checked.errors.join("; ")}`);
 }
 
@@ -459,7 +463,7 @@ export async function updateProjectSchema(key: string, payload: unknown, userId?
   // DDL より先に宣言を検証する (上限は管理者所有フィールドを合成した後の定義で見る)。
   const merged = preserveExistingDefinitionFields(definition, oldDef);
   assertConsentDeclaration(merged, oldDef);
-  assertSignupFieldsDeclaration(definition, merged, oldDef);
+  await assertSignupFieldsDeclaration(definition, merged, oldDef);
 
   const result = await migrateProjectSchema(key, definition);
 

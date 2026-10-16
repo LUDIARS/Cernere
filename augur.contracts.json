@@ -239,7 +239,7 @@
     },
     {
       "id": "C-27",
-      "criterion": "C-27 validateSignupFieldsDeclaration(raw, columns, consent, previousVersion): 存在しない列・論理削除済みの列・型と input の不一致・推奨 module の列を必須にする宣言を拒否する",
+      "criterion": "C-27 validateSignupFieldsDeclaration(raw, columns, consent, previousVersion, sharing): 存在しない列・論理削除済みの列・型と input の不一致・推奨 module の列を必須にする宣言を拒否し、共有元 project の列は readwrite grant の範囲内にある有効な列だけを受け付ける",
       "symbol": "validateSignupFieldsDeclaration",
       "file": "server/src/signup-fields/declaration.ts",
       "module": "server/src/signup-fields/contracts/declaration.contract.ts",
@@ -248,7 +248,7 @@
     },
     {
       "id": "C-28",
-      "criterion": "C-28 evaluateSignupFields(input): 未入力の必須だけを不足に数え、入力済みの列と拒否された module の列は聞かず、任意は同じ版で一度見せたら再表示しない",
+      "criterion": "C-28 evaluateSignupFields(input): 未入力の必須だけを不足に数え、入力済みの列と拒否された module の列は聞かず、任意は同じ版で一度見せたら再表示しない。共有元の列は今 grant の範囲内にある列だけを聞く",
       "symbol": "evaluateSignupFields",
       "file": "server/src/signup-fields/requirement.ts",
       "module": "server/src/signup-fields/contracts/requirement.contract.ts",
@@ -315,6 +315,15 @@
       "symbol": "checkJoinCode",
       "file": "server/src/federation/policy.ts",
       "module": "server/src/federation/contracts/join-code.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-36",
+      "criterion": "C-36 writableSharedColumns(source, callerProjectKey): 共有元の data_sharing に callerProjectKey への readwrite grant が無ければ null、あれば grant の範囲内にある有効な列だけを返す",
+      "symbol": "writableSharedColumns",
+      "file": "server/src/signup-fields/shared-source.ts",
+      "module": "server/src/signup-fields/contracts/shared-source.contract.ts",
       "mode": "observe",
       "sample": 1
     }

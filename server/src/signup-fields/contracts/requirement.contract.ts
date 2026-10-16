@@ -1,5 +1,6 @@
 // C-28: only unfilled required fields block; filled fields and fields in denied modules are never asked; an
-// optional field is not shown again once the same declaration version has been shown.
+// optional field is not shown again once the same declaration version has been shown. A field of another
+// project is asked only while that project still grants the column (it appears in input.sources).
 import type { SignupFieldsInput, SignupFieldsRequirement } from '../requirement.js';
 
 export default {
@@ -16,6 +17,12 @@ export default {
     if (result.fields.some((f) => f.filled)) return 'a filled field is asked again';
     const denied = input.deniedModules;
     for (const field of result.all) {
+      if (field.project !== null) {
+        const columns = input.sources?.[field.project]?.columns ?? {};
+        const column = Object.prototype.hasOwnProperty.call(columns, field.column) ? columns[field.column] : undefined;
+        if (!column || column._deleted) return `field ${field.column} of ${field.project} is asked without a grant`;
+        continue;
+      }
       const module = input.columns[field.column]?.module;
       if (module && denied.has(module)) return `field ${field.column} of denied module ${module} is asked`;
     }

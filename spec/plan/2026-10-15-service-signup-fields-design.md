@@ -110,7 +110,61 @@ signup_fields:
 - decide: 権限と入力を同じトランザクションで保存、項目エラー時は何も保存しない
 - for_return: Cernere 外の戻り先・未登録 origin は null
 
-## 8. 実装メモ (2026-10-15、actio:8cb286a9-bfd6-4437-b13f-b013bbeb9035)
+## 8. 共有を受けている列 (2026-10-16、actio:35ebe063-6ec0-4a55-89d8-c6515fd1d48d)
+
+背景 (neco 2026-10-16): GLAB (managed project `EducationLab`) はログイン時に 名前・役職・学科 を必須で聞く。
+この 3 列は EducationLab 自身ではなく共通プロフィール project `vantan_user` の `user_data` (module `profile`:
+`name` / `role_title` / `department_name`) にあり、`vantan_user.schema_definition.data_sharing` で EducationLab へ
+`readwrite` 共有されている (migration 027 / 042)。GLAB 側の初回プロフィール画面は Cernere の入力で置き換える。
+
+### 8.1 宣言
+
+各 field に任意の `project` を足す。省略時 (または自分の key と同じ) は今どおり自分の列。
+
+```yaml
+signup_fields:
+  version: 1
+  fields:
+    - { project: vantan_user, column: name, label: "名前", required: true, input: text, max_length: 200 }
+```
+
+`project` を指定した field は、次を全て満たすときだけ保存を受け付ける (満たさなければ保存拒否):
+
+- その project が存在する
+- その project の `data_sharing` に、この project への grant があり `access` が `readwrite`
+- 列がその project の `user_data.columns` に存在し `_deleted` でない
+- 列が grant の範囲内 (`columns` を書いた grant はその列挙、`modules` を書いた grant はその module の列)。
+  判定は `project/data-sharing.ts` の読み書きと同じ純粋関数 (`project/data-sharing-grant.ts`) を使う
+- 列の型と `input` が合う (§2 と同じ)
+
+共有元の列の module はこのサービスの consent 宣言とは別物なので、「推奨 module の列を必須にできない」検査と
+「同意で拒否された module の列は聞かない」判定は自分の列にだけ掛ける。
+**列名は宣言全体で一意** (project が違っても同じ列名は 2 つ書けない)。画面・入力値・`fields_seen` のキーは列名のまま。
+
+### 8.2 読み書き
+
+- 解決 (`consent/project-resolver.ts`) で、宣言が参照する共有元 project ごとに `storage_slug` → 表名
+  (`project/storage-resolver.ts`) と、**いま** readwrite grant の範囲内にある有効な列を引く。
+  宣言後に grant が外れた・列が消えた列は聞かない・書かない (fail closed)。
+- 値の読み込みは field ごとの保存先表から、書き込みは保存先表ごとに `ON CONFLICT (user_id)` の upsert 1 文。
+  同意と同じトランザクションに載せる。書けるのは検証済みの列だけ、値はパラメータ。
+- 行の利用者番号は今どおり (サービス境界では `resolveServiceSubject` の連携番号)。
+- 保存後は自分と共有元 project の user_data キャッシュを捨てる。
+
+### 8.3 画面の「誰が読めるか」
+
+共有元の列は、共有元の `data_sharing` の grant (read / readwrite) がその列を含む project を Cernere 側で計算し、
+「このサービス / 他のサービス: <名前>、…」と出す (このサービス自身は「このサービス」に含める)。
+自分の列は今どおり consent の visible_to (無ければ「このサービス」)。
+
+### 8.4 EducationLab の登録 (migration 074)
+
+- `schema_definition.endpoint.frontend_url` を `https://glab.ai-run-do.com` に (origin → project 解決のため)。`endpoint.url` は変えない
+- `schema_definition.signup_fields` に 名前・役職・学科 (`vantan_user` の列、必須、text、200 文字)
+- 1 文の UPDATE (`WHERE key = 'EducationLab'`)。行が無い DB では何もしない。再実行しても同じ結果。DROP なし
+- `server/service/education-lab/schema.json` も同じ内容に揃える
+
+## 9. 実装メモ (2026-10-15、actio:8cb286a9-bfd6-4437-b13f-b013bbeb9035)
 
 - 配置: `server/src/signup-fields/` — `declaration-schema.ts` (形) / `declaration.ts` (列・consent との突き合わせ、C-27) /
   `requirement.ts` (要否、C-28) / `values.ts` (入力値の検証、C-29) / `return-target.ts` (戻り先、C-30) /

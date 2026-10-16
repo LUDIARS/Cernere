@@ -6,11 +6,14 @@
  * - 入力済みの列は聞かない
  * - 同意で拒否された module の列は聞かない (必須でも。宣言の検証で推奨 module の列は必須にならない)
  * - 任意は、同じ版で一度見せたら空のままでも再表示しない。版が上がったら、まだ見せていない列だけ出す
+ * - 共有を受けている列 (field.project、設計書 §8) は、いま grant の範囲内にある列 (sources) だけ聞く。
+ *   拒否 module・consent の visible_to は自分の列にだけ掛ける
  */
 
 import type { ConsentDeclaration, DeclaredVisibility } from "../consent/declaration-schema.js";
 import { activeColumn, type SignupColumns } from "./declaration.js";
 import { textLimitOf, type SignupField, type SignupFieldsDeclaration } from "./declaration-schema.js";
+import { fieldSourceProject } from "./shared-source.js";
 import { contract } from '@ludiars/log-weaver'; /* augur-inject:import:066843ab */
 import augurContract_66b85569 from './contracts/requirement.contract.js'; /* augur-inject:contract-predicate:5a255e6b */
 
@@ -20,9 +23,20 @@ export interface SignupFieldsSeen {
   columns: readonly string[];
 }
 
+/** 共有元 project の、いま書ける列と、列ごとの他の共有先 (サービス名)。 */
+export interface SignupSourceColumns {
+  columns: SignupColumns;
+  sharedWith: Readonly<Record<string, readonly string[]>>;
+}
+
 export interface SignupFieldsInput {
   declaration: SignupFieldsDeclaration | null;
+  /** 自分の project の列 */
   columns: SignupColumns;
+  /** 宣言する project の key (field.project が自分を指すときに自分の列として扱う) */
+  ownKey?: string | null;
+  /** 共有元 project の key → 書ける列。grant が無い project は載らない */
+  sources?: Readonly<Record<string, SignupSourceColumns>>;
   /** 本人の行の現在の値。行が無ければ {} */
   values: Readonly<Record<string, unknown>>;
   /** 同意で拒否された (= 値を渡さない) user_data の module */
@@ -33,6 +47,8 @@ export interface SignupFieldsInput {
 }
 
 export interface SignupFieldView {
+  /** 保存先 project (共有を受けている列)。自分の列は null */
+  project: string | null;
   column: string;
   label: string;
   required: boolean;
@@ -46,6 +62,8 @@ export interface SignupFieldView {
   options: Array<{ value: string; label: string }> | null;
   /** その列の module の consent 宣言の visible_to。宣言が無ければ null (= このサービス) */
   visibleTo: DeclaredVisibility[] | null;
+  /** 共有を受けている列の、このサービス以外の共有先 (サービス名)。自分の列は null */
+  sharedWith: string[] | null;
   /** 現在の値 (未入力は null) */
   value: string | number | boolean | null;
   filled: boolean;
@@ -87,6 +105,14 @@ function visibilityOf(consent: ConsentDeclaration | null, module: string | undef
   return permission ? [...permission.visible_to] : null;
 }
 
+function sourceOf(input: SignupFieldsInput, project: string): SignupSourceColumns | null {
+  return input.sources && Object.prototype.hasOwnProperty.call(input.sources, project) ? input.sources[project] : null;
+}
+
+function ownList(record: Readonly<Record<string, readonly string[]>>, key: string): readonly string[] | undefined {
+  return Object.prototype.hasOwnProperty.call(record, key) ? record[key] : undefined;
+}
+
 /** 契約 C-28 (server/src/signup-fields/contracts/requirement.contract.ts) は augur inject が包む。 */
 export function evaluateSignupFields(input: SignupFieldsInput): SignupFieldsRequirement {
   const { declaration } = input;
@@ -94,11 +120,15 @@ export function evaluateSignupFields(input: SignupFieldsInput): SignupFieldsRequ
 
   const all: SignupFieldView[] = [];
   for (const field of declaration.fields) {
-    const column = activeColumn(input.columns, field.column);
-    // 宣言後に列が消された / module を拒否された列は聞かない。
-    if (!column || (column.module && input.deniedModules.has(column.module))) continue;
+    const project = fieldSourceProject(field, input.ownKey ?? null);
+    const source = project === null ? null : sourceOf(input, project);
+    if (project !== null && !source) continue;
+    const column = activeColumn(source ? source.columns : input.columns, field.column);
+    // 宣言後に列が消された / grant が外れた / module を拒否された列は聞かない。
+    if (!column || (!source && column.module && input.deniedModules.has(column.module))) continue;
     const raw = input.values[field.column];
     all.push({
+      project,
       column: field.column,
       label: field.label,
       required: field.required,
@@ -108,7 +138,8 @@ export function evaluateSignupFields(input: SignupFieldsInput): SignupFieldsRequ
       placeholder: field.placeholder ?? null,
       help: field.help ?? null,
       options: field.options ? field.options.map((o) => ({ value: o.value, label: o.label })) : null,
-      visibleTo: visibilityOf(input.consent, column.module),
+      visibleTo: source ? null : visibilityOf(input.consent, column.module),
+      sharedWith: source ? [...(ownList(source.sharedWith, field.column) ?? [])] : null,
       value: isFilled(raw) ? displayValue(raw) : null,
       filled: isFilled(raw),
     });

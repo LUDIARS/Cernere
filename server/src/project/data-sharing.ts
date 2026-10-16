@@ -17,28 +17,10 @@ import * as dbSchema from "../db/schema.js";
 import { AppError } from "../error.js";
 import type { ProjectDefinition } from "./schema.js";
 import { getUserColumns, setUserData } from "./service.js";
+import { findShareGrant, isColumnAllowedByGrant, type ShareColumns } from "./data-sharing-grant.js";
 
-type ColumnMap = Record<string, { type: string; module?: string; _deleted?: boolean }>;
-type DataSharingEntry = NonNullable<ProjectDefinition["data_sharing"]>[number];
-
-function extractColumns(definition: ProjectDefinition | null | undefined): ColumnMap {
-  return (definition?.user_data?.columns ?? {}) as ColumnMap;
-}
-
-function isColumnAllowedByGrant(
-  columnName: string,
-  columns: ColumnMap,
-  entry: DataSharingEntry,
-): boolean {
-  const column = columns[columnName];
-  if (!column || column._deleted) return false;
-
-  if (entry.modules && entry.modules.length > 0) {
-    if (!column.module || !entry.modules.includes(column.module)) return false;
-  }
-
-  // columns 未指定は既存定義との互換モード。明示した空配列は deny-all として扱う。
-  return entry.columns === undefined || entry.columns.includes(columnName);
+function extractColumns(definition: ProjectDefinition | null | undefined): ShareColumns {
+  return (definition?.user_data?.columns ?? {}) as ShareColumns;
 }
 
 /**
@@ -54,9 +36,7 @@ export function resolveSharedColumnNames(
   targetDefinition: ProjectDefinition,
   requestedColumns?: string[],
 ): string[] {
-  const shares = targetDefinition.data_sharing ?? [];
-  const entry = shares.find((s) =>
-    s.project_key === callerProjectKey && (s.access === "read" || s.access === "readwrite"));
+  const entry = findShareGrant(targetDefinition.data_sharing, callerProjectKey, ["read", "readwrite"]);
 
   if (!entry) {
     throw AppError.forbidden(
@@ -87,8 +67,7 @@ export function resolveSharedWritableColumnNames(
   targetDefinition: ProjectDefinition,
   requestedColumns: string[],
 ): string[] {
-  const entry = (targetDefinition.data_sharing ?? []).find((share) =>
-    share.project_key === callerProjectKey && share.access === "readwrite");
+  const entry = findShareGrant(targetDefinition.data_sharing, callerProjectKey, ["readwrite"]);
   if (!entry) {
     throw AppError.forbidden(
       `Project "${callerProjectKey}" has no readwrite data_sharing grant on project "${targetDefinition.project.key}"`,

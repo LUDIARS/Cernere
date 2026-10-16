@@ -14,6 +14,8 @@ export type SignupFieldVisibility = "self" | "service_users" | "public";
 export type SignupFieldValue = string | number | boolean | null;
 
 export interface SignupFieldView {
+  /** 保存先 project (共有を受けている列)。このサービス自身の列は null */
+  project: string | null;
   column: string;
   label: string;
   required: boolean;
@@ -25,6 +27,8 @@ export interface SignupFieldView {
   options: Array<{ value: string; label: string }> | null;
   /** その列の module の consent 宣言の visible_to。null = このサービス */
   visibleTo: SignupFieldVisibility[] | null;
+  /** 共有を受けている列の、このサービス以外の共有先 (サービス名)。このサービス自身の列は null */
+  sharedWith: string[] | null;
   value: SignupFieldValue;
   filled: boolean;
 }
