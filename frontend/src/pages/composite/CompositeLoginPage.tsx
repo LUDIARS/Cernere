@@ -21,6 +21,7 @@ import { CompositeLogin } from "@ludiars/cernere-composite/ui";
 import { useCompositeLoginSession } from "../../hooks/useCompositeLoginSession";
 import { continueMenuUrl } from "../continue/continue-links";
 import { CERNERE_LOGIN_LABELS } from "./composite-login-labels";
+import { passkeyEnrollmentUrl } from "../../lib/passkey-enrollment";
 
 const API_BASE = "";
 
@@ -94,6 +95,7 @@ export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
           recoverUrl="/recover"
           labels={CERNERE_LOGIN_LABELS}
           passkeyAutoStart={session.passkeyAutoReady}
+          alternatives={<a href={passkeyEnrollmentUrl(returnTarget(self, params))}>この端末にパスキーを登録する</a>}
           style={{ maxWidth: 400 }}
         />
       </div>

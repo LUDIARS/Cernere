@@ -62,8 +62,9 @@ export function useCompositeLoginSession(args: CompositeLoginSessionArgs): Compo
   const adapter = useMemo(
     () => new CernereCompositeAuthAdapter(apiBase, self ? null : (origin ?? redirectUri), origin ? "post_message" : "redirect",
       // 引き継ぎメニューの ①: 別の端末のパスキー (QR) を先に出させる。
-      wantsCrossDevice(window.location.search)),
-    [apiBase, self, origin, redirectUri],
+      wantsCrossDevice(window.location.search),
+      self ? (redirectParam ?? "/") : window.location.pathname + window.location.search),
+    [apiBase, self, origin, redirectUri, redirectParam],
   );
   useEffect(() => () => adapter.dispose(), [adapter]);
 

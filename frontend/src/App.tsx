@@ -29,6 +29,7 @@ import { ContinueMenuPage } from "./pages/continue/ContinueMenuPage";
 import { JoinRequestPage } from "./pages/federate/JoinRequestPage";
 import { ApprovePage } from "./pages/federate/ApprovePage";
 import { FederationPage } from "./pages/settings/FederationPage";
+import { PasskeyEnrollmentPage } from "./pages/PasskeyEnrollmentPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -78,6 +79,7 @@ function AppRoutes() {
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
       {/* 引き継ぎメニュー (押したログインでパスキーが見つからなかったとき)。account-federation §4 */}
       <Route path="/continue" element={<ContinueMenuPage />} />
+      <Route path="/passkeys/register" element={<PasskeyEnrollmentPage />} />
       {/* 引き継ぎ: 加わる側 (新しい端末 / 既存アカウント) と承認する側 (使っている端末) */}
       <Route path="/federate/join" element={<JoinRequestPage />} />
       <Route path="/federate/approve" element={<ApprovePage />} />

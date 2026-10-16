@@ -14,6 +14,9 @@ import type {
   PasskeyLoginBeginResult,
 } from "@ludiars/cernere-composite/ui";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/browser";
+import { auth } from "./api";
+import { isMobileDevice } from "./device-kind";
+import { passkeyEnrollmentUrl, shouldOfferPcEnrollment } from "./passkey-enrollment";
 
 async function postJson<T>(url: string, body: unknown, fallbackError: string): Promise<T> {
   const res = await fetch(url, {
@@ -44,6 +47,8 @@ export class CernereCompositeAuthAdapter implements CompositeAuthApi {
     private readonly targetMode: "post_message" | "redirect" = "post_message",
     /** 引き継ぎメニューの ① (別の端末のパスキーで入る)。WebAuthn の hints で QR (hybrid) を先に出させる */
     private readonly crossDevice: boolean = false,
+    /** Original local destination, resumed through the normal consent/target checks after enrollment. */
+    private readonly enrollmentReturnTo: string | null = null,
   ) {}
 
   async passkeyLoginBegin(): Promise<PasskeyLoginBeginResult> {
@@ -54,10 +59,18 @@ export class CernereCompositeAuthAdapter implements CompositeAuthApi {
   }
 
   async passkeyLoginFinish(params: { challengeOwner: string; response: AuthenticationResponseJSON }): Promise<CompositeAuthResponse> {
+    const offerEnrollment = this.enrollmentReturnTo !== null
+      && shouldOfferPcEnrollment(params.response.authenticatorAttachment, isMobileDevice(), this.enrollmentReturnTo);
     const data = await postJson<{ authCode?: string }>(
       `${this.apiBase}/api/auth/passkey/composite-login-finish`,
-      this.target ? { ...params, target: this.target, targetMode: this.targetMode } : params, "Passkey login failed");
+      this.target && !offerEnrollment ? { ...params, target: this.target, targetMode: this.targetMode } : params, "Passkey login failed");
     if (!data.authCode) throw new Error("Passkey login failed");
+    if (offerEnrollment && this.enrollmentReturnTo !== null) {
+      // Obtain only a Cernere session here. Service consent and authorization still run on return.
+      await auth.exchangeAuthCode(data.authCode);
+      window.location.assign(passkeyEnrollmentUrl(this.enrollmentReturnTo));
+      return new Promise<CompositeAuthResponse>(() => { /* Navigation replaces this page; do not deliver a consumed code. */ });
+    }
     return { authCode: data.authCode };
   }
 

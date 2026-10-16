@@ -142,7 +142,7 @@ export const auth = {
   // ── Passkey (WebAuthn / Face ID / Touch ID / Windows Hello / Android 生体 / 物理キー) ──
 
   /** 現在のユーザに passkey を新規登録する。 ブラウザが OS の生体認証ダイアログを開く */
-  async passkeyRegister(nickname?: string): Promise<{ ok: true; credentialId: string }> {
+  async passkeyRegister(nickname?: string, options?: { platformOnly?: boolean }): Promise<{ ok: true; credentialId: string }> {
     const existing = await this.passkeyList();
     const currentUser = getStoredUser();
     if (existing.items.length > 0 && !currentUser) {
@@ -156,7 +156,9 @@ export const auth = {
       headers: proof ? { "X-Cernere-Action-Proof": proof } : undefined,
       body: JSON.stringify({}),
     });
-    const response = await startRegistration({ optionsJSON: opts });
+    const response = await startRegistration({ optionsJSON: options?.platformOnly
+      ? { ...opts, authenticatorSelection: { ...opts.authenticatorSelection, authenticatorAttachment: "platform" } }
+      : opts });
     const res = await request<{ ok: true; credentialId: string }>("/api/auth/passkey/register-finish", {
       method: "POST", body: JSON.stringify({ response, nickname: nickname ?? null }),
     });
