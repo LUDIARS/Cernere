@@ -58,8 +58,8 @@ function ServiceConsentCard(props: { item: ServiceConsentItem; onChanged: (item:
 
   return (
     <div style={{ padding: "1rem", marginBottom: "0.75rem", borderRadius: "var(--radius)", border: `1px solid ${revoked ? "var(--red)" : "var(--border)"}` }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
-        <strong>{item.serviceName}</strong>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.25rem 0.5rem", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+        <strong style={{ minWidth: 0, overflowWrap: "anywhere" }}>{item.serviceName}</strong>
         <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
           {revoked ? `利用停止: ${new Date(item.revokedAt!).toLocaleString("ja-JP")}`
             : item.decidedAt ? `確認: ${new Date(item.decidedAt).toLocaleString("ja-JP")}` : ""}
@@ -86,7 +86,7 @@ function ServiceConsentCard(props: { item: ServiceConsentItem; onChanged: (item:
         />
       )}
       {message && <p role="status" style={{ fontSize: "0.8rem", margin: "0 0 0.5rem" }}>{message}</p>}
-      <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", justifyContent: "flex-end" }}>
         {!revoked && (
           <button type="button" className="danger" disabled={busy} onClick={() => void run("revoke")}
             style={{ fontSize: "0.8rem", padding: "0.3rem 0.75rem" }}>

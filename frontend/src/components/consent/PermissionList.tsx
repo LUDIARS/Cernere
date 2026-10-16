@@ -15,7 +15,7 @@ const rowStyle: CSSProperties = {
   borderTop: "1px solid var(--border)", fontSize: "0.85rem",
 };
 const badge = (color: string): CSSProperties => ({
-  fontSize: "0.68rem", padding: "0.05rem 0.4rem", borderRadius: "8px", marginLeft: "0.4rem",
+  fontSize: "0.68rem", padding: "0.05rem 0.4rem", borderRadius: "8px",
   border: `1px solid ${color}`, color, whiteSpace: "nowrap",
 });
 
@@ -34,11 +34,11 @@ function PermissionRow(props: {
         checked={checked}
         disabled={locked}
         onChange={(e) => onToggle?.(permission.key, e.target.checked)}
-        style={{ marginTop: "0.2rem" }}
+        style={{ width: "1rem", height: "1rem", flex: "0 0 1rem", margin: "0.2rem 0 0", padding: 0 }}
       />
-      <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 600 }}>
-          {permissionLabel(permission)}
+      <div style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: "0.25rem 0.4rem", fontWeight: 600 }}>
+          <span style={{ minWidth: 0 }}>{permissionLabel(permission)}</span>
           {permission.sharedBeyondSelf && <span style={badge("var(--red)")} title="あなた以外も読めます">他の人も読める</span>}
           {permission.isNew && <span style={badge("var(--accent)")}>新規</span>}
         </div>
