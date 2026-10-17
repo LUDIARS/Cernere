@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { compositeFramePolicy } from "./frame-ancestors.ts";
 
 // 認証 UI の本流は埋め込み SDK (packages/composite)。 Cernere フロントは publish 済み
 // パッケージではなく同一リポのソースを直接取り込む (file: 依存だと install 前に dist を
@@ -47,7 +48,7 @@ const proxy = {
 };
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [compositeFramePolicy(backendUrl), react()],
   resolve: {
     alias: {
       "@ludiars/cernere-composite/ui": compositeUiSrc,

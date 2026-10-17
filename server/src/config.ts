@@ -137,6 +137,9 @@ export const config = {
     );
   })(),
 
+  // Enable only after the frontend enforces the server-owned CSP frame-ancestors.
+  webauthnLegacyFramePolicyEnabled: env("CERNERE_WEBAUTHN_LEGACY_FRAME_POLICY", "false") === "true",
+
   // ── WebAuthn / Passkey ────────────────────────────────────
   // RP ID は eTLD+1 (例: cernere.example.com → cernere.example.com、
   // または親ドメイン example.com)。 ブラウザは window.location.origin を見て

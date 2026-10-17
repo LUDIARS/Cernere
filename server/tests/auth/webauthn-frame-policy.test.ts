@@ -10,7 +10,12 @@ describe("WebAuthn embedding boundary", () => {
   it("accepts the exact allowed signed top origin", () => {
     expect(() => assertWebauthnFrameAllowed(encode({ crossOrigin: true, topOrigin: allowed[0] }), allowed)).not.toThrow();
   });
-  it.each([undefined, "https://evil.example", "https://glab.example/path", "null"])("rejects missing or untrusted topOrigin %s", topOrigin => {
+  it("supports Level 2 clients without topOrigin under the hosted frame policy", () => {
+    expect(() => assertWebauthnFrameAllowed(encode({ crossOrigin: true }), allowed, true)).not.toThrow();
+    expect(() => assertWebauthnFrameAllowed(encode({ crossOrigin: true }), allowed)).toThrow();
+    expect(() => assertWebauthnFrameAllowed(encode({ crossOrigin: true }), [])).toThrow();
+  });
+  it.each([null, 12, "https://evil.example", "https://glab.example/path", "null"])("rejects invalid or untrusted topOrigin %s", topOrigin => {
     expect(() => assertWebauthnFrameAllowed(encode({ crossOrigin: true, topOrigin }), allowed)).toThrow();
   });
   it("fails closed without an embedding allowlist", () => {

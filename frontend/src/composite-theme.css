@@ -1,4 +1,10 @@
 /* SPEC-COMPOSITE-DEVICE-THEME-001: native media queries also follow live OS changes. */
+:root[data-composite-embedded="true"],
+:root[data-composite-embedded="true"] body {
+  background: transparent;
+  min-height: 0;
+}
+
 :root[data-composite-theme="device"] {
   color-scheme: dark;
   --button-text: #0d1117;

@@ -4,12 +4,12 @@ import { assertWebauthnFrameAllowed } from "./webauthn-frame-policy.js";
 
 /** @implements SPEC-EMBEDDED-COMPOSITE-001 */
 export function verifyAuthenticationResponse(options: Parameters<typeof authenticate>[0]): ReturnType<typeof authenticate> {
-  assertWebauthnFrameAllowed(options.response.response.clientDataJSON, config.compositeAllowedOrigins);
+  assertWebauthnFrameAllowed(options.response.response.clientDataJSON, config.compositeAllowedOrigins, config.webauthnLegacyFramePolicyEnabled);
   return authenticate(options);
 }
 
 /** @implements SPEC-EMBEDDED-COMPOSITE-001 */
 export function verifyRegistrationResponse(options: Parameters<typeof register>[0]): ReturnType<typeof register> {
-  assertWebauthnFrameAllowed(options.response.response.clientDataJSON, config.compositeAllowedOrigins);
+  assertWebauthnFrameAllowed(options.response.response.clientDataJSON, config.compositeAllowedOrigins, config.webauthnLegacyFramePolicyEnabled);
   return register(options);
 }

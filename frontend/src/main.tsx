@@ -9,6 +9,7 @@ import "./composite-theme.css";
 if (window.self !== window.top || window.location.pathname.startsWith("/composite/")) {
   document.documentElement.dataset.compositeTheme = "device";
 }
+if (window.self !== window.top) document.documentElement.dataset.compositeEmbedded = "true";
 
 const queryClient = new QueryClient({
   defaultOptions: {
