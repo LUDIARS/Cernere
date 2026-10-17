@@ -2,16 +2,28 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CompositeLoginPage } from "../../../frontend/src/pages/composite/CompositeLoginPage";
+import { LoginAttempt } from "../../../frontend/src/pages/composite/LoginAttempt";
 import { RecoveryEntryPage } from "../../../frontend/src/pages/RecoveryEntryPage";
 import { hasLoginCookie, rememberLoginCookie } from "../../../frontend/src/lib/login-cookie";
 
 const session = vi.hoisted(() => vi.fn(() => { throw new Error("Authentication started before login click"); }));
 vi.mock("../../../frontend/src/hooks/useCompositeLoginSession", () => ({ useCompositeLoginSession: session }));
-vi.mock("@ludiars/cernere-composite/ui", () => ({ CompositeLogin: () => { throw new Error("WebAuthn UI mounted before login click"); } }));
+vi.mock("@ludiars/cernere-composite/ui", () => ({
+  CompositeLogin: () => { throw new Error("Legacy login UI must never mount"); },
+  usePasskeyLogin: () => ({ phase: "fallback", hasAttempted: true }),
+}));
 
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe("explicit Cernere login entry", () => {
+  it("keeps authentication and cancellation status free of legacy login controls", () => {
+    vi.stubGlobal("window", { location: { search: "" } });
+    session.mockReturnValueOnce({ adapter: {}, passkeyAutoReady: true, blockedReason: "", handoffError: "", deliver: vi.fn() } as never);
+    const html = renderToStaticMarkup(createElement(LoginAttempt, { self: true, choice: { crossDevice: false, enroll: true }, onBusy: vi.fn() }));
+    expect(html).toContain("ログインは完了していません");
+    expect(html).not.toContain("<button");
+    expect(html).not.toContain("<a");
+  });
   it.each([true, false])("does not start authentication on opening (self=%s)", (self) => {
     vi.stubGlobal("window", { location: {
       origin: "https://cernere.example.com",
@@ -26,6 +38,8 @@ describe("explicit Cernere login entry", () => {
     expect(html).toContain("この端末のパスキーを登録して連携");
     expect(html).toContain('checked=""');
     expect(html).toContain('href="/recover"');
+    expect(html).toContain("border-radius:var(--radius, 8px)");
+    expect(html).toContain("background:var(--bg-surface, #fff)");
   });
   it("shows normal passkey login for returning cookies without starting authentication", () => {
     vi.stubGlobal("window", { location: { pathname: "/login", search: "", origin: "https://cernere.example.com" } });

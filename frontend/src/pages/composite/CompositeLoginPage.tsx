@@ -1,120 +1,23 @@
-/**
- * Composite Login Page
- *
- * 他サービスから popup / 同一窓で開かれるスタンドアロンログインページ。Cernere 自身の
- * /login もこのページを使う (self モード)。認証 UI は埋め込み SDK の <CompositeLogin> を描画する。
- * 送信先検証・silent SSO・authCode の引き渡しは hooks/useCompositeLoginSession、
- * 通信は lib/composite-auth-adapter.ts が担う。
- *
- * ログインはパスキーのみで、登録とログインを区別しない (SPEC-PASSKEY-CONTINUE)。
- * 「新しく始める」は Cernere のこの origin でパスキーを作り、/onboarding (名前・リカバリー QR・
- * 別端末の追加) を済ませてからこのページへ戻る。「ログイン」を押した後に SSO で authCode を渡す。
- *
- * Query params:
- *   origin       - postMessage 送信先 (popup モード)
- *   redirect_uri - リダイレクト先 (redirect モード)
- *   redirect     - self モードの戻り先 (ローカルパスのみ)
- */
-
-import { useState, type CSSProperties } from "react";
-import { CompositeLogin } from "@ludiars/cernere-composite/ui";
-import { useCompositeLoginSession } from "../../hooks/useCompositeLoginSession";
-import { continueMenuUrl } from "../continue/continue-links";
-import { CERNERE_LOGIN_LABELS } from "./composite-login-labels";
-import { passkeyEnrollmentUrl } from "../../lib/passkey-enrollment";
+﻿/** Cernere login keeps one entry card throughout authentication. */
+import { useState } from "react";
 import { LoginEntry, type LoginChoice } from "./LoginEntry";
+import { LoginAttempt } from "./LoginAttempt";
+import { resolveSelfRedirectTarget } from "../../lib/composite-auth-handoff";
 
-const API_BASE = "";
-
-const shellStyle: CSSProperties = {
-  minHeight: "100vh",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  background: "var(--bg)",
-};
-
-const noticeStyle: CSSProperties = {
-  width: 400,
-  background: "var(--bg-surface)",
-  border: "1px solid var(--red)",
-  borderRadius: "var(--radius)",
-  padding: "1.5rem",
-  color: "var(--red)",
-  fontSize: "0.9rem",
-};
-
-/** 作成後に戻る場所。self は ?redirect=、composite はこのページ自身 (silent SSO で authCode を渡す)。 */
-function returnTarget(self: boolean, params: URLSearchParams): string {
-  if (!self) return window.location.pathname + window.location.search;
-  const redirect = params.get("redirect");
-  return redirect && redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/";
-}
-
-/**
- * self モード: Cernere 単独フロントの /login がこのページをそのまま使う。
- * 認証処理は composite と共通 (authCode 発行まで同一) で、最後だけ
- * /api/auth/exchange で自分のトークンに交換してアプリへ入る。
- */
 export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
-  const [choice, setChoice] = useState<LoginChoice | null>(null);
+  const [attempt, setAttempt] = useState<(LoginChoice & { id: number }) | null>(null);
+  const [busy, setBusy] = useState(false);
   const params = new URLSearchParams(window.location.search);
-  if (choice) return <ActiveCompositeLoginPage self={self} choice={choice} />;
-
-  // Mount the session hook only after an explicit action: it also performs SSO.
-  return (
-    <main style={shellStyle}>
-      <LoginEntry returnTo={returnTarget(self, params)} onLogin={setChoice} />
-    </main>
-  );
-}
-
-function ActiveCompositeLoginPage({ self, choice }: { self: boolean; choice: LoginChoice }) {
-  const params = new URLSearchParams(window.location.search);
-  const origin = self ? null : params.get("origin");
-  const redirectUri = self ? null : params.get("redirect_uri");
-
-  const session = useCompositeLoginSession({
-    self,
-    origin,
-    redirectUri,
-    redirectParam: params.get("redirect"),
-    apiBase: API_BASE,
-    crossDevice: choice.crossDevice,
-    enrollAfterLogin: choice.enroll,
-  });
-
-  // 押したログインでパスキーが見つからなかったら、引き継ぎメニューへ (account-federation §4)。
-  // ここでは何も作らない。メニューから ① 別の端末で入る / ② この端末を引き継ぐ / ③ はじめて使う を選ぶ。
-  const createAccount = () => {
-    window.location.assign(continueMenuUrl(returnTarget(self, params), window.location.pathname + window.location.search));
+  const returnTo = self
+    ? resolveSelfRedirectTarget(params.get("redirect") ?? "/", window.location.origin)
+    : window.location.pathname + window.location.search;
+  const start = (choice: LoginChoice) => {
+    setBusy(true);
+    setAttempt(previous => ({ ...choice, id: (previous?.id ?? 0) + 1 }));
   };
-
-  if (session.blockedReason) {
-    return (
-      <div style={shellStyle}>
-        <div style={noticeStyle}>{session.blockedReason}</div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={shellStyle}>
-      <div style={{ width: 400 }}>
-        {session.handoffError && (
-          <div style={{ ...noticeStyle, width: "auto", marginBottom: "1rem" }}>{session.handoffError}</div>
-        )}
-        <CompositeLogin
-          authApi={session.adapter}
-          onAuthCode={session.deliver}
-          onCreateAccount={createAccount}
-          recoverUrl="/recover"
-          labels={CERNERE_LOGIN_LABELS}
-          passkeyAutoStart={session.passkeyAutoReady}
-          alternatives={<a href={passkeyEnrollmentUrl(returnTarget(self, params))}>この端末にパスキーを登録する</a>}
-          style={{ maxWidth: 400 }}
-        />
-      </div>
-    </div>
-  );
+  return <main style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)", padding: "1rem", boxSizing: "border-box" }}>
+    <LoginEntry returnTo={returnTo} onLogin={start} busy={busy}>
+      {attempt && <LoginAttempt key={attempt.id} self={self} choice={attempt} onBusy={setBusy} />}
+    </LoginEntry>
+  </main>;
 }
