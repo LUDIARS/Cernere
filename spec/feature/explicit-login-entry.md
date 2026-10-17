@@ -22,4 +22,6 @@ Human requirement: Cr must not begin authentication immediately on opening.
 - The login button starts the existing authentication component; destination query parameters are retained.
 - The entry layout fits a narrow viewport without a fixed-width panel.
 - Enrollment checkbox and its full label occupy one horizontal line. Override global input width/padding with a fixed 1rem checkbox and use responsive card side padding; do not rely only on flexShrink. This requirement follows the second reported checkbox-layout regression on 2026-10-17.
+- Display `スマホでログインする場合、` immediately above the single-line checkbox label `この端末のパスキーを登録して連携`. Associate the context through aria-describedby.
+- Place the recovery link at the lower right with 3rem separation from the login controls. Place an expandable help explanation at the upper right; opening help does not begin authentication or navigate away.
 - Cookie/no-cookie rendering, default checkbox, recovery destinations and both enrollment choices have regression coverage.
