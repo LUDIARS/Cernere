@@ -1,4 +1,5 @@
 /** Browser storage for native Cr authentication; device secrets remain in HttpOnly cookies. */
+import { rememberLoginCookie } from "./login-cookie";
 let deviceAccessToken: string | null = null;
 const KIND_KEY = "cernere_session_kind";
 export function usesDeviceSession(): boolean { return localStorage.getItem(KIND_KEY) === "device"; }
@@ -17,6 +18,7 @@ export function setTokens(access: string, refresh: string): void {
     localStorage.setItem("refreshToken", refresh);
   }
   localStorage.setItem("cernere_returning", "1");
+  rememberLoginCookie();
 }
 export function clearTokens(): void {
   deviceAccessToken = null;

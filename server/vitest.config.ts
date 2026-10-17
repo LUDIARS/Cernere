@@ -1,6 +1,13 @@
 import { defineConfig } from "vitest/config";
+import { fileURLToPath } from "node:url";
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      react: fileURLToPath(new URL("./node_modules/react", import.meta.url)),
+      "@ludiars/cernere-composite/ui": fileURLToPath(new URL("../packages/composite/src/ui/index.ts", import.meta.url)),
+    },
+  },
   test: {
     include: ["tests/**/*.test.ts"],
     environment: "node",

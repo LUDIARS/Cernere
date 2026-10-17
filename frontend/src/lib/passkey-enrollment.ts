@@ -8,7 +8,7 @@ export function passkeyEnrollmentUrl(returnTo: string, origin = window.location.
 }
 
 /** Attachment is a UX hint, never proof that a PC has (or lacks) a credential. */
-export function shouldOfferPcEnrollment(attachment: string | null | undefined, mobile: boolean, returnTo: string, origin = window.location.origin): boolean {
-  return !mobile && attachment === "cross-platform"
+export function shouldOfferPcEnrollment(attachment: string | null | undefined, mobile: boolean, returnTo: string, origin = window.location.origin, requested = false): boolean {
+  return (requested || (!mobile && attachment === "cross-platform"))
     && new URL(resolveSelfRedirectTarget(returnTo, origin), origin).pathname !== PASSKEY_ENROLLMENT_PATH;
 }

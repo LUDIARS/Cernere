@@ -27,6 +27,20 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("enrollment authentication boundary", () => {
+  it("does not enroll after smartphone login when the checkbox is unchecked", async () => {
+    const adapter = new CernereCompositeAuthAdapter("", target, "redirect", true, null);
+    expect(await adapter.passkeyLoginFinish(params("cross-platform"))).toEqual({ authCode: "one-time-code" });
+    expect(exchange).not.toHaveBeenCalled();
+    expect(assign).not.toHaveBeenCalled();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ target, targetMode: "redirect" });
+  });
+  it("honors checked smartphone enrollment even without an external attachment hint", async () => {
+    const adapter = new CernereCompositeAuthAdapter("", target, "redirect", true, returnTo);
+    void adapter.passkeyLoginFinish(params("platform"));
+    await vi.waitFor(() => expect(assign).toHaveBeenCalledOnce());
+    expect(exchange).toHaveBeenCalledOnce();
+    expect(assign.mock.calls[0][0]).toContain("/passkeys/register?");
+  });
   it("exchanges only a Cernere code and never delivers the consumed code to the service", async () => {
     const adapter = new CernereCompositeAuthAdapter("", target, "post_message", false, returnTo);
     const delivered = vi.fn();

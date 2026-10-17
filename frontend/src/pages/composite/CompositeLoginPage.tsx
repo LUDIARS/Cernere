@@ -8,7 +8,7 @@
  *
  * ログインはパスキーのみで、登録とログインを区別しない (SPEC-PASSKEY-CONTINUE)。
  * 「新しく始める」は Cernere のこの origin でパスキーを作り、/onboarding (名前・リカバリー QR・
- * 別端末の追加) を済ませてからこのページへ戻る。戻ると silent SSO で authCode を渡す。
+ * 別端末の追加) を済ませてからこのページへ戻る。「ログイン」を押した後に SSO で authCode を渡す。
  *
  * Query params:
  *   origin       - postMessage 送信先 (popup モード)
@@ -16,12 +16,13 @@
  *   redirect     - self モードの戻り先 (ローカルパスのみ)
  */
 
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { CompositeLogin } from "@ludiars/cernere-composite/ui";
 import { useCompositeLoginSession } from "../../hooks/useCompositeLoginSession";
 import { continueMenuUrl } from "../continue/continue-links";
 import { CERNERE_LOGIN_LABELS } from "./composite-login-labels";
 import { passkeyEnrollmentUrl } from "../../lib/passkey-enrollment";
+import { LoginEntry, type LoginChoice } from "./LoginEntry";
 
 const API_BASE = "";
 
@@ -56,6 +57,19 @@ function returnTarget(self: boolean, params: URLSearchParams): string {
  * /api/auth/exchange で自分のトークンに交換してアプリへ入る。
  */
 export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
+  const [choice, setChoice] = useState<LoginChoice | null>(null);
+  const params = new URLSearchParams(window.location.search);
+  if (choice) return <ActiveCompositeLoginPage self={self} choice={choice} />;
+
+  // Mount the session hook only after an explicit action: it also performs SSO.
+  return (
+    <main style={shellStyle}>
+      <LoginEntry returnTo={returnTarget(self, params)} onLogin={setChoice} />
+    </main>
+  );
+}
+
+function ActiveCompositeLoginPage({ self, choice }: { self: boolean; choice: LoginChoice }) {
   const params = new URLSearchParams(window.location.search);
   const origin = self ? null : params.get("origin");
   const redirectUri = self ? null : params.get("redirect_uri");
@@ -66,6 +80,8 @@ export function CompositeLoginPage({ self = false }: { self?: boolean } = {}) {
     redirectUri,
     redirectParam: params.get("redirect"),
     apiBase: API_BASE,
+    crossDevice: choice.crossDevice,
+    enrollAfterLogin: choice.enroll,
   });
 
   // 押したログインでパスキーが見つからなかったら、引き継ぎメニューへ (account-federation §4)。

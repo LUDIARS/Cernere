@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { startRegistration, type PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
-import { RecoveryQrPage } from "./RecoveryQrPage";
+import { RecoveryEntryPage } from "./RecoveryEntryPage";
 
 /**
- * /recover: 運用者が発行した回復リンク (#token=...) なら運用者回復、それ以外はリカバリー QR による自己回復。
+ * /recover: 発行済み回復リンク (#token=...) を保持し、通常は復旧方法の選択を表示する。
  */
 export function PasskeyRecoveryPage() {
   const [operatorLink] = useState(() => new URLSearchParams(window.location.hash.slice(1)).has("token"));
-  return operatorLink ? <OperatorRecovery /> : <RecoveryQrPage />;
+  return operatorLink ? <OperatorRecovery /> : <RecoveryEntryPage />;
 }
 
 function OperatorRecovery() {

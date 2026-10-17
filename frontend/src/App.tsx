@@ -23,6 +23,7 @@ import { AccessReviewPage } from "./pages/admin/AccessReviewPage";
 import { AccessGate } from "./components/AccessGate";
 import { DeviceSessionsPage } from "./pages/DeviceSessionsPage";
 import { PasskeyRecoveryPage } from "./pages/PasskeyRecoveryPage";
+import { RecoveryQrPage } from "./pages/RecoveryQrPage";
 import { AccountRecoveryPage } from "./pages/admin/AccountRecoveryPage";
 import { OnsiteKiosksPage } from "./pages/admin/OnsiteKiosksPage";
 import { ContinueMenuPage } from "./pages/continue/ContinueMenuPage";
@@ -60,6 +61,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/recover" element={<PasskeyRecoveryPage />} />
+      <Route path="/recover/qr" element={<RecoveryQrPage />} />
       {/* Composite: 他サービス組み込み用 (アプリシェルなし) */}
       <Route path="/composite/login" element={<CompositeLoginPage />} />
       <Route path="/composite/callback" element={<CompositeCallbackPage />} />

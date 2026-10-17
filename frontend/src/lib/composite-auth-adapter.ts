@@ -60,7 +60,7 @@ export class CernereCompositeAuthAdapter implements CompositeAuthApi {
 
   async passkeyLoginFinish(params: { challengeOwner: string; response: AuthenticationResponseJSON }): Promise<CompositeAuthResponse> {
     const offerEnrollment = this.enrollmentReturnTo !== null
-      && shouldOfferPcEnrollment(params.response.authenticatorAttachment, isMobileDevice(), this.enrollmentReturnTo);
+      && shouldOfferPcEnrollment(params.response.authenticatorAttachment, isMobileDevice(), this.enrollmentReturnTo, window.location.origin, this.crossDevice);
     const data = await postJson<{ authCode?: string }>(
       `${this.apiBase}/api/auth/passkey/composite-login-finish`,
       this.target && !offerEnrollment ? { ...params, target: this.target, targetMode: this.targetMode } : params, "Passkey login failed");

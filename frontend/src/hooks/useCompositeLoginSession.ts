@@ -27,6 +27,8 @@ export interface CompositeLoginSessionArgs {
   /** self モードの戻り先 (`?redirect=`) */
   redirectParam: string | null;
   apiBase: string;
+  crossDevice?: boolean;
+  enrollAfterLogin?: boolean;
 }
 
 export interface CompositeLoginSession {
@@ -49,6 +51,8 @@ const TARGET_CHECK_PENDING = "送信先を確認しています…";
  */
 export function useCompositeLoginSession(args: CompositeLoginSessionArgs): CompositeLoginSession {
   const { self, origin, redirectUri, redirectParam, apiBase } = args;
+  const crossDevice = args.crossDevice ?? wantsCrossDevice(window.location.search);
+  const enrollAfterLogin = args.enrollAfterLogin ?? true;
 
   // composite は検証開始前も fail-closed。空文字にしておくと最初の effect が完了するまで
   // 認証 UI が一瞬描画され、資格情報や手動 passkey を送信できてしまう。
@@ -62,9 +66,9 @@ export function useCompositeLoginSession(args: CompositeLoginSessionArgs): Compo
   const adapter = useMemo(
     () => new CernereCompositeAuthAdapter(apiBase, self ? null : (origin ?? redirectUri), origin ? "post_message" : "redirect",
       // 引き継ぎメニューの ①: 別の端末のパスキー (QR) を先に出させる。
-      wantsCrossDevice(window.location.search),
-      self ? (redirectParam ?? "/") : window.location.pathname + window.location.search),
-    [apiBase, self, origin, redirectUri, redirectParam],
+      crossDevice,
+      enrollAfterLogin ? (self ? (redirectParam ?? "/") : window.location.pathname + window.location.search) : null),
+    [apiBase, self, origin, redirectUri, redirectParam, crossDevice, enrollAfterLogin],
   );
   useEffect(() => () => adapter.dispose(), [adapter]);
 
@@ -105,7 +109,7 @@ export function useCompositeLoginSession(args: CompositeLoginSessionArgs): Compo
       // パスワードの再入力なしで authCode を発行し、 呼び出し元 (EducationLab 等) へ返す。
       // 失敗 / 未ログインなら通常の対話ログイン UI にフォールバックする。
       const token = getAccessToken();
-      if (token) {
+      if (token && !crossDevice) {
         try {
           const res = await fetch(`${apiBase}/api/auth/composite-session-code`, {
             method: "POST",
@@ -140,7 +144,7 @@ export function useCompositeLoginSession(args: CompositeLoginSessionArgs): Compo
       }
     })();
     return () => { cancelled = true; };
-  }, [self, origin, redirectUri, apiBase, handoff]);
+  }, [self, origin, redirectUri, apiBase, handoff, crossDevice]);
 
   /** @implements SPEC-COMPOSITE-AUTHCODE-HANDOFF */
   const deliver = (authCode: string): void => {
