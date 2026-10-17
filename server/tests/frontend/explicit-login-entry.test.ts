@@ -53,6 +53,14 @@ describe("explicit Cernere login entry", () => {
     vi.stubGlobal("document", { cookie: "cf_clearance=opaque; __cf_bm=opaque" });
     expect(hasLoginCookie()).toBe(false);
   });
+  it.each(["", "theme=dark", "CF_Authorization=opaque; analytics=1", "cernere_returning=0", "cernere_returning=", "other_cernere_returning=1"])("does not treat unrelated or invalid cookies as login history: %s", cookie => {
+    vi.stubGlobal("document", { cookie });
+    expect(hasLoginCookie()).toBe(false);
+  });
+  it("recognizes only the exact returning marker among other cookies", () => {
+    vi.stubGlobal("document", { cookie: "theme=dark; cernere_returning=1; analytics=1" });
+    expect(hasLoginCookie()).toBe(true);
+  });
   it("stores a non-secret returning hint after successful login", () => {
     vi.stubGlobal("document", { cookie: "" });
     vi.stubGlobal("window", { location: { protocol: "https:" } });

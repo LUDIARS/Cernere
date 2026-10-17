@@ -1,11 +1,8 @@
-const INFRA_COOKIES = new Set(["__cf_bm", "_cfuvid", "cf_clearance", "__cflb", "__cfruid"]);
-
 /** Display hint only. HttpOnly session secrets must never be exposed to JavaScript. */
 export function hasLoginCookie(): boolean {
   try {
     return document.cookie.split(";").some(part => {
-      const name = part.split("=")[0]?.trim();
-      return !!name && !INFRA_COOKIES.has(name);
+      return part.trim() === "cernere_returning=1";
     });
   } catch { return false; }
 }

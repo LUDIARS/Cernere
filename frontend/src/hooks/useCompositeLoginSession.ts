@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { auth as authApi, getAccessToken } from "../lib/api";
 import { CernereCompositeAuthAdapter } from "../lib/composite-auth-adapter";
-import { CompositeAuthHandoff } from "../lib/composite-auth-handoff";
+import { CompositeAuthHandoff, resolveSelfRedirectTarget } from "../lib/composite-auth-handoff";
 import { fetchAllowedOrigins, isTargetAllowed } from "../lib/composite-redirect";
 import { wantsCrossDevice } from "../pages/continue/continue-links";
 
@@ -67,7 +67,7 @@ export function useCompositeLoginSession(args: CompositeLoginSessionArgs): Compo
     () => new CernereCompositeAuthAdapter(apiBase, self ? null : (origin ?? redirectUri), origin ? "post_message" : "redirect",
       // 引き継ぎメニューの ①: 別の端末のパスキー (QR) を先に出させる。
       crossDevice,
-      enrollAfterLogin ? (self ? (redirectParam ?? "/") : window.location.pathname + window.location.search) : null),
+      enrollAfterLogin ? (self ? resolveSelfRedirectTarget(redirectParam ?? "/", window.location.origin) : window.location.pathname + window.location.search) : null),
     [apiBase, self, origin, redirectUri, redirectParam, crossDevice, enrollAfterLogin],
   );
   useEffect(() => () => adapter.dispose(), [adapter]);
