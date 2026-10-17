@@ -1,0 +1,28 @@
+/* SPEC-COMPOSITE-DEVICE-THEME-001: native media queries also follow live OS changes. */
+:root[data-composite-theme="device"] {
+  color-scheme: dark;
+  --button-text: #0d1117;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-composite-theme="device"] {
+    color-scheme: light;
+    --bg: #f6f8fa;
+    --bg-surface: #ffffff;
+    --bg-surface-2: #eaeef2;
+    --border: #8c959f;
+    --text: #1f2328;
+    --text-muted: #59636e;
+    --accent: #0969da;
+    --accent-hover: #0550ae;
+    --green: #1a7f37;
+    --orange: #9a6700;
+    --red: #cf222e;
+    --purple: #8250df;
+    --button-text: #ffffff;
+  }
+}
+
+:root[data-composite-theme="device"] button.primary {
+  color: var(--button-text);
+}

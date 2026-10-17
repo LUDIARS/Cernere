@@ -30,7 +30,7 @@ export function primaryButton(disabled: boolean): CSSProperties {
     borderRadius: "var(--radius)",
     border: "1px solid var(--accent)",
     background: "var(--accent)",
-    color: "#fff",
+    color: "var(--button-text, #fff)",
     cursor: disabled ? "not-allowed" : "pointer",
     opacity: disabled ? 0.6 : 1,
   };
