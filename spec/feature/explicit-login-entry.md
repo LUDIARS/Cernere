@@ -21,4 +21,5 @@ Human requirement: Cr must not begin authentication immediately on opening.
 - Initial rendering in self and composite modes invokes no authentication session hook.
 - The login button starts the existing authentication component; destination query parameters are retained.
 - The entry layout fits a narrow viewport without a fixed-width panel.
+- Enrollment checkbox and its full label occupy one horizontal line. Override global input width/padding with a fixed 1rem checkbox and use responsive card side padding; do not rely only on flexShrink. This requirement follows the second reported checkbox-layout regression on 2026-10-17.
 - Cookie/no-cookie rendering, default checkbox, recovery destinations and both enrollment choices have regression coverage.
