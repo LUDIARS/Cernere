@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { bodyTextStyle, inputStyle, messageStyle, pageStyle, panelStyle, panelTitleStyle, primaryButton, secondaryButton } from "../components/security/panel-styles";
 import { recoveryWithCode } from "../lib/passkey-account-api";
 import { createQrDetector, decodeQrFromFile } from "../lib/recovery-qr-image";
-import { onboardingUrl } from "./onboarding/onboarding-return";
+import { onboardingUrl, readReturnPath } from "./onboarding/onboarding-return";
 
 type Phase = "input" | "registering" | "pending" | "confirming";
 
@@ -88,7 +88,7 @@ export function RecoveryQrPage() {
     try {
       await recoveryWithCode.confirm();
       // 回復で古い QR は使えなくなったので、オンボーディングで新しい QR を作らせる。
-      window.location.assign(onboardingUrl("/"));
+      window.location.assign(onboardingUrl(readReturnPath(window.location.search)));
     } catch (e) {
       setError((e as Error).message);
       setPhase(eligibleAt ? "pending" : "input");

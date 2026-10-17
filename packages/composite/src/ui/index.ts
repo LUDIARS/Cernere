@@ -1,4 +1,6 @@
 export { CompositeLogin } from "./CompositeLogin.js";
+export { CompositeLoginFrame } from "./CompositeLoginFrame.js";
+export type { CompositeLoginFrameProps } from "./CompositeLoginFrame.js";
 export { installBrowserResumeReload } from "./browser-resume.js";
 export type { BrowserResumeOptions } from "./browser-resume.js";
 export { isWebAuthnActive, startAuthentication, startRegistration } from "./resume-safe-webauthn.js";

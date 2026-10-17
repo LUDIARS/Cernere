@@ -1,9 +1,9 @@
+import { verifyAuthenticationResponse } from "../auth/verify-embedded-webauthn.js";
 import crypto from "node:crypto";
 
 import { and, eq, isNull } from "drizzle-orm";
 import {
   generateAuthenticationOptions,
-  verifyAuthenticationResponse,
 } from "@simplewebauthn/server";
 import type {
   AuthenticationResponseJSON,

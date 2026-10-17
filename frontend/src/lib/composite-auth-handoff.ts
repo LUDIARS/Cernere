@@ -72,13 +72,14 @@ export class CompositeAuthHandoff {
       return;
     }
     // 権威はサーバ許可リスト。 postMessage/redirect の直前で必ず再検証する。
-    if (origin && window.opener) {
+    const receiver = window.parent !== window ? window.parent : window.opener;
+    if (origin && receiver) {
       if (!isTargetAllowed(origin, this.allowedOrigins)) {
         onError("許可されていない送信先のため認証を中止しました。");
         return;
       }
-      window.opener.postMessage({ type: "cernere:auth", authCode }, new URL(origin).origin);
-      window.close();
+      receiver.postMessage({ type: "cernere:auth", authCode }, new URL(origin).origin);
+      if (window.parent === window) window.close();
       return;
     }
     if (redirectUri) {

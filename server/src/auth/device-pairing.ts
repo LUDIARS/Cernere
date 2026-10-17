@@ -1,3 +1,4 @@
+import { verifyRegistrationResponse } from "./verify-embedded-webauthn.js";
 /**
  * 別端末の追加 (SPEC-DEVICE-PAIRING)。
  *
@@ -11,7 +12,6 @@ import crypto from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import {
   generateRegistrationOptions,
-  verifyRegistrationResponse,
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 

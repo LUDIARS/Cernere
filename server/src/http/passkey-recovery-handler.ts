@@ -1,6 +1,7 @@
+import { verifyRegistrationResponse } from "../auth/verify-embedded-webauthn.js";
 /** A recovery grant can enroll a verified passkey, never mint an access token. @implements SPEC-DEVICE-RECOVERY */
 import { randomUUID } from "node:crypto";
-import { generateRegistrationOptions, verifyRegistrationResponse, type RegistrationResponseJSON } from "@simplewebauthn/server";
+import { generateRegistrationOptions, type RegistrationResponseJSON } from "@simplewebauthn/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { config } from "../config.js";

@@ -32,6 +32,6 @@ export function LoginEntry({ returnTo, onLogin, busy = false, children }: { retu
       </label>
     </>}
     {children}
-    <p style={{ marginTop: "3rem", marginBottom: 0, textAlign: "right", fontSize: "0.8rem" }}><a href="/recover">アカウントを復旧する</a></p>
+    <p style={{ marginTop: "3rem", marginBottom: 0, textAlign: "right", fontSize: "0.8rem" }}><a href={`/recover?${new URLSearchParams({ return: returnTo })}`}>アカウントを復旧する</a></p>
   </section>;
 }

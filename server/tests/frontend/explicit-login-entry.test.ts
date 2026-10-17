@@ -37,7 +37,8 @@ describe("explicit Cernere login entry", () => {
     expect(html).toContain("新規アカウントで登録します");
     expect(html).toContain("この端末のパスキーを登録して連携");
     expect(html).toContain('checked=""');
-    expect(html).toContain('href="/recover"');
+    const returnTo = self ? "/profile" : "/composite/login?origin=https%3A%2F%2Fglab.example.com";
+    expect(html).toContain(`href="/recover?${new URLSearchParams({ return: returnTo })}"`);
     expect(html).toContain("border-radius:var(--radius, 8px)");
     expect(html).toContain("background:var(--bg-surface, #fff)");
   });

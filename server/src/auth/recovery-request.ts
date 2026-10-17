@@ -1,3 +1,4 @@
+import { verifyAuthenticationResponse, verifyRegistrationResponse } from "./verify-embedded-webauthn.js";
 /**
  * リカバリー QR による回復 (SPEC-RECOVERY-QR-USE)。
  *
@@ -12,8 +13,6 @@ import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import {
   generateAuthenticationOptions,
   generateRegistrationOptions,
-  verifyAuthenticationResponse,
-  verifyRegistrationResponse,
   type AuthenticationResponseJSON,
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";

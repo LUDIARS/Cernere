@@ -136,9 +136,10 @@ export function deliverConsentOutcome(outcome: ConsentOutcome): boolean {
     window.location.href = outcome.url;
     return true;
   }
-  if (outcome.kind === "post_message" && window.opener) {
-    (window.opener as Window).postMessage(outcome.message, outcome.origin);
-    window.close();
+  const receiver = window.parent !== window ? window.parent : window.opener;
+  if (outcome.kind === "post_message" && receiver) {
+    receiver.postMessage(outcome.message, outcome.origin);
+    if (window.parent === window) window.close();
     return true;
   }
   return false;

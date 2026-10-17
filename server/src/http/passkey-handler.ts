@@ -1,3 +1,4 @@
+import { verifyAuthenticationResponse, verifyRegistrationResponse } from "../auth/verify-embedded-webauthn.js";
 /**
  * Passkey (WebAuthn / FIDO2) REST ハンドラ
  *
@@ -31,9 +32,7 @@ import crypto from "node:crypto";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   generateRegistrationOptions,
-  verifyRegistrationResponse,
   generateAuthenticationOptions,
-  verifyAuthenticationResponse,
 } from "@simplewebauthn/server";
 import type {
   RegistrationResponseJSON,
