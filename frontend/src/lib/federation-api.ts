@@ -9,7 +9,7 @@
 import {
   startRegistration,
   type PublicKeyCredentialCreationOptionsJSON,
-} from "@simplewebauthn/browser";
+} from "./webauthn";
 import { authorizeAction } from "./action-auth";
 import { getAccessToken, setTokens } from "./browser-token-store";
 import { setStoredUser } from "./api";

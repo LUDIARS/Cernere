@@ -20,10 +20,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  startAuthentication,
   browserSupportsWebAuthn,
   type AuthenticationResponseJSON,
 } from "@simplewebauthn/browser";
+import { startAuthentication } from "./resume-safe-webauthn.js";
 import type { CompositeAuthApi, CompositeAuthResponse } from "./auth-api.js";
 
 export type PasskeyLoginPhase =

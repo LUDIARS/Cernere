@@ -13,7 +13,7 @@ import {
   type PublicKeyCredentialCreationOptionsJSON,
   type PublicKeyCredentialRequestOptionsJSON,
   type RegistrationResponseJSON,
-} from "@simplewebauthn/browser";
+} from "./webauthn";
 import { authorizeAction } from "./action-auth";
 import { getAccessToken, setTokens } from "./browser-token-store";
 import { setStoredUser } from "./api";

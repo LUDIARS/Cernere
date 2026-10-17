@@ -4,6 +4,7 @@ import { usesDeviceSession } from "../lib/browser-token-store";
 import { toAuthUser } from "../lib/me-user";
 import { refreshBrowserAccessToken } from "../lib/browser-refresh";
 import { wsClient } from "../lib/ws-client";
+import { installAuthenticatedPageRecovery } from "../lib/browser-resume";
 
 interface User {
   id: string;
@@ -24,6 +25,9 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(getStoredUser);
   const [wsConnected, setWsConnected] = useState(false);
+  useEffect(() => {
+    if (user) return installAuthenticatedPageRecovery();
+  }, [user?.id]);
   const [loading, setLoading] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     const stored = getStoredUser();

@@ -1,10 +1,10 @@
 import { getAccessToken } from "./browser-token-store";
 import { refreshBrowserAccessToken } from "./browser-refresh";
-import { startAuthentication } from "@simplewebauthn/browser";
+import { startAuthentication } from "./webauthn";
 import type {
   AuthenticationResponseJSON,
   PublicKeyCredentialRequestOptionsJSON,
-} from "@simplewebauthn/browser";
+} from "./webauthn";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 

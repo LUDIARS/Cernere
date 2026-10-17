@@ -1,8 +1,8 @@
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 // Passkey 用は @simplewebauthn/browser を使うので type だけ import
-import { startRegistration } from "@simplewebauthn/browser";
-import type { PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
+import { startRegistration } from "./webauthn";
+import type { PublicKeyCredentialCreationOptionsJSON } from "./webauthn";
 import { authorizeAction } from "./action-auth";
 import type { ConsentView } from "./consent-api";
 

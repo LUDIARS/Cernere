@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { startRegistration, type PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
+import { startRegistration, type PublicKeyCredentialCreationOptionsJSON } from "../lib/webauthn";
 import { RecoveryEntryPage } from "./RecoveryEntryPage";
 
 /**
