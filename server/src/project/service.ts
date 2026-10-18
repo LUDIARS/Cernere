@@ -598,12 +598,13 @@ export async function setModuleOptout(userId: string, projectKey: string, module
         }
 
         // NULL 化 + _deleted_columns 更新
-        const setClauses = moduleCols.map((c, i) => `"${c}" = NULL`);
-        setClauses.push(`_deleted_columns = $${moduleCols.length + 1}`);
+        const setClauses = moduleCols.map((c) => `"${c}" = NULL`);
+        // Column names are SQL identifiers; only the backup and user ID are bound values.
+        setClauses.push(`_deleted_columns = $1::jsonb`);
         setClauses.push(`updated_at = NOW()`);
         await sqlClient.unsafe(
-          `UPDATE "${tableName}" SET ${setClauses.join(", ")} WHERE user_id = $${moduleCols.length + 2}`,
-          [...moduleCols, JSON.stringify(backup), userId],
+          `UPDATE "${tableName}" SET ${setClauses.join(", ")} WHERE user_id = $2`,
+          [JSON.stringify(backup), userId],
         );
       }
     } catch (err) {
