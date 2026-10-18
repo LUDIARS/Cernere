@@ -1,0 +1,16 @@
+{
+  "name": "@ludiars/cernere-native-composite",
+  "version": "0.1.0",
+  "description": "Local installation identity and Cernere passkey session bridge for desktop hosts",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist", "README.md"],
+  "scripts": { "build": "tsc -p tsconfig.json", "prepublishOnly": "npm run build" },
+  "engines": { "node": ">=22.15.0" },
+  "devDependencies": { "@types/node": "^22.0.0", "typescript": "~5.9.3" },
+  "license": "MIT",
+  "publishConfig": { "registry": "https://npm.pkg.github.com" },
+  "repository": { "type": "git", "url": "https://github.com/LUDIARS/Cernere.git", "directory": "packages/native-composite" }
+}
