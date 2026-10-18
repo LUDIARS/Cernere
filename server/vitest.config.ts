@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       react: fileURLToPath(new URL("./node_modules/react", import.meta.url)),
+      "react-router-dom": fileURLToPath(new URL("../frontend/node_modules/react-router-dom/dist/index.mjs", import.meta.url)),
       "@ludiars/cernere-composite/ui": fileURLToPath(new URL("../packages/composite/src/ui/index.ts", import.meta.url)),
     },
   },

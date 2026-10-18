@@ -14,6 +14,7 @@ export function PasskeyEnrollmentPage() {
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  const [prepared, setPrepared] = useState<(() => Promise<unknown>) | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -34,8 +35,14 @@ export function PasskeyEnrollmentPage() {
     setBusy(true);
     setError("");
     try {
-      await auth.passkeyRegister("この端末", { platformOnly: true });
-      setSaved(true);
+      if (!prepared) {
+        const complete = await auth.preparePasskeyRegistration("この端末", { platformOnly: true });
+        setPrepared(() => complete);
+      } else {
+        setPrepared(null);
+        await prepared();
+        setSaved(true);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "登録できませんでした。もう一度お試しください。");
     } finally {
@@ -51,10 +58,11 @@ export function PasskeyEnrollmentPage() {
       {error && <p role="alert" style={{ color: "var(--red)" }}>{error}</p>}
       {saved ? <p role="status">この端末にパスキーを登録しました。</p> : (
         <>
+          {prepared && <p role="status">準備ができました。「この端末に保存する」を押してパスキーを登録してください。</p>}
           {available === null && <p role="status">この端末で登録できるか確認しています…</p>}
           {available === false && <p role="status">この環境では端末内のパスキー登録を利用できません。Windows Hello・Touch ID の設定や対応ブラウザを確認してください。登録せずに続けることもできます。</p>}
           <button type="button" disabled={busy || available !== true} style={primaryButton(busy || available !== true)} onClick={() => { void register(); }}>
-            {busy ? "登録中…" : "この端末に登録する"}
+            {busy ? "処理中…" : prepared ? "この端末に保存する" : "登録を準備する"}
           </button>
         </>
       )}

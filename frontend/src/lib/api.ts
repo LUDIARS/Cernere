@@ -143,6 +143,12 @@ export const auth = {
 
   /** 現在のユーザに passkey を新規登録する。 ブラウザが OS の生体認証ダイアログを開く */
   async passkeyRegister(nickname?: string, options?: { platformOnly?: boolean }): Promise<{ ok: true; credentialId: string }> {
+    const complete = await this.preparePasskeyRegistration(nickname, options);
+    return complete();
+  },
+
+  /** Prepare authorization first; invoke the returned operation directly from a fresh click. */
+  async preparePasskeyRegistration(nickname?: string, options?: { platformOnly?: boolean }): Promise<() => Promise<{ ok: true; credentialId: string }>> {
     const existing = await this.passkeyList();
     const currentUser = getStoredUser();
     if (existing.items.length > 0 && !currentUser) {
@@ -156,13 +162,19 @@ export const auth = {
       headers: proof ? { "X-Cernere-Action-Proof": proof } : undefined,
       body: JSON.stringify({}),
     });
-    const response = await startRegistration({ optionsJSON: options?.platformOnly
-      ? { ...opts, authenticatorSelection: { ...opts.authenticatorSelection, authenticatorAttachment: "platform" } }
-      : opts });
-    const res = await request<{ ok: true; credentialId: string }>("/api/auth/passkey/register-finish", {
-      method: "POST", body: JSON.stringify({ response, nickname: nickname ?? null }),
-    });
-    return res;
+    let used = false;
+    const expiresAt = Date.now() + 120_000;
+    return async () => {
+      if (used || Date.now() >= expiresAt) throw new Error("登録の準備が期限切れです。もう一度、登録を準備してください。");
+      used = true;
+      // No network or other await before create: embedded creation needs a fresh user activation.
+      const response = await startRegistration({ optionsJSON: options?.platformOnly
+        ? { ...opts, authenticatorSelection: { ...opts.authenticatorSelection, authenticatorAttachment: "platform" } }
+        : opts });
+      return request<{ ok: true; credentialId: string }>("/api/auth/passkey/register-finish", {
+        method: "POST", body: JSON.stringify({ response, nickname: nickname ?? null }),
+      });
+    };
   },
 
 

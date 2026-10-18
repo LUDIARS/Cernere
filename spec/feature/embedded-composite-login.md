@@ -12,6 +12,8 @@ Deployment prerequisite: activate and verify the frontend CSP middleware before 
 
 Embedded Composite displays only the rounded card, without the full-height outer background or padding. Its document background is transparent; standalone login keeps its existing layout.
 
+Adding a passkey at `/passkeys/register` uses two explicit actions: prepare (existing-key authorization and server challenge), then save on this device. The save click calls WebAuthn creation before any asynchronous preparation or network request, retaining transient user activation in cross-origin frames. Preparation never creates a credential automatically. Cancellation or expired preparation requires preparation again; prepared operations are single-use and expire before the server challenge. Required action proofs, platform-only selection and finish verification remain enforced.
+
 The SDK accepts one authCode only from the exact Cernere origin and the mounted frame window. The child checks the existing server target allowlist before sending to its parent; consent uses its server-validated outcome. No wildcard postMessage is permitted. Exchange stays on the host backend. Recovery carries only a local return path.
 
 Rollout: merge/deploy Cernere and update the consuming Corpus/GLab submodule references and GLab mount through their own reviews. No assumption that publishing the SDK automatically updates consumers. No automatic popup fallback on unsupported embedded WebAuthn. Actual embedded authentication requires browser validation; unit tests do not prove platform support.
