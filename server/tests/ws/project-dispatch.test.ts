@@ -16,6 +16,12 @@ vi.mock("../../src/project/data-sharing.js", () => ({
 
 const { dispatchProjectCommand } = await import("../../src/ws/project-dispatch.js");
 
+it("rejects permission queries for another project before loading any data", async () => {
+  await expect(dispatchProjectCommand("EducationLab", "managed_project", "get_user_permissions", {
+    userId: "user-1", targetProjectKey: "another",
+  })).rejects.toThrow("Cross-project permission access");
+});
+
 describe("dispatchProjectCommand — managed_project.get_user_data routing", () => {
   beforeEach(() => {
     mockGetUserColumns.mockReset().mockResolvedValue({ ok: "self" });

@@ -36,6 +36,13 @@ export async function dispatchProjectCommand(
     }
   }
   switch (`${module}.${action}`) {
+    case "managed_project.get_user_permissions": {
+      if (payload.targetProjectKey !== undefined && payload.targetProjectKey !== projectKey) {
+        throw AppError.forbidden("Cross-project permission access is not allowed");
+      }
+      const { getProjectUserPermissions } = await import("../project/user-permissions.js");
+      return getProjectUserPermissions(projectKey, requireStr(payload, "userId"));
+    }
     case "profile.get":
       return getServiceProfile(projectKey, payload);
     case "profile.update":

@@ -1,0 +1,11 @@
+{
+  "name": "project-user-permissions",
+  "description": "Read-only effective user permission status scoped to the authenticated project, combining consent and current opt-out decisions.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    { "pathPattern": "(^|/)server/src/project/user-permissions\\.ts$" },
+    { "pathPattern": "(^|/)server/tests/project/user-permissions\\.test\\.ts$" }
+  ],
+  "specRefs": ["spec/feature/project-user-permissions.md"]
+}
