@@ -28,6 +28,7 @@
   ],
   "cardTemplate": "Summarise the \"persistence-migration\" domain: Drizzle ORM schema, DB connection, and numbered idempotent SQL migrations with the no-DROP / logical-delete rules.",
   "specRefs": [
+    "spec/feature/glab-registration-consolidation.md",
     "2. DB マイグレーション",
     "ファイル管理",
     "冪等性",

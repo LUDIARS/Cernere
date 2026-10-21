@@ -8,7 +8,7 @@ const migration = readFileSync(
   "utf8",
 );
 const body = migration.replace(/--[^\n]*\n/g, "");
-const schemaJson = JSON.parse(readFileSync(new URL("../../service/education-lab/schema.json", import.meta.url), "utf8"));
+const schemaJson = JSON.parse(readFileSync(new URL("../../service/glab/schema.json", import.meta.url), "utf8"));
 
 function signupFieldsOfMigration(): unknown {
   const literal = body.match(/'\{signup_fields\}',\s*'([\s\S]*?)'::jsonb/);

@@ -1,15 +1,15 @@
 {
   "project": {
-    "key": "EducationLab",
-    "name": "EducationLab",
-    "description": "EducationPartner EducationLab operations hub"
+    "key": "glab",
+    "name": "GLab",
+    "description": "GLab operations hub"
   },
 
   "endpoint": {
     "url": "http://localhost:5187",
     "frontend_url": "https://glab.ai-run-do.com",
     "same_server": true,
-    "bridge_path": "/EducationLab"
+    "bridge_path": "/glab"
   },
 
   "data_sharing": [],
@@ -24,6 +24,10 @@
   },
 
   "user_data": {
-    "columns": {}
+    "columns": {
+      "available_now": { "type": "boolean", "module": "presence", "nullable": true, "default_value": "false", "description": "おれひま" },
+      "available_until": { "type": "timestamp", "module": "presence", "nullable": true, "description": "おれひま有効期限" },
+      "current_location": { "type": "text", "module": "presence", "nullable": true, "description": "本人申告の現在地" }
+    }
   }
 }
