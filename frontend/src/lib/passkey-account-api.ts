@@ -17,6 +17,7 @@ import {
 import { authorizeAction } from "./action-auth";
 import { getAccessToken, setTokens } from "./browser-token-store";
 import { setStoredUser } from "./api";
+import { rememberRegisteredPasskeyCookie } from "./login-cookie";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -60,6 +61,7 @@ export async function signupWithPasskey(): Promise<SessionResponse> {
   const begin = await post<{ signupId: string; options: PublicKeyCredentialCreationOptionsJSON }>("signup-begin", {});
   const response = await startRegistration({ optionsJSON: begin.options });
   const data = await post<SessionResponse>("signup-finish", { signupId: begin.signupId, response });
+  rememberRegisteredPasskeyCookie();
   storeSession(data);
   return data;
 }
@@ -107,6 +109,7 @@ export const recoveryWithCode = {
     const begin = await post<{ confirmId: string; options: PublicKeyCredentialRequestOptionsJSON }>("recovery-confirm-begin", {});
     const response = await startAuthentication({ optionsJSON: begin.options });
     const data = await post<SessionResponse & { recovered: true }>("recovery-confirm-finish", { confirmId: begin.confirmId, response });
+    if (data.recovered === true) rememberRegisteredPasskeyCookie();
     storeSession(data);
     return data;
   },

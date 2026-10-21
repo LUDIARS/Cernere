@@ -11,6 +11,7 @@ import {
   type PublicKeyCredentialCreationOptionsJSON,
 } from "./webauthn";
 import { authorizeAction } from "./action-auth";
+import { rememberRegisteredPasskeyCookie } from "./login-cookie";
 import { getAccessToken, setTokens } from "./browser-token-store";
 import { setStoredUser } from "./api";
 
@@ -110,6 +111,7 @@ export const federationDevice = {
       signupId: begin.signupId, response,
       federation: { requestId: ticket.requestId, deviceSecret: ticket.deviceSecret },
     });
+    rememberRegisteredPasskeyCookie();
     setTokens(data.accessToken, data.refreshToken);
     setStoredUser({ id: data.user.id, name: data.user.displayName ?? "", email: "", role: data.user.role });
   },

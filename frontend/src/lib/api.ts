@@ -4,6 +4,7 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 import { startRegistration } from "./webauthn";
 import type { PublicKeyCredentialCreationOptionsJSON } from "./webauthn";
 import { authorizeAction } from "./action-auth";
+import { rememberRegisteredPasskeyCookie } from "./login-cookie";
 import type { ConsentView } from "./consent-api";
 
 // ── Token Management ──────────────────────────────
@@ -171,9 +172,11 @@ export const auth = {
       const response = await startRegistration({ optionsJSON: options?.platformOnly
         ? { ...opts, authenticatorSelection: { ...opts.authenticatorSelection, authenticatorAttachment: "platform" } }
         : opts });
-      return request<{ ok: true; credentialId: string }>("/api/auth/passkey/register-finish", {
+      const result = await request<{ ok: true; credentialId: string }>("/api/auth/passkey/register-finish", {
         method: "POST", body: JSON.stringify({ response, nickname: nickname ?? null }),
       });
+      if (result.ok === true && result.credentialId) rememberRegisteredPasskeyCookie();
+      return result;
     };
   },
 

@@ -4,7 +4,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CompositeLoginPage } from "../../../frontend/src/pages/composite/CompositeLoginPage";
 import { LoginAttempt } from "../../../frontend/src/pages/composite/LoginAttempt";
 import { RecoveryEntryPage } from "../../../frontend/src/pages/RecoveryEntryPage";
-import { hasLoginCookie, rememberLoginCookie } from "../../../frontend/src/lib/login-cookie";
+import { hasRegisteredPasskeyCookie, rememberRegisteredPasskeyCookie } from "../../../frontend/src/lib/login-cookie";
+import { setTokens } from "../../../frontend/src/lib/browser-token-store";
 
 const session = vi.hoisted(() => vi.fn(() => { throw new Error("Authentication started before login click"); }));
 vi.mock("../../../frontend/src/hooks/useCompositeLoginSession", () => ({ useCompositeLoginSession: session }));
@@ -16,6 +17,17 @@ vi.mock("@ludiars/cernere-composite/ui", () => ({
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe("explicit Cernere login entry", () => {
+  it("ignores the legacy login cookie when choosing registration controls", () => {
+    vi.stubGlobal("document", { cookie: "cernere_returning=1" });
+    expect(hasRegisteredPasskeyCookie()).toBe(false);
+  });
+  it.each(["", "refresh"])("keeps session persistence independent of registration (refresh=%s)", refresh => {
+    vi.stubGlobal("localStorage", { setItem: vi.fn(), removeItem: vi.fn() });
+    vi.stubGlobal("document", { cookie: "" });
+    setTokens("access", refresh);
+    expect(document.cookie).toBe("");
+    expect(localStorage.setItem).not.toHaveBeenCalledWith("cernere_returning", "1");
+  });
   it("keeps authentication and cancellation status free of legacy login controls", () => {
     vi.stubGlobal("window", { location: { search: "" } });
     session.mockReturnValueOnce({ adapter: {}, passkeyAutoReady: true, blockedReason: "", handoffError: "", deliver: vi.fn() } as never);
@@ -44,7 +56,7 @@ describe("explicit Cernere login entry", () => {
   });
   it("shows normal passkey login for returning cookies without starting authentication", () => {
     vi.stubGlobal("window", { location: { pathname: "/login", search: "", origin: "https://cernere.example.com" } });
-    vi.stubGlobal("document", { cookie: "cernere_returning=1" });
+    vi.stubGlobal("document", { cookie: "cernere_passkey_registered=1" });
     const html = renderToStaticMarkup(createElement(CompositeLoginPage, { self: true }));
     expect(html).toContain("パスキーでログイン");
     expect(html).not.toContain("スマホでログイン");
@@ -52,21 +64,21 @@ describe("explicit Cernere login entry", () => {
   });
   it("does not mistake infrastructure cookies for a returning account", () => {
     vi.stubGlobal("document", { cookie: "cf_clearance=opaque; __cf_bm=opaque" });
-    expect(hasLoginCookie()).toBe(false);
+    expect(hasRegisteredPasskeyCookie()).toBe(false);
   });
-  it.each(["", "theme=dark", "CF_Authorization=opaque; analytics=1", "cernere_returning=0", "cernere_returning=", "other_cernere_returning=1"])("does not treat unrelated or invalid cookies as login history: %s", cookie => {
+  it.each(["", "theme=dark", "CF_Authorization=opaque; analytics=1", "cernere_passkey_registered=0", "cernere_passkey_registered=", "other_cernere_passkey_registered=1"])("does not treat unrelated or invalid cookies as login history: %s", cookie => {
     vi.stubGlobal("document", { cookie });
-    expect(hasLoginCookie()).toBe(false);
+    expect(hasRegisteredPasskeyCookie()).toBe(false);
   });
   it("recognizes only the exact returning marker among other cookies", () => {
-    vi.stubGlobal("document", { cookie: "theme=dark; cernere_returning=1; analytics=1" });
-    expect(hasLoginCookie()).toBe(true);
+    vi.stubGlobal("document", { cookie: "theme=dark; cernere_passkey_registered=1; analytics=1" });
+    expect(hasRegisteredPasskeyCookie()).toBe(true);
   });
-  it("stores a non-secret returning hint after successful login", () => {
+  it("stores a non-secret hint for confirmed registration", () => {
     vi.stubGlobal("document", { cookie: "" });
     vi.stubGlobal("window", { location: { protocol: "https:" } });
-    rememberLoginCookie();
-    expect(document.cookie).toContain("cernere_returning=1;");
+    rememberRegisteredPasskeyCookie();
+    expect(document.cookie).toContain("cernere_passkey_registered=1;");
     expect(document.cookie).toContain("; Secure");
   });
   it("offers QR recovery and administrator contact", () => {

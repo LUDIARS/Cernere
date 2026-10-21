@@ -46,7 +46,7 @@ describe("login card interactions", () => {
     expect(view.root.findAllByType("button")).toHaveLength(2);
   });
   it("keeps login disabled through async handoff and allows retry if handoff fails", async () => {
-    vi.stubGlobal("document", { cookie: "cernere_returning=1" });
+    vi.stubGlobal("document", { cookie: "cernere_passkey_registered=1" });
     await act(() => { view = create(page()); });
     expect(view.root.findAllByType("input")).toHaveLength(0);
     expect(view.root.findAllByType("button")).toHaveLength(1);
