@@ -13,3 +13,10 @@ whole migration; operators must not override these guards or mark it applied man
 
 Acceptance: only glab is active; all four pre-migration presence rows survive; refusal
 and consent remain effective; GLab launches with glab credentials and renders GLab.
+
+Migration 076 completes signup-field acknowledgement history (`fields_version`,
+`fields_seen`) omitted by 075. It fills only a destination whose two fields are NULL,
+whose consent decision still matches the source, and whose source registration is
+inactive. A subsequent GLab submission is never overwritten. The source is retained.
+Acceptance: untouched migrated acknowledgements match the source; new GLab history
+and changed consent decisions remain unchanged on initial application and rerun.
