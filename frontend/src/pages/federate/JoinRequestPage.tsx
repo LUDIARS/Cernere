@@ -24,9 +24,10 @@ import { readReturnPath } from "../onboarding/onboarding-return";
 
 const POLL_MS = 2500;
 
-export function JoinRequestPage() {
+export function JoinRequestPage({ newDevice = false }: { newDevice?: boolean } = {}) {
   const returnTo = readReturnPath(window.location.search);
-  const loggedIn = getAccessToken() !== null;
+  // A smartphone login on this browser is not the PC identity being enrolled.
+  const loggedIn = !newDevice && getAccessToken() !== null;
   const mobile = isMobileDevice();
   const [ticket, setTicket] = useState<DeviceTicket | null>(null);
   const [qr, setQr] = useState("");
@@ -35,6 +36,7 @@ export function JoinRequestPage() {
   const [services, setServices] = useState<ServiceUsage[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [prepared, setPrepared] = useState<(() => Promise<void>) | null>(null);
   const timer = useRef<number | null>(null);
 
   const stopPolling = () => {
@@ -47,7 +49,7 @@ export function JoinRequestPage() {
     setBusy(true);
     setError("");
     try {
-      const claimed = await federationDevice.claimInvite(token);
+      const claimed = await federationDevice.claimInvite(token, newDevice);
       setTicket(claimed);
       setState("claimed");
       setQr("");
@@ -56,7 +58,7 @@ export function JoinRequestPage() {
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [newDevice]);
 
   // A の招待 QR をカメラアプリで読んで開いた (#t=)。token は fragment から読み、履歴から消す。
   useEffect(() => {
@@ -89,7 +91,7 @@ export function JoinRequestPage() {
     setBusy(true);
     setError("");
     try {
-      const created = await federationDevice.createRequest();
+      const created = await federationDevice.createRequest(newDevice);
       setTicket(created);
       setState("open");
       setQr(await QRCode.toDataURL(created.approveUrl, { width: 260, margin: 1 }));
@@ -121,7 +123,14 @@ export function JoinRequestPage() {
         await federationDevice.completeAsExistingAccount(ticket);
         window.location.assign("/settings/federation");
       } else {
-        await federationDevice.completeAsNewDevice(ticket);
+        if (!prepared) {
+          const save = await federationDevice.prepareNewDevice(ticket, newDevice);
+          setPrepared(() => save);
+          setBusy(false);
+          return;
+        }
+        setPrepared(null);
+        await prepared();
         // 名前は聞かない (主の名前を使う)。リカバリー QR と通知だけを設定する。
         window.location.assign(`/onboarding?${new URLSearchParams({ return: returnTo, federated: "1" }).toString()}`);
       }
@@ -132,6 +141,7 @@ export function JoinRequestPage() {
   };
 
   const restart = () => {
+    setPrepared(null);
     stopPolling();
     setTicket(null);
     setState(null);
@@ -199,7 +209,7 @@ export function JoinRequestPage() {
               : "この端末にパスキーを作ると、いま使っているアカウントと同じ利用者としてサービスを使えます。名前は入力しなくてかまいません。"}
           </p>
           <button type="button" onClick={() => { void complete(); }} disabled={busy} style={primaryButton(busy)}>
-            {busy ? "パスキーを待っています…" : loggedIn ? "パスキーで確認して連携する" : "この端末にパスキーを作る"}
+            {busy ? "処理中…" : loggedIn ? "パスキーで確認して連携する" : prepared ? "この端末に保存して連携する" : "登録を準備する"}
           </button>
         </div>
       )}

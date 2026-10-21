@@ -87,13 +87,13 @@ async function post<T>(action: string, body: unknown, opts: { auth?: "required" 
 
 export const federationDevice = {
   /** この端末で引き継ぎ要求を作る (ログインしていれば既存アカウントとして加わる)。 */
-  createRequest(): Promise<DeviceTicket & { approveUrl: string }> {
-    return post("request-create", {}, { auth: "optional" });
+  createRequest(newDevice = false): Promise<DeviceTicket & { approveUrl: string }> {
+    return post("request-create", {}, newDevice ? {} : { auth: "optional" });
   },
 
   /** 使っている端末が出した招待 QR を読む。4 桁はこちらに出る。 */
-  claimInvite(token: string): Promise<DeviceTicket & { kind: JoinKind }> {
-    return post("invite-claim", { token }, { auth: "optional" });
+  claimInvite(token: string, newDevice = false): Promise<DeviceTicket & { kind: JoinKind }> {
+    return post("invite-claim", { token }, newDevice ? {} : { auth: "optional" });
   },
 
   status(ticket: Pick<DeviceTicket, "requestId" | "deviceSecret">): Promise<{ state: JoinState; kind: JoinKind | null; expiresIn: number }> {
@@ -102,18 +102,32 @@ export const federationDevice = {
 
   /** 新しい端末: 承認済みの要求で、この端末にパスキーを作りアカウントを作って連携に加わる。 */
   async completeAsNewDevice(ticket: Pick<DeviceTicket, "requestId" | "deviceSecret">): Promise<void> {
+    const complete = await this.prepareNewDevice(ticket);
+    await complete();
+  },
+
+  /** Fetch options before the save click so Windows Hello receives fresh user activation. */
+  async prepareNewDevice(ticket: Pick<DeviceTicket, "requestId" | "deviceSecret">, platformOnly = false): Promise<() => Promise<void>> {
     const begin = await passkeyPost<{ signupId: string; options: PublicKeyCredentialCreationOptionsJSON }>("signup-begin", {});
-    const response = await startRegistration({ optionsJSON: begin.options });
-    const data = await passkeyPost<{
-      user: { id: string; displayName: string | null; role: string };
-      accessToken: string; refreshToken: string;
-    }>("signup-finish", {
-      signupId: begin.signupId, response,
-      federation: { requestId: ticket.requestId, deviceSecret: ticket.deviceSecret },
-    });
-    rememberRegisteredPasskeyCookie();
-    setTokens(data.accessToken, data.refreshToken);
-    setStoredUser({ id: data.user.id, name: data.user.displayName ?? "", email: "", role: data.user.role });
+    let used = false;
+    const expiresAt = Date.now() + 120_000;
+    return async () => {
+      if (used || Date.now() >= expiresAt) throw new Error("登録の準備が期限切れです。もう一度準備してください。");
+      used = true;
+      const response = await startRegistration({ optionsJSON: platformOnly
+        ? { ...begin.options, authenticatorSelection: { ...begin.options.authenticatorSelection, authenticatorAttachment: "platform" } }
+        : begin.options });
+      const data = await passkeyPost<{
+        user: { id: string; displayName: string | null; role: string };
+        accessToken: string; refreshToken: string;
+      }>("signup-finish", {
+        signupId: begin.signupId, response,
+        federation: { requestId: ticket.requestId, deviceSecret: ticket.deviceSecret },
+      });
+      rememberRegisteredPasskeyCookie();
+      setTokens(data.accessToken, data.refreshToken);
+      setStoredUser({ id: data.user.id, name: data.user.displayName ?? "", email: "", role: data.user.role });
+    };
   },
 
   /** 既存アカウント: 承認済みの要求で、このアカウントのパスキーで本人確認して連携に加わる (§4.2)。 */
