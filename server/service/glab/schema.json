@@ -12,19 +12,26 @@
     "bridge_path": "/glab"
   },
 
-  "data_sharing": [],
+  "data_sharing": [
+    { "project_key": "aedilis", "modules": ["profile"], "access": "read" }
+  ],
 
   "signup_fields": {
-    "version": 1,
+    "version": 2,
     "fields": [
-      { "project": "vantan_user", "column": "name", "label": "名前", "required": true, "input": "text", "max_length": 200 },
-      { "project": "vantan_user", "column": "role_title", "label": "役職", "required": true, "input": "text", "max_length": 200 },
-      { "project": "vantan_user", "column": "department_name", "label": "学科", "required": true, "input": "text", "max_length": 200 }
+      { "column": "name", "label": "名前", "required": true, "input": "text", "max_length": 200 },
+      { "column": "role_title", "label": "役職", "required": true, "input": "text", "max_length": 200 },
+      { "column": "department_name", "label": "学科", "required": true, "input": "text", "max_length": 200 }
     ]
   },
 
   "user_data": {
     "columns": {
+      "name": { "type": "text", "module": "profile", "nullable": false, "description": "氏名" },
+      "role_title": { "type": "text", "module": "profile", "nullable": false, "description": "役職" },
+      "department_name": { "type": "text", "module": "profile", "nullable": false, "description": "所属学科" },
+      "grade": { "type": "integer", "module": "profile", "nullable": true, "description": "学年" },
+      "desired_job": { "type": "text", "module": "profile", "nullable": true, "description": "希望職種" },
       "available_now": { "type": "boolean", "module": "presence", "nullable": true, "default_value": "false", "description": "おれひま" },
       "available_until": { "type": "timestamp", "module": "presence", "nullable": true, "description": "おれひま有効期限" },
       "current_location": { "type": "text", "module": "presence", "nullable": true, "description": "本人申告の現在地" }

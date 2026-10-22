@@ -39,7 +39,7 @@ describe("074 EducationLab signup_fields", () => {
     expect(body).not.toMatch(/"url":/);
   });
 
-  it("名前・役職・学科を vantan_user の必須 text として宣言し、schema.json と同じ内容にする", () => {
+  it("074 時点では名前・役職・学科を vantan_user の必須 text として宣言する", () => {
     const declared = signupFieldsOfMigration();
     expect(declared).toEqual({
       version: 1,
@@ -49,7 +49,6 @@ describe("074 EducationLab signup_fields", () => {
         { project: "vantan_user", column: "department_name", label: "学科", required: true, input: "text", max_length: 200 },
       ],
     });
-    expect(schemaJson.signup_fields).toEqual(declared);
     expect(schemaJson.endpoint).toMatchObject({ url: "http://localhost:5187", frontend_url: "https://glab.ai-run-do.com" });
     expect(projectDefinitionSchema.safeParse(schemaJson).success).toBe(true);
   });
