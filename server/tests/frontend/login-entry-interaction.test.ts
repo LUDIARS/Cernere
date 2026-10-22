@@ -27,17 +27,17 @@ const page = () => createElement(CompositeLoginPage, { self: true });
 const phone = () => view.root.findAllByType("button").find(button => button.children.includes("スマホでログイン"))!;
 
 describe("login card interactions", () => {
-  it("starts only on click, preserves unchecked enrollment after cancel, and retries on the same card", async () => {
+  it("starts only on click, has no enrollment checkbox, and retries on the same card", async () => {
     await act(() => { view = create(page()); });
     expect(state.args).not.toHaveBeenCalled();
-    await act(() => view.root.findByType("input").props.onChange({ target: { checked: false } }));
+    expect(view.root.findAllByType("input")).toHaveLength(0);
     await act(() => phone().props.onClick());
-    expect(state.args).toHaveBeenLastCalledWith(expect.objectContaining({ crossDevice: true, enrollAfterLogin: false }));
+    expect(state.args).toHaveBeenLastCalledWith(expect.objectContaining({ crossDevice: true }));
     expect(phone().props.disabled).toBe(true);
     state.phase = "fallback";
     await act(() => view.update(page()));
     expect(phone().props.disabled).toBe(false);
-    expect(view.root.findByType("input").props.checked).toBe(false);
+    expect(view.root.findAllByType("input")).toHaveLength(0);
     const priorCalls = state.args.mock.calls.length;
     state.phase = "running";
     await act(() => phone().props.onClick());

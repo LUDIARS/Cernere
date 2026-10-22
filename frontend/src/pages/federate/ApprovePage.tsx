@@ -63,7 +63,7 @@ export function ApprovePage() {
 
   return (
     <main style={pageStyle}>
-      <h1 style={{ fontSize: "1.4rem", fontWeight: 700 }}>端末の引き継ぎ</h1>
+      <h1 style={{ fontSize: "1.4rem", fontWeight: 700 }}>端末を追加する</h1>
       {error && <div role="alert" style={messageStyle(true)}>{error}</div>}
       {!view && !error && <p style={bodyTextStyle}>読み込んでいます…</p>}
       {view && <ApproveRequestPanel view={view} onChange={setView} />}

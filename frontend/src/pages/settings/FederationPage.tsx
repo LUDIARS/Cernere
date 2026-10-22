@@ -2,7 +2,7 @@
  * 設定「アカウントの連携」(spec/plan/2026-10-15-account-federation-design.md §4.2 / §4.3 / §6)。
  *
  *   - 連携しているアカウント (端末ごとのアカウント) の一覧と主の選択 (今の主のパスキーで承認)
- *   - 端末を引き継ぐ: 招待 QR を出す / 新しい端末の QR を読む → 4 桁を照合してパスキーで承認
+ *   - 端末を追加する: 招待 QR を出す / 新しい端末の QR を読む → 4 桁を照合してパスキーで承認
  *   - 外す (主による取り外し / 本人の離脱)
  *   - 既存の「別の端末を追加」(同じアカウントにパスキーを足す) との違いを並べて書く
  */
@@ -24,7 +24,7 @@ const POLL_MS = 2500;
 
 const JOINED_VIA: Record<string, string> = {
   founder: "最初のアカウント",
-  qr_new_device: "引き継ぎで追加",
+  qr_new_device: "端末の追加",
   qr_existing_account: "既存のアカウントを連携",
 };
 
@@ -140,7 +140,7 @@ export function FederationPage() {
         {!view ? (
           <p style={bodyTextStyle}>読み込んでいます…</p>
         ) : !view.federationId ? (
-          <p style={bodyTextStyle}>まだほかのアカウントと連携していません。下の「端末を引き継ぐ」から追加できます。</p>
+          <p style={bodyTextStyle}>まだほかのアカウントと連携していません。下の「端末を追加する」から追加できます。</p>
         ) : (
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
             {view.members.map((member) => (
@@ -177,7 +177,7 @@ export function FederationPage() {
       </div>
 
       <div style={panelStyle}>
-        <h2 style={panelTitleStyle}>📲 端末を引き継ぐ</h2>
+        <h2 style={panelTitleStyle}>📲 端末を追加する</h2>
         <p style={bodyTextStyle}>
           新しい端末でこのアカウントを使えるようにします。新しい端末には端末用のアカウントができ、この連携に加わります。
           カメラがある側で QR を読んでください。新しい端末に出る 4 桁を入れ、この端末のパスキーで承認します。
@@ -208,7 +208,7 @@ export function FederationPage() {
 
       <h2 style={{ fontSize: "1.1rem", fontWeight: 600, marginTop: "2rem" }}>同じアカウントにパスキーを足す (別の端末を追加)</h2>
       <p style={bodyTextStyle}>
-        「端末を引き継ぐ」は端末ごとにアカウントを作って束ねます。こちらはこのアカウントそのものに別の端末のパスキーを足します。
+        「端末を追加する」は端末ごとにアカウントを作って束ねます。こちらはこのアカウントそのものに別の端末のパスキーを足します。
         どちらでも、その端末から同じ利用者としてサービスを使えます。
       </p>
       <PairingPanel />

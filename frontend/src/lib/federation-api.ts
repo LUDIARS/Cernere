@@ -202,9 +202,9 @@ export function federationErrorMessage(error: unknown): string {
   const err = error as Error & { code?: string; name?: string };
   if (err.name === "NotAllowedError" || err.name === "AbortError") return "パスキーの操作が完了しませんでした。もう一度お試しください。";
   switch (err.code) {
-    case "federation_join_expired": return "引き継ぎの期限が切れました (10 分)。最初からやり直してください。";
+    case "federation_join_expired": return "端末追加の期限が切れました (10 分)。最初からやり直してください。";
     case "federation_join_code_mismatch": return "番号が一致しません。相手の端末に出ている 4 桁を確かめてください。";
-    case "federation_join_code_locked": return "番号を 3 回間違えたため、この引き継ぎは無効になりました。最初からやり直してください。";
+    case "federation_join_code_locked": return "番号を 3 回間違えたため、この端末の追加は無効になりました。最初からやり直してください。";
     case "federation_join_refused": return `連携できません: ${err.message}`;
     case "federation_revision_conflict": return "別の端末で連携が変更されました。読み直してからもう一度お試しください。";
     default: return err.message;

@@ -27,14 +27,15 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("enrollment authentication boundary", () => {
-  it("does not enroll after smartphone login when the checkbox is unchecked", async () => {
-    const adapter = new CernereCompositeAuthAdapter("", target, "redirect", true, null);
+  it("preserves service authorization after the browser dismisses device addition", async () => {
+    vi.stubGlobal("document", { cookie: "cernere_hide_device_enrollment=1" });
+    const adapter = new CernereCompositeAuthAdapter("", target, "redirect", true, returnTo);
     expect(await adapter.passkeyLoginFinish(params("cross-platform"))).toEqual({ authCode: "one-time-code" });
     expect(exchange).not.toHaveBeenCalled();
     expect(assign).not.toHaveBeenCalled();
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ target, targetMode: "redirect" });
   });
-  it("honors checked smartphone enrollment even without an external attachment hint", async () => {
+  it("offers device addition after smartphone login even without an external attachment hint", async () => {
     const adapter = new CernereCompositeAuthAdapter("", target, "redirect", true, returnTo);
     void adapter.passkeyLoginFinish(params("platform"));
     await vi.waitFor(() => expect(assign).toHaveBeenCalledOnce());

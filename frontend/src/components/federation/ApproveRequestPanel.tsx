@@ -36,7 +36,7 @@ export function ApproveRequestPanel({ view, onChange }: ApproveRequestPanelProps
   const existing = view.kind === "existing_account";
   return (
     <div style={panelStyle}>
-      <h2 style={panelTitleStyle}>🔗 {existing ? "アカウントの連携を承認する" : "新しい端末の引き継ぎを承認する"}</h2>
+      <h2 style={panelTitleStyle}>🔗 {existing ? "アカウントの連携を承認する" : "端末の追加を承認する"}</h2>
       {error && <div role="alert" style={messageStyle(true)}>{error}</div>}
 
       {view.state === "approved" || view.state === "completed" ? (
@@ -44,7 +44,7 @@ export function ApproveRequestPanel({ view, onChange }: ApproveRequestPanelProps
           承認しました。{existing ? "相手のアカウントでパスキーの確認を終えると連携します。" : "相手の端末でパスキーを作ると、この端末と同じアカウントとして使えるようになります。"}
         </div>
       ) : view.state === "locked" ? (
-        <p style={bodyTextStyle}>この引き継ぎは無効になりました。最初からやり直してください。</p>
+        <p style={bodyTextStyle}>この端末の追加は無効になりました。最初からやり直してください。</p>
       ) : view.state === "open" ? (
         <p style={bodyTextStyle}>相手の端末で QR を読むのを待っています…</p>
       ) : (

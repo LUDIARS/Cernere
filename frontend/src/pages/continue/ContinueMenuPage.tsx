@@ -6,7 +6,7 @@
  *
  *   おすすめ: 既存アカウントへこの端末のパスキーを追加 (連携は不要)
  *   ① ほかの端末のパスキーで入る … 外部認証器で入った PC では登録の案内を挟む (スキップ可)
- *   ② この端末をアカウントに引き継ぐ … 使っている端末と QR でつなぎ、この端末用のアカウントを作って連携する
+ *   ② 端末を追加する … 使っている端末と QR でつなぎ、この端末用のアカウントを作って連携する
  *   ③ はじめて使う … /start (名前 →「はじめる」)。独立した新しいアカウント
  *
  * Query: return (ログイン後の戻り先、Cernere 内のパス) / login (戻るログイン画面のパス)
@@ -45,12 +45,12 @@ export function ContinueMenuPage() {
       </div>
 
       <div style={panelStyle}>
-        <h2 style={panelTitleStyle}>② この端末をアカウントに引き継ぐ</h2>
+        <h2 style={panelTitleStyle}>② 端末を追加する</h2>
         <p style={bodyTextStyle}>
           いま使っている端末と QR でつなぎ、この端末用のパスキーを作ります。名前やサービスでの記録は、いま使っているアカウントと同じものが使われます。
         </p>
         <button type="button" onClick={() => window.location.assign(federateJoinUrl(returnTo))} style={primaryButton(false)}>
-          この端末を引き継ぐ
+          端末を追加する
         </button>
       </div>
 

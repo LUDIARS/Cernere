@@ -20,7 +20,19 @@ beforeEach(() => {
   mocks.prepare.mockResolvedValue(mocks.save);
   mocks.save.mockResolvedValue(undefined);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("document", { cookie: "" });
   vi.stubGlobal("window", { location: { href: "https://cr.example/passkeys/register?return=%2Fprofile", search: "?return=%2Fprofile", origin: "https://cr.example", hash: "", assign: mocks.assign }, setInterval, clearInterval });
+});
+it("remembers prompt dismissal without registering a passkey and can continue without creating a request", async () => {
+  await act(() => { view = create(createElement(PasskeyEnrollmentPage)); });
+  expect(view.root.findByType("h1").children).toContain("端末を追加する");
+  await act(() => view.root.findByType("input").props.onChange({ target: { checked: true } }));
+  expect(document.cookie).toContain("cernere_hide_device_enrollment=1;");
+  expect(document.cookie).not.toContain("cernere_passkey_registered");
+  await act(() => view.root.findAllByType("button").find(button => button.children.includes("今は追加せずに続ける"))!.props.onClick());
+  expect(mocks.assign).toHaveBeenCalledWith("/profile");
+  expect(mocks.request).not.toHaveBeenCalled();
+  expect(mocks.save).not.toHaveBeenCalled();
 });
 afterEach(async () => { if(view) await act(() => view.unmount()); vi.unstubAllGlobals(); vi.useRealTimers(); });
 it("creates a distinct PC request despite phone login, waits for approval, then saves on a separate click", async () => {

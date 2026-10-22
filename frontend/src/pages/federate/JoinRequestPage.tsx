@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { QrScanner } from "../../components/federation/QrScanner";
 import { ServiceUsageWarning } from "../../components/federation/ServiceUsageWarning";
+import { DeviceEnrollmentPreference } from "../../components/federation/DeviceEnrollmentPreference";
 import {
   bodyTextStyle, messageStyle, pageStyle, panelStyle, panelTitleStyle, primaryButton, secondaryButton,
 } from "../../components/security/panel-styles";
@@ -153,7 +154,7 @@ export function JoinRequestPage({ newDevice = false }: { newDevice?: boolean } =
   return (
     <main style={pageStyle}>
       <h1 style={{ fontSize: "1.4rem", fontWeight: 700 }}>
-        {loggedIn ? "このアカウントをほかのアカウントと連携する" : pcEnrollment ? "このPCにパスキーを登録する" : "この端末にパスキーを登録する"}
+        {loggedIn ? "このアカウントをほかのアカウントと連携する" : "端末を追加する"}
       </h1>
       <p style={bodyTextStyle}>
         {pcEnrollment
@@ -182,7 +183,7 @@ export function JoinRequestPage({ newDevice = false }: { newDevice?: boolean } =
             </button>
           </div>
           <p style={{ ...bodyTextStyle, marginTop: "0.75rem" }}>
-            {pcEnrollment ? "PCのカメラを使う場合は、" : "「カメラで QR を読む」は、"}承認する端末の 設定 →「アカウントの連携」→「端末を引き継ぐ (QR を出す)」で出した QR を読みます。
+            {pcEnrollment ? "PCのカメラを使う場合は、" : "「カメラで QR を読む」は、"}承認する端末の 設定 →「アカウントの連携」→「端末を追加する (QR を出す)」で出した QR を読みます。
           </p>
         </div>
       )}
@@ -226,10 +227,11 @@ export function JoinRequestPage({ newDevice = false }: { newDevice?: boolean } =
 
       {(state === "locked" || state === "completed") && (
         <div style={panelStyle}>
-          <p style={bodyTextStyle}>{state === "locked" ? "番号の入力に失敗したため、この引き継ぎは無効になりました。" : "この引き継ぎは完了しています。"}</p>
+          <p style={bodyTextStyle}>{state === "locked" ? "番号の入力に失敗したため、この端末の追加は無効になりました。" : "この端末の追加は完了しています。"}</p>
           <button type="button" onClick={restart} style={secondaryButton(false)}>最初からやり直す</button>
         </div>
       )}
+      {newDevice && <DeviceEnrollmentPreference returnTo={returnTo} busy={busy} />}
     </main>
   );
 }

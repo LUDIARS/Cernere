@@ -31,7 +31,7 @@ describe("explicit Cernere login entry", () => {
   it("keeps authentication and cancellation status free of legacy login controls", () => {
     vi.stubGlobal("window", { location: { search: "" } });
     session.mockReturnValueOnce({ adapter: {}, passkeyAutoReady: true, blockedReason: "", handoffError: "", deliver: vi.fn() } as never);
-    const html = renderToStaticMarkup(createElement(LoginAttempt, { self: true, choice: { crossDevice: false, enroll: true }, onBusy: vi.fn() }));
+    const html = renderToStaticMarkup(createElement(LoginAttempt, { self: true, choice: { crossDevice: false }, onBusy: vi.fn() }));
     expect(html).toContain("ログインは完了していません");
     expect(html).not.toContain("<button");
     expect(html).not.toContain("<a");
@@ -47,8 +47,8 @@ describe("explicit Cernere login entry", () => {
     expect(session).not.toHaveBeenCalled();
     expect(html).toContain("スマホでログイン</button>");
     expect(html).toContain("新規アカウントで登録します");
-    expect(html).toContain("この端末のパスキーを登録して連携");
-    expect(html).toContain('checked=""');
+    expect(html).not.toContain("この端末のパスキーを登録して連携");
+    expect(html).not.toContain('type="checkbox"');
     const returnTo = self ? "/profile" : "/composite/login?origin=https%3A%2F%2Fglab.example.com";
     expect(html).toContain(`href="/recover?${new URLSearchParams({ return: returnTo })}"`);
     expect(html).toContain("border-radius:var(--radius, 8px)");
