@@ -29,28 +29,12 @@ BEGIN
        OR (d.updated_at IS NOT DISTINCT FROM s.updated_at AND to_jsonb(d) <> to_jsonb(s))
   ) THEN RAISE EXCEPTION 'Unverified GLab user data copy; removal refused'; END IF;
 
-  IF EXISTS (
-    SELECT 1 FROM user_service_consents s
-    WHERE s.subject_kind = 'project' AND s.subject_key = 'EducationLab'
-      AND NOT EXISTS (
-        SELECT 1 FROM user_service_consents d
-        WHERE d.user_id = s.user_id AND d.subject_kind = 'project' AND d.subject_key = 'glab'
-          AND (d.decided_at > s.decided_at OR (
-            d.decided_at IS NOT DISTINCT FROM s.decided_at
-            AND d.declaration_version IS NOT DISTINCT FROM s.declaration_version
-            AND d.granted IS NOT DISTINCT FROM s.granted
-            AND d.denied IS NOT DISTINCT FROM s.denied
-            AND d.revoked_at IS NOT DISTINCT FROM s.revoked_at
-            AND d.fields_version IS NOT DISTINCT FROM s.fields_version
-            AND d.fields_seen IS NOT DISTINCT FROM s.fields_seen
-          ))
-      )
-  ) THEN RAISE EXCEPTION 'Unverified GLab consent copy; removal refused'; END IF;
-  IF EXISTS (
-    SELECT 1 FROM user_data_optouts s WHERE s.service_id = 'EducationLab'
-      AND NOT EXISTS (SELECT 1 FROM user_data_optouts d
-        WHERE d.service_id = 'glab' AND d.user_id = s.user_id AND d.category_key = s.category_key)
-  ) THEN RAISE EXCEPTION 'Unverified GLab opt-out copy; removal refused'; END IF;
+  -- Current decisions may differ legitimately after migration (including opt-in).
+  -- Never restore or compare against obsolete source decisions during deletion.
+  IF NOT EXISTS (SELECT 1 FROM _migrations WHERE version = '075_consolidate_glab_registration')
+     OR NOT EXISTS (SELECT 1 FROM _migrations WHERE version = '076_glab_signup_field_history') THEN
+    RAISE EXCEPTION 'Recorded GLab consolidation and consent-history migration required';
+  END IF;
 
   -- These were absent at consolidation. New integrations must not be cascaded away.
   IF EXISTS (SELECT 1 FROM edge_idp_bindings WHERE project_key = 'EducationLab')

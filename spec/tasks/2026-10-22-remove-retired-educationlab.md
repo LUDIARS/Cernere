@@ -13,8 +13,10 @@ GLab's registration, credentials, data, consent decisions and shared profiles mu
 remain untouched. Audit logs and old migration source files are not erased.
 
 The migration is one atomic statement. It refuses active or unexpected identities,
-missing destination users/consents/opt-outs, older destination data, and remaining
-integrations. An already removed source is a no-op. Empty historical table structure
+missing destination users, missing recorded completion of migrations 075/076,
+older destination data, and remaining integrations. Current consent and opt-out
+decisions may change after consolidation and are never restored from the retired
+source. An already removed source is a no-op. Empty historical table structure
 remains to avoid breaking migration compatibility; it contains no source data.
 
 Acceptance: EducationLab registration and source rows are absent after deployment;
