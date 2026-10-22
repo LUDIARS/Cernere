@@ -34,7 +34,7 @@ it("creates a distinct PC request despite phone login, waits for approval, then 
   await act(async () => { button().props.onClick(); });
   expect(mocks.prepare).toHaveBeenCalledWith(expect.objectContaining({ requestId: "request" }), true);
   expect(mocks.save).not.toHaveBeenCalled();
-  expect(button().children).toContain("この端末に保存して連携する");
+  expect(button().children).toContain("このPCにパスキーを保存する");
   await act(async () => { button().props.onClick(); expect(mocks.save).toHaveBeenCalledOnce(); });
   expect(mocks.assign).toHaveBeenCalledWith(expect.stringContaining("federated=1"));
 });

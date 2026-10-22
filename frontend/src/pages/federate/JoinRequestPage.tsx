@@ -29,6 +29,7 @@ export function JoinRequestPage({ newDevice = false }: { newDevice?: boolean } =
   // A smartphone login on this browser is not the PC identity being enrolled.
   const loggedIn = !newDevice && getAccessToken() !== null;
   const mobile = isMobileDevice();
+  const pcEnrollment = newDevice && !mobile;
   const [ticket, setTicket] = useState<DeviceTicket | null>(null);
   const [qr, setQr] = useState("");
   const [state, setState] = useState<JoinState | null>(null);
@@ -152,27 +153,36 @@ export function JoinRequestPage({ newDevice = false }: { newDevice?: boolean } =
   return (
     <main style={pageStyle}>
       <h1 style={{ fontSize: "1.4rem", fontWeight: 700 }}>
-        {loggedIn ? "このアカウントをほかのアカウントと連携する" : "この端末を引き継ぐ"}
+        {loggedIn ? "このアカウントをほかのアカウントと連携する" : pcEnrollment ? "このPCにパスキーを登録する" : "この端末にパスキーを登録する"}
       </h1>
       <p style={bodyTextStyle}>
-        いま使っている端末 (Cernere にログインしている端末) と QR でつなぎます。カメラがある側で読み、無い側で QR を出してください。
+        {pcEnrollment
+          ? "次回からこのPCでもログインできるように、PC用のパスキーを登録します。スマホでログインした後も、PCへの登録にはスマホでの承認が必要です。"
+          : "すでにCernereを使っている端末で承認してから、この端末の登録を進めます。登録する端末にQRを表示し、承認する端末で読み取れます。"}
       </p>
+      {pcEnrollment && (
+        <ol style={bodyTextStyle}>
+          <li>このPCで「QRを表示する」を押します。</li>
+          <li>スマホのカメラで読み取り、PCに表示された4桁の番号をスマホで入力して承認します。</li>
+          <li>このPCに戻り、パスキーを登録します。名前やサービスの記録はそのまま使えます。</li>
+        </ol>
+      )}
       {error && <div role="alert" style={messageStyle(true)}>{error}</div>}
       {loggedIn && services && <ServiceUsageWarning services={services} subject="このアカウント" />}
 
       {!ticket && !scanning && (
         <div style={panelStyle}>
-          <h2 style={panelTitleStyle}>📷 どちらで読みますか</h2>
+          <h2 style={panelTitleStyle}>{pcEnrollment ? "スマホで登録を承認する" : "📷 QRで端末をつなぐ"}</h2>
           <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
             <button type="button" onClick={() => { void showQr(); }} disabled={busy} style={primaryButton(busy)}>
-              この端末に QR を出す
+              {pcEnrollment ? "QRを表示する（スマホで読み取る）" : "この端末に QR を出す"}
             </button>
             <button type="button" onClick={() => setScanning(true)} disabled={busy} style={mobile ? primaryButton(busy) : secondaryButton(busy)}>
-              カメラで QR を読む
+              {pcEnrollment ? "逆にPCのカメラで読み取る" : "カメラで QR を読む"}
             </button>
           </div>
           <p style={{ ...bodyTextStyle, marginTop: "0.75rem" }}>
-            「カメラで QR を読む」は、使っている端末の 設定 →「アカウントの連携」→「端末を引き継ぐ (QR を出す)」で出した QR を読みます。
+            {pcEnrollment ? "PCのカメラを使う場合は、" : "「カメラで QR を読む」は、"}承認する端末の 設定 →「アカウントの連携」→「端末を引き継ぐ (QR を出す)」で出した QR を読みます。
           </p>
         </div>
       )}
@@ -189,14 +199,14 @@ export function JoinRequestPage({ newDevice = false }: { newDevice?: boolean } =
           {qr && state === "open" && (
             <div style={{ textAlign: "center" }}>
               <img src={qr} alt="使っている端末で読み取る QR コード" width={260} height={260} />
-              <p style={bodyTextStyle}>使っている端末のカメラで読んでください。この QR は 10 分で無効になります。他人に見せないでください。</p>
+              <p style={bodyTextStyle}>{pcEnrollment ? "Cernereにログインしているスマホのカメラで読み取ってください。" : "承認する端末のカメラで読み取ってください。"}この QR は 10 分で無効になります。他人に見せないでください。</p>
             </div>
           )}
-          <p style={{ ...bodyTextStyle, color: "var(--text)" }}>使っている端末で、次の番号を入力してください:</p>
+          <p style={{ ...bodyTextStyle, color: "var(--text)" }}>{pcEnrollment ? "スマホの承認画面で、次の4桁を入力してください:" : "承認する端末で、次の番号を入力してください:"}</p>
           <p style={{ fontSize: "2rem", fontFamily: "monospace", letterSpacing: "0.4em", textAlign: "center" }} aria-label="確認の番号">
             {ticket.code}
           </p>
-          <p style={bodyTextStyle}>承認を待っています…</p>
+          <p style={bodyTextStyle}>{pcEnrollment ? "スマホでの承認を待っています。承認後はこのPCに戻ってください。" : "承認を待っています…"}</p>
         </div>
       )}
 
@@ -209,7 +219,7 @@ export function JoinRequestPage({ newDevice = false }: { newDevice?: boolean } =
               : "この端末にパスキーを作ると、いま使っているアカウントと同じ利用者としてサービスを使えます。名前は入力しなくてかまいません。"}
           </p>
           <button type="button" onClick={() => { void complete(); }} disabled={busy} style={primaryButton(busy)}>
-            {busy ? "処理中…" : loggedIn ? "パスキーで確認して連携する" : prepared ? "この端末に保存して連携する" : "登録を準備する"}
+            {busy ? "処理中…" : loggedIn ? "パスキーで確認して連携する" : prepared ? (pcEnrollment ? "このPCにパスキーを保存する" : "この端末にパスキーを保存する") : "パスキーの登録へ進む"}
           </button>
         </div>
       )}
