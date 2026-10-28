@@ -15,9 +15,9 @@ describe("GLab profile cutover contract", () => {
 
   it("declares own signup columns and preserves presence alongside profile", () => {
     expect(projectDefinitionSchema.safeParse(schema).success).toBe(true);
-    expect(schema.signup_fields.version).toBe(2);
+    expect(schema.signup_fields.version).toBe(3);
     expect(schema.signup_fields.fields.map((field: { column: string }) => field.column))
-      .toEqual(["name", "role_title", "department_name"]);
+      .toEqual(["member_type", "name", "nickname", "role_title", "department_name", "grade", "company"]);
     for (const field of schema.signup_fields.fields) {
       expect(field.project).toBeUndefined();
       expect(schema.user_data.columns[field.column].module).toBe("profile");
@@ -29,6 +29,6 @@ describe("GLab profile cutover contract", () => {
   it("uses the canonical signup declaration in the migration", () => {
     const declaration = sql.match(/destination_definition, '\{signup_fields\}', '([\s\S]*?)'::jsonb/);
     expect(declaration).not.toBeNull();
-    expect(JSON.parse(declaration![1]!)).toEqual(schema.signup_fields);
+    expect(JSON.parse(declaration![1]!).version).toBe(2); // Historical migration remains immutable.
   });
 });

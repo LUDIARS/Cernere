@@ -24,11 +24,14 @@ type Normalized = { value: SignupValue } | { error: string };
 function normalizeText(field: SignupFieldView, raw: unknown): Normalized {
   if (raw === null) return { value: null };
   if (typeof raw !== "string") return { error: "文字で入力してください" };
+  if (field.input === "select" || field.input === "tabs") {
+    if (raw.length === 0) return { value: null };
+    return field.options?.some((option) => option.value === raw)
+      ? { value: raw }
+      : { error: "選択肢から選んでください" };
+  }
   const text = raw.trim();
   if (text.length === 0) return { value: null };
-  if (field.input === "select") {
-    return field.options?.some((o) => o.value === text) ? { value: text } : { error: "選択肢から選んでください" };
-  }
   if (field.maxLength !== null && text.length > field.maxLength) return { error: `${field.maxLength} 文字以内で入力してください` };
   return { value: text };
 }
@@ -37,6 +40,7 @@ function normalizeNumber(field: SignupFieldView, raw: unknown): Normalized {
   if (raw === null || (typeof raw === "string" && raw.trim() === "")) return { value: null };
   const n = typeof raw === "number" ? raw : typeof raw === "string" && /^-?\d+$/.test(raw.trim()) ? Number(raw.trim()) : NaN;
   if (!Number.isSafeInteger(n)) return { error: "整数で入力してください" };
+  if (field.minimum !== undefined && n < field.minimum) return { error: `${field.minimum} 以上で入力してください` };
   if (field.columnType === "integer" && (n > INT32_MAX || n < INT32_MIN)) return { error: "大きすぎる数です" };
   return { value: n };
 }
@@ -59,10 +63,17 @@ export function validateSignupFieldValues(
 ): SignupValuesCheck {
   const values: Record<string, SignupValue> = {};
   const errors: Record<string, string> = {};
+  const current = Object.fromEntries(fields.map((field) => [field.column, field.value]));
+  const effective = { ...current, ...input };
   for (const field of fields) {
+    if (field.visibleWhen && effective[field.visibleWhen.column] !== field.visibleWhen.value) continue;
     const provided = Object.prototype.hasOwnProperty.call(input, field.column);
     if (!provided) {
-      if (field.required && !field.filled) errors[field.column] = "入力してください";
+      if (field.required) {
+        const stored = normalize(field, field.value);
+        if ('error' in stored) errors[field.column] = stored.error;
+        else if (stored.value === null) errors[field.column] = "入力してください";
+      }
       continue;
     }
     const result = normalize(field, input[field.column]);

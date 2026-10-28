@@ -52,6 +52,8 @@ export interface SignupFieldView {
   column: string;
   label: string;
   required: boolean;
+  visibleWhen?: { column: string; value: string };
+  minimum?: number;
   input: SignupField["input"];
   /** 列の型 (number の範囲の検査に使う) */
   columnType: string;
@@ -132,6 +134,8 @@ export function evaluateSignupFields(input: SignupFieldsInput): SignupFieldsRequ
       column: field.column,
       label: field.label,
       required: field.required,
+      ...(field.visible_when ? { visibleWhen: field.visible_when } : {}),
+      ...(field.minimum !== undefined ? { minimum: field.minimum } : {}),
       input: field.input,
       columnType: column.type,
       maxLength: field.input === "text" || field.input === "textarea" ? textLimitOf(field) : null,
@@ -148,8 +152,12 @@ export function evaluateSignupFields(input: SignupFieldsInput): SignupFieldsRequ
   const { seen } = input;
   const shownBefore = (column: string) => seen.version !== null
     && (seen.version >= declaration.version || seen.columns.includes(column));
-  const missingRequired = all.filter((f) => f.required && !f.filled).map((f) => f.column);
-  const optionalUnfilled = all.filter((f) => !f.required && !f.filled && !shownBefore(f.column)).map((f) => f.column);
+  const active = all.filter((f) => !f.visibleWhen || input.values[f.visibleWhen.column] === f.visibleWhen.value);
+  const missingRequired = active.filter((f) => f.required && (!f.filled
+    || (f.options && !f.options.some((option) => option.value === f.value))
+    || (f.minimum !== undefined && (typeof f.value !== 'number' || f.value < f.minimum))))
+    .map((f) => f.column);
+  const optionalUnfilled = active.filter((f) => !f.required && !f.filled && !shownBefore(f.column)).map((f) => f.column);
   const asked = new Set([...missingRequired, ...optionalUnfilled]);
 
   return {
@@ -157,7 +165,8 @@ export function evaluateSignupFields(input: SignupFieldsInput): SignupFieldsRequ
     version: declaration.version,
     missingRequired,
     optionalUnfilled,
-    fields: all.filter((f) => asked.has(f.column)),
+    // A selector can activate previously hidden required fields in this same submission.
+    fields: asked.size > 0 && all.some((f) => f.visibleWhen) ? all : all.filter((f) => asked.has(f.column)),
     all,
   };
 }

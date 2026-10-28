@@ -16,9 +16,17 @@ export default {
       if (!field) return `a value for an unasked column was kept: ${column}`;
       if (!Object.prototype.hasOwnProperty.call(input, column)) return `a value was invented for ${column}`;
       if (field.required && value === null) return `required field ${column} was accepted empty`;
-      if (field.input === 'select' && value !== null && !field.options?.some((o) => o.value === value)) return `select ${column} accepted a value outside its options`;
+      if ((field.input === 'select' || field.input === 'tabs') && value !== null && !field.options?.some((o) => o.value === value)) return `select ${column} accepted a value outside its options`;
     }
     for (const field of fields) {
+      if (field.visibleWhen) {
+        const selector = Object.prototype.hasOwnProperty.call(input, field.visibleWhen.column)
+          ? input[field.visibleWhen.column] : asked.get(field.visibleWhen.column)?.value;
+        if (selector !== field.visibleWhen.value) {
+          if (field.column in result.values) return `hidden field ${field.column} was written`;
+          continue;
+        }
+      }
       if (field.required && !field.filled && !(field.column in result.values)) return `required field ${field.column} was left unfilled`;
     }
     return true;

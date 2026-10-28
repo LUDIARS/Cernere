@@ -10,6 +10,8 @@
 import type { CSSProperties } from "react";
 import type { SignupFieldErrors, SignupFieldValue, SignupFieldView, SignupFieldVisibility } from "../../lib/signup-fields-api";
 import { audienceLabel } from "../consent/consent-labels";
+import { isSignupFieldVisible } from "../../lib/signup-fields-api";
+import { SignupFieldTabs } from "./SignupFieldTabs";
 
 const fieldStyle: CSSProperties = { padding: "0.55rem 0", borderTop: "1px solid var(--border)", fontSize: "0.85rem" };
 const inputStyle: CSSProperties = {
@@ -40,6 +42,8 @@ function FieldInput(props: {
   const style = invalid ? { ...inputStyle, borderColor: "var(--red)" } : inputStyle;
   const common = { id, disabled, "aria-invalid": invalid, "aria-required": field.required };
   switch (field.input) {
+    case "tabs":
+      return <SignupFieldTabs field={field} value={value} disabled={disabled} onChange={onChange} />;
     case "textarea":
       return <textarea {...common} rows={3} maxLength={field.maxLength ?? undefined} placeholder={field.placeholder ?? undefined}
         value={typeof value === "string" ? value : ""} onChange={(e) => onChange(e.target.value)} style={style} />;
@@ -60,7 +64,7 @@ function FieldInput(props: {
         </select>
       );
     case "number":
-      return <input {...common} type="number" inputMode="numeric" step={1} placeholder={field.placeholder ?? undefined}
+      return <input {...common} type="number" inputMode="numeric" step={1} min={field.minimum} placeholder={field.placeholder ?? undefined}
         value={typeof value === "number" || typeof value === "string" ? String(value) : ""}
         onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)} style={style} />;
     default:
@@ -82,12 +86,12 @@ export function SignupFieldsForm(props: {
   return (
     <div style={{ marginBottom: "1rem" }}>
       <p style={{ fontSize: "0.85rem", fontWeight: 600, margin: "0 0 0.25rem" }}>{serviceName} で使う情報</p>
-      {fields.map((field) => {
+      {fields.filter((field) => isSignupFieldVisible(field, values)).map((field) => {
         const error = errors?.[field.column];
         return (
           <div key={field.column} style={fieldStyle}>
-            <label htmlFor={`signup-field-${field.column}`} style={{ fontWeight: 600 }}>
-              {field.label}
+            <label id={`signup-field-${field.column}-label`} htmlFor={`signup-field-${field.column}`} style={{ fontWeight: 600 }}>
+              {field.label}{!field.required && '（任意）'}
               {field.required && <span style={{ color: "var(--red)", marginLeft: "0.3rem" }} aria-label="必須">*</span>}
             </label>
             <FieldInput field={field} value={values[field.column] ?? null} invalid={!!error} disabled={disabled}

@@ -8,17 +8,22 @@
  */
 
 import { wsClient } from "./ws-client";
+import type { SignupFieldFormView, SignupFieldValue } from "./signup-fields-form";
 
-export type SignupFieldInput = "text" | "textarea" | "select" | "boolean" | "number";
+export { initialSignupValues, isSignupFieldVisible, requiredFilled } from "./signup-fields-form";
+export type { SignupFieldValue } from "./signup-fields-form";
+
+export type SignupFieldInput = "text" | "textarea" | "select" | "tabs" | "boolean" | "number";
 export type SignupFieldVisibility = "self" | "service_users" | "public";
-export type SignupFieldValue = string | number | boolean | null;
 
-export interface SignupFieldView {
+export interface SignupFieldView extends SignupFieldFormView {
   /** 保存先 project (共有を受けている列)。このサービス自身の列は null */
   project: string | null;
   column: string;
   label: string;
   required: boolean;
+  visibleWhen?: { column: string; value: string };
+  minimum?: number;
   input: SignupFieldInput;
   columnType: string;
   maxLength: number | null;
@@ -61,16 +66,3 @@ export const signupFieldsApi = {
   },
 };
 
-/** フォームの初期値 (現在の値。未入力は空)。 */
-export function initialSignupValues(fields: readonly SignupFieldView[]): Record<string, SignupFieldValue> {
-  return Object.fromEntries(fields.map((f) => [f.column, f.value]));
-}
-
-/** 必須が全て入っているか (送信ボタンの有効化。最終判定はサーバ)。 */
-export function requiredFilled(fields: readonly SignupFieldView[], values: Record<string, SignupFieldValue>): boolean {
-  return fields.every((f) => {
-    if (!f.required) return true;
-    const value = values[f.column];
-    return value !== null && value !== undefined && !(typeof value === "string" && value.trim() === "");
-  });
-}

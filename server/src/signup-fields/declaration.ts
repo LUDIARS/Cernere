@@ -38,6 +38,7 @@ const COLUMN_TYPES_BY_INPUT: Record<SignupFieldInput, readonly string[]> = {
   text: ["text"],
   textarea: ["text"],
   select: ["text"],
+  tabs: ["text"],
   boolean: ["boolean"],
   number: ["integer", "bigint"],
 };
@@ -85,6 +86,18 @@ function sharedColumn(
   return column;
 }
 
+/** Resolve the writable column used by a declaration field without adding duplicate diagnostics. */
+function declarationColumn(
+  field: SignupFieldsDeclaration["fields"][number],
+  columns: SignupColumns,
+  sharing: SignupSharing | undefined,
+): SignupColumn | null {
+  const source = fieldSourceProject(field, sharing?.ownKey ?? null);
+  return source === null
+    ? activeColumn(columns, field.column)
+    : sharedColumn(field.column, source, sharing, () => undefined);
+}
+
 /**
  * 宣言を検証する。`previousVersion` は保存済みの宣言の版 (無ければ null)。版を下げる更新は拒否する
  * (fields_version で「この版は見せた」を記録しているため、下げると聞き直しが起きなくなる)。
@@ -108,6 +121,18 @@ export function validateSignupFieldsDeclaration(
   const seen = new Set<string>();
   for (const [index, field] of declaration.fields.entries()) {
     const where = `signup_fields.fields.${index}`;
+    if (field.visible_when) {
+      const selector = declaration.fields.find((candidate) => candidate.column === field.visible_when?.column);
+      const selectorColumn = selector ? declarationColumn(selector, columns, sharing) : null;
+      const fieldColumn = declarationColumn(field, columns, sharing);
+      if (!selector || selector === field || selector.visible_when || !selector.required
+        || !["tabs", "select"].includes(selector.input)
+        || !selector.options?.some((option) => option.value === field.visible_when?.value)
+        || fieldSourceProject(selector, sharing?.ownKey ?? null) !== fieldSourceProject(field, sharing?.ownKey ?? null)
+        || !selectorColumn || !fieldColumn || selectorColumn.module !== fieldColumn.module) {
+        errors.push(`${where}.visible_when: requires an unconditional required selector in the same source and module`);
+      }
+    }
     if (seen.has(field.column)) errors.push(`${where}.column: duplicate column ${field.column}`);
     seen.add(field.column);
     const source = fieldSourceProject(field, sharing?.ownKey ?? null);

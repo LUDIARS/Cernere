@@ -8,13 +8,19 @@ export default {
     const byColumn = new Map(result.all.map((f) => [f.column, f]));
     for (const column of result.missingRequired) {
       const field = byColumn.get(column);
-      if (!field || !field.required || field.filled) return `missingRequired lists ${column}, which is not an unfilled required field`;
+      if (!field || !field.required) return `missingRequired lists ${column}, which is not a required field`;
+      if (field.visibleWhen && input.values[field.visibleWhen.column] !== field.visibleWhen.value) return `hidden field ${column} blocks registration`;
+      const hasValidOption = !field.options || field.options.some((option) => option.value === field.value);
+      const meetsMinimum = field.minimum === undefined || (typeof field.value === 'number' && field.value >= field.minimum);
+      if (field.filled && hasValidOption && meetsMinimum) {
+        return `missingRequired lists ${column}, which already has a valid value`;
+      }
     }
     for (const column of result.optionalUnfilled) {
       const field = byColumn.get(column);
       if (!field || field.required || field.filled) return `optionalUnfilled lists ${column}, which is not an unfilled optional field`;
     }
-    if (result.fields.some((f) => f.filled)) return 'a filled field is asked again';
+    if (!result.all.some((f) => f.visibleWhen) && result.fields.some((f) => f.filled)) return 'a filled field is asked again';
     const denied = input.deniedModules;
     for (const field of result.all) {
       if (field.project !== null) {

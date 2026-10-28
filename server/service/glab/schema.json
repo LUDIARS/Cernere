@@ -17,11 +17,15 @@
   ],
 
   "signup_fields": {
-    "version": 2,
+    "version": 3,
     "fields": [
+      { "column": "member_type", "label": "在校生／OB", "required": true, "input": "tabs", "options": [{ "value": "student", "label": "在校生" }, { "value": "alumni", "label": "OB" }] },
       { "column": "name", "label": "名前", "required": true, "input": "text", "max_length": 200 },
+      { "column": "nickname", "label": "ニックネーム", "required": false, "input": "text", "max_length": 200 },
       { "column": "role_title", "label": "役職", "required": true, "input": "text", "max_length": 200 },
-      { "column": "department_name", "label": "学科", "required": true, "input": "text", "max_length": 200 }
+      { "column": "department_name", "label": "学科", "required": true, "input": "text", "max_length": 200, "visible_when": { "column": "member_type", "value": "student" } },
+      { "column": "grade", "label": "学年", "required": true, "input": "number", "minimum": 1, "visible_when": { "column": "member_type", "value": "student" } },
+      { "column": "company", "label": "会社", "required": false, "input": "text", "max_length": 200, "visible_when": { "column": "member_type", "value": "alumni" } }
     ]
   },
 
@@ -29,7 +33,10 @@
     "columns": {
       "name": { "type": "text", "module": "profile", "nullable": false, "description": "氏名" },
       "role_title": { "type": "text", "module": "profile", "nullable": false, "description": "役職" },
-      "department_name": { "type": "text", "module": "profile", "nullable": false, "description": "所属学科" },
+      "member_type": { "type": "text", "module": "profile", "nullable": true, "description": "在校生 student / OB alumni" },
+      "nickname": { "type": "text", "module": "profile", "nullable": true, "description": "任意のニックネーム" },
+      "company": { "type": "text", "module": "profile", "nullable": true, "description": "OBの会社（任意）" },
+      "department_name": { "type": "text", "module": "profile", "nullable": true, "description": "所属学科（在校生は必須）" },
       "grade": { "type": "integer", "module": "profile", "nullable": true, "description": "学年" },
       "desired_job": { "type": "text", "module": "profile", "nullable": true, "description": "希望職種" },
       "available_now": { "type": "boolean", "module": "presence", "nullable": true, "default_value": "false", "description": "おれひま" },

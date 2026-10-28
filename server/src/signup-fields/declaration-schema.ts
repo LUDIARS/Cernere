@@ -8,7 +8,7 @@
 
 import { z } from "zod";
 
-export const SIGNUP_FIELD_INPUTS = ["text", "textarea", "select", "boolean", "number"] as const;
+export const SIGNUP_FIELD_INPUTS = ["text", "textarea", "select", "tabs", "boolean", "number"] as const;
 export type SignupFieldInput = (typeof SIGNUP_FIELD_INPUTS)[number];
 
 export const MAX_SIGNUP_FIELDS = 20;
@@ -34,12 +34,17 @@ export const signupFieldSchema = z.object({
   placeholder: z.string().max(200).optional(),
   help: z.string().max(400).optional(),
   options: z.array(optionSchema).min(1).max(MAX_SIGNUP_OPTIONS).optional(),
+  visible_when: z.object({ column: z.string().min(1).max(128), value: z.string().min(1).max(100) }).strict().optional(),
+  minimum: z.number().int().optional(),
 }).strict().superRefine((field, context) => {
-  if (field.input === "select" && !field.options) {
+  if ((field.input === "select" || field.input === "tabs") && !field.options) {
     context.addIssue({ code: "custom", path: ["options"], message: "select needs options" });
   }
-  if (field.input !== "select" && field.options) {
+  if (field.input !== "select" && field.input !== "tabs" && field.options) {
     context.addIssue({ code: "custom", path: ["options"], message: "options are only for select" });
+  }
+  if (field.minimum !== undefined && field.input !== "number") {
+    context.addIssue({ code: "custom", path: ["minimum"], message: "minimum is only for number" });
   }
   if (field.max_length !== undefined && field.input !== "text" && field.input !== "textarea") {
     context.addIssue({ code: "custom", path: ["max_length"], message: "max_length is only for text / textarea" });

@@ -79,4 +79,18 @@ describe("validateSignupFieldsDeclaration (共有を受けている列)", () => 
     const mixed = { version: 1, fields: [...declaration.fields, ...sharedDeclaration.fields] };
     expect(validateSignupFieldsDeclaration(mixed, columns, consent, null, sharing("EducationLab")).ok).toBe(true);
   });
+
+  it("条件付き項目は共有元でも selector と同じ module に限る", () => {
+    const source: SharedProjectDefinition = {
+      ...sharedProfile,
+      dataSharing: [{ project_key: "EducationLab", modules: ["profile", "private"], access: "readwrite" }],
+    };
+    const conditional = { version: 2, fields: [
+      { project: "vantan_user", column: "name", label: "種別", required: true, input: "tabs",
+        options: [{ value: "member", label: "会員" }] },
+      { project: "vantan_user", column: "note", label: "備考", input: "text",
+        visible_when: { column: "name", value: "member" } },
+    ] };
+    expect(errorsOf(conditional, sharing("EducationLab", source))).toContain("same source and module");
+  });
 });
