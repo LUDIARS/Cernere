@@ -10,6 +10,7 @@
  */
 
 import crypto from "node:crypto";
+import { rateLimitSubject, wideRateLimitSubject } from "./rate-limit-subject.js";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
@@ -73,10 +74,14 @@ export async function handleRecoveryCodeRoute(
   }
 }
 
-/** 匿名で叩ける入口の予算。IP ごとと全体の両方で抑え、userId 単位の予算は持たない (第三者に本人の回復枠を潰させない)。 */
+/**
+ * 匿名で叩ける入口の予算。接続元 (IPv6 は /64) と広いまとまり (IPv4 /24・IPv6 /48) で抑え、userId 単位の予算は持たない
+ * (第三者に本人の回復枠を潰させない)。全体で 1 枠にすると 1 人で全員の回復を止められるので、全体は非常止めとして桁を上げる。
+ */
 async function limitAnonymous(scope: string, ctx: RecoveryCtx): Promise<void> {
-  await checkRateLimit(`${scope}:ip:${ctx.ip ?? "anon"}`, 15, 60);
-  await checkRateLimit(`${scope}:global`, 600, 60);
+  await checkRateLimit(`${scope}:ip:${rateLimitSubject(ctx.ip)}`, 15, 60);
+  await checkRateLimit(`${scope}:wide:${wideRateLimitSubject(ctx.ip)}`, 600, 60);
+  await checkRateLimit(`${scope}:global`, 6000, 60);
 }
 
 /** proof 無しで初回のコードを出してよいか: 有効なコードが無く、作成直後か回復確定直後。 */

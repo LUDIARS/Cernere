@@ -13,6 +13,7 @@
  */
 
 import { config } from "../config.js";
+import { rateLimitSubject } from "./rate-limit-subject.js";
 import { assertDeviceOrigin } from "../auth/device-origin.js";
 import { AppError } from "../error.js";
 import { devLog } from "../logging/dev-logger.js";
@@ -86,7 +87,7 @@ const ROTATION_ID_RE =
 async function session(ctx: DeviceRequestCtx): Promise<RouteResult> {
   assertDeviceOrigin(ctx.origin);
   if (!config.deviceSessionsEnabled) throw AppError.serviceUnavailable("Device sessions are not enabled");
-  await checkRateLimit(`device-session:${ctx.ip ?? "unknown"}`, 60, 60);
+  await checkRateLimit(`device-session:${rateLimitSubject(ctx.ip)}`, 60, 60);
   if (!ctx.rotationId) {
     throw AppError.badRequest("X-Cernere-Rotation-Id header is required");
   }

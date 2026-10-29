@@ -4,6 +4,7 @@
  * @implements SPEC-MFA-ONSITE
  */
 import type uWS from "uWebSockets.js";
+import { rateLimitSubject } from "./rate-limit-subject.js";
 import { AppError } from "../error.js";
 import { limitMfa } from "../auth/mfa-records.js";
 import { handleOnsiteKioskAdmin } from "./onsite-kiosk-admin-handler.js";
@@ -40,7 +41,7 @@ export function registerOnsiteRoutes(app: uWS.TemplatedApp, http: HttpHelpers): 
         if (aborted) return;
         try { body = JSON.parse(raw || "{}"); } catch { throw AppError.badRequest("Invalid JSON"); }
       }
-      await limitMfa(`onsite-http:${ip ?? "unknown"}`, 120, 60);
+      await limitMfa(`onsite-http:${rateLimitSubject(ip)}`, 120, 60);
       const data = await handler(auth, body, parameter);
       if (!aborted) http.jsonResponse(res, "200 OK", data, [], NO_STORE);
     } catch (error) {

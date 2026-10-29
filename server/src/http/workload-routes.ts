@@ -1,4 +1,5 @@
 import type uWS from 'uWebSockets.js';
+import { rateLimitSubject } from './rate-limit-subject.js';
 import { AppError } from '../error.js';
 import { checkRateLimit } from '../redis.js';
 import { WorkloadAuthority } from '../workload/authority.js';
@@ -38,7 +39,7 @@ export function registerWorkloadRoutes(
       try {
         const raw = await http.readBody(res, 16384, () => { aborted = true; });
         if (aborted) return;
-        await limit(`workload:${action}:${ip}`, 120, 60);
+        await limit(`workload:${action}:${rateLimitSubject(ip === 'unknown' ? undefined : ip)}`, 120, 60);
         let input: unknown;
         try { input = JSON.parse(raw); } catch { throw AppError.badRequest('Invalid workload request'); }
         const result = action === 'token' ? await authority.issue(input) : await authority.introspect(input);

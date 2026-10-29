@@ -7,6 +7,7 @@
  */
 
 import { z } from "zod";
+import { rateLimitSubject, wideRateLimitSubject } from "./rate-limit-subject.js";
 
 import { actionProofStore, httpActionBinding } from "../auth/action-proof.js";
 import type { ProtectedAction } from "../auth/action-policy.js";
@@ -66,13 +67,16 @@ export async function handleFederationRoute(
   actionProof: string,
   ctx: FederationRequestCtx,
 ): Promise<RouteResult> {
-  const ip = ctx.ip ?? "anon";
+  // IPv6 は /64 にまとめる (アドレスを替えて回されないように)。
+  const ip = rateLimitSubject(ctx.ip);
   const device = summarizeUserAgent(ctx.userAgent);
   switch (action) {
     // ── device 側 (B: 未ログイン可 / C: ログイン済み) ──
     case "request-create": {
       await checkRateLimit(`federation-request:${ip}`, 10, 600);
-      await checkRateLimit("federation-request:global", 600, 600);
+      // 全体で 1 枠にすると 1 人で全員を止められるので、広いまとまり単位で数え、全体は非常止めとして桁を上げる。
+      await checkRateLimit(`federation-request:wide:${wideRateLimitSubject(ctx.ip)}`, 600, 600);
+      await checkRateLimit("federation-request:global", 6000, 600);
       const joinerUserId = await optionalUserId(authHeader);
       const created = await joinRequestStore.createDeviceRequest({ joinerUserId, device });
       return { status: "200 OK", data: {

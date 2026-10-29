@@ -7,6 +7,8 @@
  */
 
 import { getServiceProfile, updateServiceProfile } from "../project/profile-service.js";
+import { normalizeIp } from "../http/client-ip.js";
+import { rateLimitSubject } from "../http/rate-limit-subject.js";
 import { AppError } from "../error.js";
 import { findConnection } from "../enterprise/connections.js";
 import { enterpriseProjectCommand } from "../enterprise/sessions.js";
@@ -102,6 +104,7 @@ export async function dispatchProjectCommand(
     // Cernere 側 (composite 許可 origin) で行うので、 サービスは中継するだけでよい。
     // レート制限は認証済み WS に bind された projectKey を使う。payload の clientIp は
     // サービスが任意に詐称できるため、security boundary には使わず ceremony からも除く。
+    // ただし project 全体の枠の中を利用者ごとに分けるヒントにだけは使う (枠を広げることはできない)。
     case "auth.passkey-login-begin":
     case "auth.passkey-login-finish":
     case "auth.passkey-signup-begin":
@@ -112,9 +115,11 @@ export async function dispatchProjectCommand(
         throw new Error(`Unknown passkey action: ${action}`);
       }
       const ceremony = { ...payload };
+      const hintIp = typeof ceremony.clientIp === "string" ? normalizeIp(ceremony.clientIp) : undefined;
       delete ceremony.clientIp;
       return executePasskeyCompositeAction(action, ceremony, {
         projectKey,
+        ...(hintIp ? { clientHint: rateLimitSubject(hintIp) } : {}),
       });
     }
     // ─── managed_project: project_data_{key} へのユーザーデータアクセス ───

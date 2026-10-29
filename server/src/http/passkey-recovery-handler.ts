@@ -1,4 +1,5 @@
 import { verifyRegistrationResponse } from "../auth/verify-embedded-webauthn.js";
+import { rateLimitSubject } from "./rate-limit-subject.js";
 /** A recovery grant can enroll a verified passkey, never mint an access token. @implements SPEC-DEVICE-RECOVERY */
 import { randomUUID } from "node:crypto";
 import { generateRegistrationOptions, type RegistrationResponseJSON } from "@simplewebauthn/server";
@@ -16,7 +17,7 @@ const pendingSchema = z.object({ userId: z.string().uuid(), grantHash: z.string(
 const inputSchema = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/), ceremonyId: z.string().uuid().optional(), response: z.unknown().optional() }).strict();
 
 export async function handlePasskeyRecovery(action: string, input: unknown, ip?: string): Promise<{ status: string; data: unknown }> {
-  await checkRateLimit("passkey-recovery:" + (ip ?? "unknown"), 15, 60);
+  await checkRateLimit("passkey-recovery:" + rateLimitSubject(ip), 15, 60);
   const parsed = inputSchema.safeParse(input);
   if (!parsed.success) throw AppError.badRequest("Invalid recovery request");
   const p = parsed.data;

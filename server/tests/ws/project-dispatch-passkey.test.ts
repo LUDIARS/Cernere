@@ -31,16 +31,22 @@ describe("dispatchProjectCommand — auth.passkey-* (embedded SDK ceremony relay
     expect(result).toEqual({ ok: true });
   });
 
-  it("ignores a service-supplied clientIp and strips it from the ceremony payload", async () => {
+  it("strips a service-supplied clientIp from the ceremony and only uses it as a per-client hint", async () => {
     await dispatchProjectCommand("schedula", "auth", "passkey-signup-begin", {
       name: "alice",
-      clientIp: "203.0.113.7",
+      clientIp: "2001:db8:1:2::7",
     });
+    // ヒントは project の枠の中を利用者ごとに分けるだけ (projectKey は常に WS の認証から)。
     expect(mockExecute).toHaveBeenCalledWith(
       "passkey-signup-begin",
       { name: "alice" },
-      { projectKey: "schedula" },
+      { projectKey: "schedula", clientHint: "2001:db8:1:2::/64" },
     );
+  });
+
+  it("drops a clientIp that is not an IP address", async () => {
+    await dispatchProjectCommand("schedula", "auth", "passkey-login-begin", { clientIp: "evil, 1.2.3.4" });
+    expect(mockExecute).toHaveBeenCalledWith("passkey-login-begin", {}, { projectKey: "schedula" });
   });
 
   it("ignores an empty / non-string clientIp", async () => {

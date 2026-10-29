@@ -73,6 +73,7 @@ import {
   passkeyLoginRateLimits,
 } from "../auth/passkey-rate-limit.js";
 import { passkeyLoginDecoy } from "../auth/passkey-login-decoy.js";
+import { rateLimitSubject, wideRateLimitSubject } from "./rate-limit-subject.js";
 import { publicPasskeyCompositeError } from "../auth/passkey-public-error.js";
 import { AppError } from "../error.js";
 import { requireServiceAccess } from "../federation/subject.js";
@@ -103,6 +104,11 @@ export interface RequestCtx {
    * REST 直叩きでは undefined。
    */
   projectKey?: string;
+  /**
+   * project WS のみ: サービスが観測した利用者の接続元 (rate-limit-subject 済み)。サービスが自由に
+   * 決められるので、そのサービス自身の枠を利用者ごとに分けるためだけに使う (auth/passkey-rate-limit.ts)。
+   */
+  clientHint?: string;
 }
 
 
@@ -275,8 +281,10 @@ async function signupBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise
   const parsed = signupBeginSchema.safeParse(p);
   if (!parsed.success) throw AppError.badRequest("Passkey sign-up takes no name or email; set your name after signing in");
   await checkRateLimit(`passkey-signup:${passkeyAnonymousRateLimitScope(ctx)}`, 5, 600);
-  // アカウント量産の全体上限 (IP を変えて回す相手にも効かせる)。
-  await checkRateLimit("passkey-signup:global", 300, 600);
+  // アカウント量産の上限。IP を変えて回す相手には広いまとまり (IPv4 /24・IPv6 /48) で効かせる。
+  // 全体で 1 枠にすると 1 人で全員の登録を止められるので、全体は非常止めとして桁を上げる。
+  await checkRateLimit(`passkey-signup:wide:${wideRateLimitSubject(ctx.ip)}`, 300, 600);
+  await checkRateLimit("passkey-signup:global", 3000, 600);
 
   const userId = crypto.randomUUID();
   // 認証器のアカウント選択に出る名前。利用者の名前はまだ無いので、ID の先頭で区別できるようにする。
@@ -805,7 +813,7 @@ async function pairingCreate(authHeader: string): Promise<RouteResult> {
 
 async function pairingRegisterBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
   // token は単回で総当たりの意味が無い。NAT 配下の教室でも詰まらない程度の上限にする。
-  await checkRateLimit(`passkey-pairing-begin:${ctx.ip ?? "anon"}`, 60, 600);
+  await checkRateLimit(`passkey-pairing-begin:${rateLimitSubject(ctx.ip)}`, 60, 600);
   const token = typeof p.token === "string" ? p.token : "";
   return { status: "200 OK", data: await beginPairingRegistration(token) };
 }

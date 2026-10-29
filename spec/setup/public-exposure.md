@@ -70,7 +70,8 @@ AWS の cernere は本社 Vault から値を受け取り、拠点固有の値だ
   5173 / 8086 / 5432 / 6379 / 9000 / 9001 は開けない (Tunnel は外向き接続だけで動く)。
 - **Tailscale ACL**: tailnet から AWS の 8086 に来てよい端末を、Cernere を使うサービスの拠点に絞る。
   5432 / 6379 はループバック待受になるので tailnet からは届かない。
-- **Cloudflare (cr.ai-run-do.com)**: WAF Managed Rules を有効にし、`/api/auth/*` と `/api/federation/*` に
-  レート制限ルールを入れる (例: 1 IP あたり 1 分 60 回)。本文サイズはアプリ側で 256 KiB に制限済み。
+- **Cloudflare (cr.ai-run-do.com)**: WAF Managed Rules を有効にし、`/api/auth/*`・`/api/federation/*`・`/auth` (WebSocket) に
+  レート制限ルールを入れる (例: 1 IP あたり 1 分 60 回)。IPv6 は /64 で数える設定にする (アプリ側も /64・/48 で数える)。
+  本文サイズはアプリ側で 256 KiB に制限済み。
 - **監視**: Excubitor か CloudWatch で 401 / 429 / 500 の急増を通知する。auth ログ (`server/logs/auth-*.log`) の保管期間を決める。
 

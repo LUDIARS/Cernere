@@ -126,3 +126,14 @@ export async function checkRateLimit(
     throw new Error("Rate limit exceeded. Please try again later.");
   }
 }
+
+/** 数を足さずに、既に上限へ達しているかだけを見る (失敗だけを数える制限で使う)。 */
+export async function isRateLimited(key: string, maxRequests: number): Promise<boolean> {
+  const count = Number(await redis.get(`ratelimit:${key}`) ?? 0);
+  return count >= maxRequests;
+}
+
+/** 判定せずに 1 回分だけ足す (失敗の記録)。 */
+export async function recordRateLimitHit(key: string, windowSecs: number): Promise<void> {
+  await redis.eval(RATE_LIMIT_LUA, 1, `ratelimit:${key}`, String(windowSecs));
+}

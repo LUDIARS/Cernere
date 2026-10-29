@@ -28,6 +28,8 @@ import { ConsentRequiredError, consentRequiredBody } from "../consent/gate.js";
 import { isCernereFrontendOrigin } from "./cernere-origin.js";
 import { checkExchangeAudience } from "../auth/auth-code-audience.js";
 import { AppError } from "../error.js";
+import { rateLimitSubject } from "./rate-limit-subject.js";
+import { beforeCredentialCheck, recordCredentialFailure } from "../auth/credential-rate-limit.js";
 import { loadServiceIdentity, requireServiceAccess } from "../federation/subject.js";
 import { retiredLoginResult } from "../auth/retired-login.js";
 import { removeAlertTarget } from "../notify/alert-targets.js";
@@ -155,7 +157,7 @@ async function logout(p: Record<string, unknown>): Promise<RouteResult> {
 async function verify(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
   // verify は token 文字列の有効性 oracle になりうるため rate limit を課す
   // (M-1: login/register には rate limit があるのに verify には無かった非対称を解消)。
-  await checkRateLimit(`verify:${ctx.ip ?? "unknown"}`, 60, 60);
+  await checkRateLimit(`verify:${rateLimitSubject(ctx.ip)}`, 60, 60);
   const token = p.token as string;
   // プロジェクトトークンとして検証
   try {
@@ -525,16 +527,19 @@ async function projectLogin(clientId: string | undefined, clientSecret: string |
     logProjectLoginFailed(clientId, "missing credentials", ctx);
     throw new Error("client_id and client_secret are required");
   }
-  await checkRateLimit(`project_login:${clientId}`, 10, 300);
+  // client_id 単独で数えると、client_id を知る第三者が失敗要求で本物のサービスを締め出せる (auth/credential-rate-limit.ts)。
+  await beforeCredentialCheck("project_login", clientId, ctx.ip);
   const rows = await db.select().from(schema.managedProjects)
     .where(eq(schema.managedProjects.clientId, clientId)).limit(1);
   const project = rows[0];
   if (!project || !project.isActive) {
+    await recordCredentialFailure("project_login", clientId, ctx.ip);
     logProjectLoginFailed(clientId, "invalid credentials or project inactive", ctx);
     throw new Error("Unauthorized: Invalid project credentials");
   }
   const valid = await bcrypt.compare(clientSecret, project.clientSecretHash);
   if (!valid) {
+    await recordCredentialFailure("project_login", clientId, ctx.ip);
     logProjectLoginFailed(clientId, "invalid credentials", ctx);
     throw new Error("Unauthorized: Invalid project credentials");
   }
@@ -573,7 +578,7 @@ async function serviceToken(p: Record<string, unknown>, ctx: RequestCtx): Promis
   if (!clientId || !clientSecret || !targetProjectKey) {
     throw AppError.badRequest("client_id, client_secret, and target_project_key are required");
   }
-  await checkRateLimit(`service_token:${clientId}`, 60, 300);
+  await beforeCredentialCheck("service_token", clientId, ctx.ip);
 
   const { issueServiceToken } = await import("../project/service-token-issuer.js");
   let issued;
@@ -581,6 +586,7 @@ async function serviceToken(p: Record<string, unknown>, ctx: RequestCtx): Promis
     issued = await issueServiceToken({ clientId, clientSecret, targetProjectKey });
   } catch (err) {
     if (err instanceof AppError && err.statusCode === 401) {
+      await recordCredentialFailure("service_token", clientId, ctx.ip);
       logProjectLoginFailed(clientId, "invalid service-token credentials", ctx);
     }
     throw err;
@@ -608,11 +614,12 @@ async function projectLaunchCredential(
     );
   }
 
-  await checkRateLimit(`project_launch_credential:${clientId}`, 30, 300);
+  await beforeCredentialCheck("project_launch_credential", clientId, ctx.ip);
   const rows = await db.select().from(schema.managedProjects)
     .where(eq(schema.managedProjects.clientId, clientId)).limit(1);
   const issuer = rows[0];
   if (!issuer || !issuer.isActive || !await bcrypt.compare(clientSecret, issuer.clientSecretHash)) {
+    await recordCredentialFailure("project_launch_credential", clientId, ctx.ip);
     logProjectLoginFailed(clientId, "invalid launch issuer credentials", ctx);
     throw new Error("Unauthorized: Invalid project credentials");
   }

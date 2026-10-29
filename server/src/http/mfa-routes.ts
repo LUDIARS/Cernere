@@ -1,5 +1,6 @@
 /** Bounded, no-store HTTP transport for MFA. @implements SPEC-MFA-SETTINGS */
 import type uWS from "uWebSockets.js";
+import { rateLimitSubject } from "./rate-limit-subject.js";
 import { AppError } from "../error.js";
 import { limitMfa } from "../auth/mfa-records.js";
 import { handleMfaRoute } from "./mfa-handler.js";
@@ -27,7 +28,7 @@ export function registerMfaRoutes(app: uWS.TemplatedApp, http: HttpHelpers): voi
         if (aborted) return;
         try { body = JSON.parse(raw || "{}"); } catch { throw AppError.badRequest("Invalid JSON"); }
       }
-      await limitMfa(`http:${ip ?? "unknown"}`, 60, 60);
+      await limitMfa(`http:${rateLimitSubject(ip)}`, 60, 60);
       if (aborted) return;
       const data = await handleMfaRoute(action, body, auth, proof);
       if (!aborted) http.jsonResponse(res, "200 OK", data, [], { "Cache-Control": "no-store" });
