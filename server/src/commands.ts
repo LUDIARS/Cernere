@@ -29,6 +29,7 @@ import { deviceSessionCommand } from "./auth/device-command.js";
 import { loginAlertCommand } from "./notify/login-alert-command.js";
 import { securityEventCommand } from "./notify/security-event-command.js";
 import { recoveryCommand } from "./auth/recovery-command.js";
+import { hqTestAccountDeletionEnabled } from "./auth/hq-test-account-deletion.js";
 
 /**
  * Layer 2-3 を要求しないコマンド (主に「現在ログイン中であることを必須としない」もの).
@@ -364,6 +365,8 @@ async function orgProjectCmd(userId: string, action: string, p?: Record<string, 
 
 async function userCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
   switch (action) {
+    case "test_account_deletion":
+      return { enabled: hqTestAccountDeletionEnabled(process.env) };
     case "get": {
       const targetId = requireStr(p, "userId");
       const rows = await db.select().from(schema.users)
@@ -419,6 +422,12 @@ async function userCmd(userId: string, action: string, p?: Record<string, unknow
       };
     }
     case "delete_account": {
+      if (p?.hqTest === true) {
+        if (!hqTestAccountDeletionEnabled(process.env)) throw AppError.forbidden("Test account deletion is unavailable");
+        if (p.userId !== undefined || p.confirmation !== "DELETE") {
+          throw AppError.badRequest("Confirm deletion of your own test account with DELETE");
+        }
+      }
       // right to be forgotten — Cernere 一カ所で個人データを完全消去する。
       // 既定は自分自身の削除。他ユーザを対象にする場合のみ system admin を要求。
       const targetId = optStr(p, "userId") ?? userId;

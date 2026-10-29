@@ -4,6 +4,7 @@ import { PairingPanel } from "../components/security/PairingPanel";
 import { useAuth } from "../contexts/AuthContext";
 import { LinkedAccountsSection } from "./LinkedAccountsSection";
 import { MfaSettingsSection } from "./MfaSettingsSection";
+import { TestAccountDeletionSection } from "./TestAccountDeletionSection";
 import { profile as profileApi, auth as authApi, faceConsents, type UserProfileData, type ProfilePrivacy } from "../lib/api";
 
 export function ProfilePage() {
@@ -106,6 +107,7 @@ export function ProfilePage() {
           <p><strong>メール:</strong> {user?.email}</p>
           <p><strong>システムロール:</strong> <span className="badge blue">{user?.role}</span></p>
         </div>
+        <TestAccountDeletionSection />
 
         {/* パーソナリティデータ */}
         <div

@@ -22,6 +22,7 @@ const SELF_ONLY_ACTIONS = new Set<string>([
   "user_access.status",
   "user_access.apply",
   "user_access.withdraw",
+  "user.test_account_deletion",
   // オンボーディングの最初の手順 (ログイン先サービスの入力項目)。本人の行だけを読み書きする。
   // spec/plan/2026-10-15-service-signup-fields-design.md §4.2
   "signup_fields.for_return",
