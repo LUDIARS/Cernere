@@ -26,6 +26,7 @@ import { PasskeyRecoveryPage } from "./pages/PasskeyRecoveryPage";
 import { RecoveryQrPage } from "./pages/RecoveryQrPage";
 import { AccountRecoveryPage } from "./pages/admin/AccountRecoveryPage";
 import { OnsiteKiosksPage } from "./pages/admin/OnsiteKiosksPage";
+import { WorkloadAuthorityPage } from "./pages/admin/WorkloadAuthorityPage";
 import { ContinueMenuPage } from "./pages/continue/ContinueMenuPage";
 import { JoinRequestPage } from "./pages/federate/JoinRequestPage";
 import { ApprovePage } from "./pages/federate/ApprovePage";
@@ -104,6 +105,7 @@ function AppRoutes() {
         <Route path="/oidc-clients" element={<OidcClientsPage />} />
         <Route path="/enterprise" element={<EnterpriseConnectionsPage />} />
         <Route path="/onsite-kiosks" element={<OnsiteKiosksPage />} />
+        <Route path="/admin/workloads" element={<WorkloadAuthorityPage />} />
       </Route>
     </Routes>
   );

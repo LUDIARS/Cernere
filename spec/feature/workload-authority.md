@@ -7,6 +7,16 @@
 
 ## 保存・管理境界
 
+### 管理画面（workload-admin-ui）
+
+`/admin/workloads` は既存 AuthProvider / AppLayout 内の system admin 専用画面。
+登録、監視 grant、失効を別フォームとし、既存 `workload_authority` WS とサーバー側の live session/admin 検査を再利用する。
+登録は拠点で生成した Ed25519 SPKI 公開鍵だけを入力し、秘密鍵生成・取得を行わない。
+登録 credentials は React の一時 state にだけ保持し、閉じる・離脱・ログアウトで破棄する。Query cache、Web Storage、URL、ログ、ファイルへ保存しない。
+登録済み ID と key/grant ID は運用者が記録する。monitor grant は subject/audience を明示し、resource を `node:<audience>` に固定する。操作実行/Vault への grant はこの画面では扱わない。
+送信前に内容を確認し、同時送信を排他する。通信エラー・30秒応答なしでは成否不明として画面を停止し、監査記録を照合するまで再送しない。遅延成功応答は表示できる。操作は自動再試行しない。
+受入は一般ユーザーの拒否、接続なしの送信拒否、monitor grant の固定範囲、秘密情報の破棄、重複送信抑止、成否不明の扱いを確認する。
+
 `workload_principals` は site/workload 形式の不変 ID と独立 client ID、bcrypt secret hash、失効時刻を持つ。`workload_keys` は主体につき一つの登録済み Ed25519 SPKI 公開鍵と失効時刻を持つ。秘密鍵は受け取らない。鍵交換は旧主体を失効して新しい ID を登録する方式とし、失効済み行は再有効化しない。
 
 `workload_grants` は不変 ID、主体、宛先、action、resource、vault の keys 完全一致 allowlist、失効時刻を持つ。変更は失効と新規作成で行い、発行済み token に権限が後から増えない。`workload_tokens` は SHA256 token hash、公開 jti、主体、宛先、鍵 ID、grant ID、発行・期限・失効時刻のみを保持する。平文 secret / token は保存しない。

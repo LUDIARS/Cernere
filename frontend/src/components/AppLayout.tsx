@@ -16,6 +16,7 @@ const navItems = [
   { path: "/oidc-clients", label: "OIDC", adminOnly: true },
   { path: "/enterprise", label: "Cloudflare", adminOnly: true },
   { path: "/onsite-kiosks", label: "Kiosk", adminOnly: true },
+  { path: "/admin/workloads", label: "拠点認証", adminOnly: true },
 ];
 
 export function AppLayout() {

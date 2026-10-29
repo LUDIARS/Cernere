@@ -1,0 +1,8 @@
+.workload-admin { max-width: 850px; margin: auto; padding: 1.5rem; box-sizing: border-box; }
+.workload-admin section { border-top: 1px solid var(--border); margin-top: 1.5rem; padding-top: .5rem; }
+.workload-admin fieldset { border: 0; padding: 0; min-width: 0; }
+.workload-admin label { display: block; margin: .75rem 0; }
+.workload-admin input, .workload-admin textarea, .workload-admin select { display: block; width: 100%; box-sizing: border-box; padding: .5rem; color: var(--text); background: var(--bg-surface); border: 1px solid var(--border); border-radius: 4px; }
+.workload-admin button { padding: .5rem .75rem; cursor: pointer; }
+.workload-admin button:disabled { cursor: not-allowed; opacity: .6; }
+.workload-admin code { overflow-wrap: anywhere; }
