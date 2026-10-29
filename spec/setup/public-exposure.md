@@ -28,42 +28,41 @@ cernere → cernere-postgres 127.0.0.1:5432 / cernere-redis 127.0.0.1:6379 (要�
 レート制限を「接続元」と「email × 接続元」で数える (email 単独で数えると他人を締め出せる)、
 未登録 email にも同じ形の allowCredentials を返し `challengeOwner` に userId を載せない (登録有無と内部 ID を引かせない)。
 
-## Vault (`cernere`) に入れる値 — 人間が Excubitor の画面で行う
+## Vault の値 — どこに入れるか
 
-| キー | 値 | 備考 |
-|---|---|---|
-| `LISTEN_HOST` | `127.0.0.1,::1,<拠点の tailnet IP>` | 同居サービス (GLAB 等) と tailnet だけに開く。tailnet IP は拠点差なので catalog に書かない |
-| `REDIS_URL` | `redis://:<パスワード>@127.0.0.1:6379` | パスワードは AWS の `/home/ubuntu/.config/cernere/datastores.env` の `REDIS_PASSWORD` |
-| `CERNERE_IDENTITY_VERIFICATION_DISABLED` | **削除** | 残すと `CERNERE_ENV=production` で起動時に例外になり、Cernere が起動しない |
+AWS の cernere は本社 Vault から値を受け取り、拠点固有の値だけを **AWS の Excubitor の拠点上書き**
+(`overrides.cernere`、Excubitor spec/feature/vault.md の SPEC-EX-VAULT-SITE-OVERRIDE) で持つ。
+拠点固有の値を本社側に入れると、AWS では古い上書きが後勝ちで使われて効かないうえ、cernere を担当する
+他の拠点にも配られる。
 
-## 拠点 (AWS) で行うこと
+| キー | 入れる場所 | 値 | 備考 |
+|---|---|---|---|
+| `LISTEN_HOST` | AWS の拠点上書き | `127.0.0.1,::1,<AWS の tailnet IP>` | 同居サービス (GLAB 等) と tailnet だけに開く。本番で未設定なら起動を止める |
+| `REDIS_URL` | AWS の拠点上書き | `redis://:<パスワード>@127.0.0.1:6379` | パスワードは AWS の `~/.config/cernere/datastores.env` の `REDIS_PASSWORD` |
+| `CERNERE_IDENTITY_VERIFICATION_DISABLED` | 本社の `cernere` の紐付けから**外す** | — | 残すと `CERNERE_ENV=production` で起動時に例外になり、Cernere が起動しない |
+| `CERNERE_ENV` / `CERNERE_TRUSTED_PROXIES` / `NODE_ENV` | **入れない** | — | catalog が持つ。Vault に入れると catalog の値より優先されて崩れる |
 
-1. Redis パスワードを拠点で作る (値を通信路・ログに出さない)。
+## 手順 (順番どおりに行う)
+
+1. **本社**: `cernere` の紐付けから `CERNERE_IDENTITY_VERIFICATION_DISABLED` を外す。
    ```sh
-   install -d -m 700 /home/ubuntu/.config/cernere
-   umask 077; printf 'REDIS_PASSWORD=%s\n' "$(openssl rand -hex 32)" > /home/ubuntu/.config/cernere/datastores.env
+   node scripts/site/public-hardening/hq-vault-unbind.mjs
    ```
-2. Vault を上の表のとおり更新する (人間)。
-3. Postgres / Redis をループバック待受 + パスワード付きで作り直す (データは既存 volume のまま)。
-   ```sh
-   cd /var/share/LUDIARS/Cernere
-   docker stop cernere-redis cernere-postgres && docker rm cernere-redis cernere-postgres
-   docker compose -p cernere -f deploy/datastores/docker-compose.yaml \
-     --env-file /home/ubuntu/.config/cernere/datastores.env up -d
-   ss -ltn | grep -E ':(5432|6379) '   # 127.0.0.1 だけになっていること
-   ```
-   旧定義は `/home/ubuntu/ludiars/Cernere/docker-compose.yaml` (古い checkout)。戻すときはそちらで `docker compose up -d postgres redis`。
-4. Excubitor の peer operation で `cernere` → `cernere-frontend` の順に deploy (setup でビルドされる)。
+2. **AWS**: 拠点のシェル (Excubitor の terminal profile 経由でよい) で `scripts/site/public-hardening/aws-site.sh` を流す。
+   何度流しても同じ結果になり、秘密の値は表示しない。行うことは次の 4 つ。
+   - Redis パスワードを拠点で作る (`~/.config/cernere/datastores.env`、0600)
+   - 拠点上書きに `LISTEN_HOST` / `REDIS_URL` を入れ、`overrides.cernere` に名前を足す
+   - Postgres / Redis をループバック待受 + Redis パスワード必須で作り直す (データは既存 volume。
+     定義は `deploy/datastores/docker-compose.yaml` と同じもの)
+   - cloudflared の Tunnel トークンをプロセス引数から `--token-file` へ移す (接続を確認できなければ元に戻す)。
+     Tunnel は AWS の全公開サービス (GLAB 等) が共有するので、切り替え直後に各ホスト名の到達を確認する
+   Redis はパスワード必須になるので、**この直後に 3 まで進める** (間が空くと、動いている Cernere が NOAUTH で止まる)。
+3. **AWS**: Excubitor の peer operation で `cernere` → `cernere-frontend` の順に deploy (setup でビルドされる)。
    `http://127.0.0.1:8086/health` と `https://cr.ai-run-do.com/` を確認する。
-5. cloudflared の Tunnel トークンをプロセス引数から外す (同じホストの全ユーザーが `ps` で読めるため)。
-   cloudflared 2025.4 以降の `--token-file` を使う。
-   ```sh
-   sudo install -d -m 700 /etc/cloudflared
-   # 現在の ExecStart の --token の値を /etc/cloudflared/tunnel-token (0600 root) へ移す
-   sudo systemctl edit cloudflared   # ExecStart= を空にしてから --token-file /etc/cloudflared/tunnel-token で再定義
-   sudo systemctl restart cloudflared
-   ```
-   Tunnel は AWS の全公開サービス (GLAB 等) が共有するので、切り替え直後に各ホスト名の到達を確認する。
+
+戻すときは、旧 compose (Redis はパスワード無し・全インターフェース待受) で `docker compose up -d postgres redis`、
+拠点上書きから `LISTEN_HOST` / `REDIS_URL` を外し、cloudflared の drop-in
+(`/etc/systemd/system/cloudflared.service.d/token-file.conf`) を消して `systemctl daemon-reload && systemctl restart cloudflared`。
 
 ## 人間が行うこと (この環境から権限が無いもの)
 

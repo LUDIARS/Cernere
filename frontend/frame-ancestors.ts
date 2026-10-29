@@ -1,16 +1,7 @@
 import type { Plugin, Connect } from "vite";
+import { frameAncestorsPolicy } from "./frame-ancestors-policy.mjs";
 
-/** @implements SPEC-EMBEDDED-COMPOSITE-001 */
-export function frameAncestorsPolicy(origins: unknown): string {
-  if (!Array.isArray(origins) || origins.length === 0) throw new Error("Missing embedding allowlist");
-  const sources = origins.map((origin: unknown) => {
-    if (typeof origin !== "string") throw new Error("Invalid embedding origin");
-    const url = new URL(origin);
-    if (!["http:", "https:"].includes(url.protocol) || url.origin !== origin) throw new Error("Invalid embedding origin");
-    return origin;
-  });
-  return `frame-ancestors 'self' ${[...new Set(sources)].join(" ")}`;
-}
+export { frameAncestorsPolicy };
 
 /** Protect every served document, including registration/recovery after frame navigation.
  * @implements SPEC-EMBEDDED-COMPOSITE-001

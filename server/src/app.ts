@@ -183,15 +183,33 @@ function jsonResponse(
   cookies: string[] = [],
   headers: Readonly<Record<string, string>> = {},
 ): void {
-  res.cork(() => {
-    res.writeStatus(status)
-      .writeHeader("Content-Type", "application/json")
-      .writeHeader("Access-Control-Allow-Origin", config.frontendUrl)
-      .writeHeader("Access-Control-Allow-Credentials", "true");
-    for (const [name, value] of Object.entries(headers)) res.writeHeader(name, value);
-    for (const cookie of cookies) res.writeHeader("Set-Cookie", cookie);
-    res.end(JSON.stringify(data));
-  });
+  try {
+    res.cork(() => {
+      res.writeStatus(status)
+        .writeHeader("Content-Type", "application/json")
+        .writeHeader("Access-Control-Allow-Origin", config.frontendUrl)
+        .writeHeader("Access-Control-Allow-Credentials", "true");
+      for (const [name, value] of Object.entries(headers)) res.writeHeader(name, value);
+      for (const cookie of cookies) res.writeHeader("Set-Cookie", cookie);
+      res.end(JSON.stringify(data));
+    });
+  } catch (err) {
+    // 利用者が途中で切った応答に書くと uWS は例外を投げる。ハンドラの外へ漏れると
+    // unhandledRejection でプロセスごと落ちるので、ここで止める (書く先はもう無い)。
+    devLog("http.response.dropped", { status, reason: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/**
+ * Host ヘッダからホスト名を取る。壊れた値 (`[` や空) は 400。
+ * try の外で new URL を作るとハンドラの Promise が reject され、プロセスが落ちる。
+ */
+function requestHostname(host: string): string {
+  try {
+    const hostname = new URL("https://" + host).hostname;
+    if (hostname) return hostname;
+  } catch { /* 下で 400 にする */ }
+  throw AppError.badRequest("Invalid Host header");
 }
 
 /**
@@ -212,7 +230,16 @@ const STATUS_TEXT: Record<number, string> = {
   503: "503 Service Unavailable",
 };
 
-function classifyError(err: unknown): { status: string; message: string; code?: string } {
+/** drizzle のクエリ失敗 (DrizzleQueryError) か、pg の SQLSTATE を持つ例外か。 */
+export function isDatabaseError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (err.name === "DrizzleQueryError" || err.message.startsWith("Failed query")) return true;
+  const sqlState = (value: unknown) =>
+    typeof (value as { code?: unknown })?.code === "string" && /^[0-9A-Z]{5}$/.test((value as { code: string }).code);
+  return sqlState(err) || sqlState((err as { cause?: unknown }).cause);
+}
+
+export function classifyError(err: unknown): { status: string; message: string; code?: string } {
   // AppError は statusCode を明示的に持つため、メッセージ文言の正規表現マッチに
   // 依存せずそのまま使う。 メッセージがどんな文言でも (例: "Invalid or expired
   // token" のように "Unauthorized" を含まない) 正しい 4xx にマップされる。
@@ -221,6 +248,12 @@ function classifyError(err: unknown): { status: string; message: string; code?: 
     const message = err.statusCode >= 500 && !config.isDevelopment ? "Internal server error" : err.message;
     // code は機械可読な分岐用 (§11.4)。 持たない AppError では undefined のまま。
     return err.code ? { status, message, code: err.code } : { status, message };
+  }
+
+  // DB の例外は文言に SQL 文と params (= 利用者の入力) を含む。下の文言判定に掛けると、入力に
+  // "Unauthorized" 等を混ぜるだけで 4xx として SQL 文が返ってしまうので、常に 500 + 固定文言にする。
+  if (isDatabaseError(err)) {
+    return { status: "500 Internal Server Error", message: "Internal server error" };
   }
 
   const msg = err instanceof Error ? err.message : String(err ?? "Internal error");
@@ -440,10 +473,10 @@ export function createApp() {
     const phase = req.getParameter(0) ?? "";
     const authHeader = req.getHeader("authorization") ?? "";
     let aborted = false;
-    res.onAborted(() => { aborted = true; });
 
     try {
-      const body = await readBody(res);
+      // onAborted は readBody に渡して一本化する (先に登録しても readBody の登録で上書きされ aborted が立たない)。
+      const body = await readBody(res, DEFAULT_MAX_BODY_BYTES, () => { aborted = true; });
       if (aborted) return;
       const result = await handleActionAuthRoute(phase, body, authHeader);
       jsonResponse(res, result.status, result.data);
@@ -510,11 +543,10 @@ export function createApp() {
     const origin = req.getHeader("origin") ?? "";
     const ip = getRemoteIp(res, req);
     let aborted = false;
-    res.onAborted(() => { aborted = true; });
 
     devLog("http.auth.begin", { action, ip, userAgent });
     try {
-      const body = await readBody(res);
+      const body = await readBody(res, DEFAULT_MAX_BODY_BYTES, () => { aborted = true; });
       if (aborted) return;
       devLog("http.auth.body", { action, bodyLen: body.length });
       const result = await handleAuthRoute(action, body, authHeader, { ip, userAgent, actionProof, origin });
@@ -546,7 +578,6 @@ export function createApp() {
     const rotationId = req.getHeader("x-cernere-rotation-id") ?? "";
     const ip = getRemoteIp(res, req);
     let aborted = false;
-    res.onAborted(() => { aborted = true; });
 
     devLog("http.device.begin", { action, ip });
     try {
@@ -555,7 +586,7 @@ export function createApp() {
       const result = await handleDeviceRoute(action, body, authHeader, {
         cookieHeader,
         origin,
-        hostname: new URL("https://" + host).hostname,
+        hostname: requestHostname(host),
         rotationId,
         ip,
       });
@@ -582,15 +613,15 @@ export function createApp() {
     const userAgent = req.getHeader("user-agent") ?? undefined;
     // Device Credential Cookie の属性判定に要求ホストが要る (§10.1)。
     const origin = req.getHeader("origin") ?? "";
-    const hostname = new URL("https://" + (req.getHeader("host") ?? "")).hostname;
+    const host = req.getHeader("host") ?? "";
     const ip = getRemoteIp(res, req);
     let aborted = false;
-    res.onAborted(() => { aborted = true; });
 
     devLog("http.passkey.begin", { action, ip, userAgent });
     try {
-      const body = await readBody(res);
+      const body = await readBody(res, DEFAULT_MAX_BODY_BYTES, () => { aborted = true; });
       if (aborted) return;
+      const hostname = requestHostname(host);
       const result = await handlePasskeyRoute(action, body, authHeader, { ip, userAgent, hostname, origin }, "", actionProof);
       devLog("http.passkey.ok", { action, status: result.status });
       // 端末追加の QR URL やリカバリーコードなど、一度きりの秘密を返す応答がある。
@@ -745,11 +776,10 @@ export function createApp() {
     const userAgent = req.getHeader("user-agent") ?? undefined;
     const ip = getRemoteIp(res, req);
     let aborted = false;
-    res.onAborted(() => { aborted = true; });
 
     devLog("http.composite.begin", { action, ip, userAgent });
     try {
-      const body = await readBody(res);
+      const body = await readBody(res, DEFAULT_MAX_BODY_BYTES, () => { aborted = true; });
       if (aborted) return;
       devLog("http.composite.body", { action, bodyLen: body.length });
       const result = await handleCompositeRoute(action, body, { ip, userAgent });

@@ -4,7 +4,7 @@
 import { createReadStream } from "node:fs";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
-import { isBackendPath, isUpgradePath, proxyHttp, proxyUpgrade } from "./backend-proxy.mjs";
+import { bodyFraming, isBackendPath, isUpgradePath, proxyHttp, proxyUpgrade } from "./backend-proxy.mjs";
 import { createFramePolicySource, fetchAllowedOrigins } from "./frame-policy.mjs";
 import { parseRequestTarget } from "./request-target.mjs";
 import { EXTRA_CSP, SECURITY_HEADERS } from "./security-headers.mjs";
@@ -54,7 +54,7 @@ const server = http.createServer((req, res) => {
 
 server.on("upgrade", (req, socket, head) => {
   const target = parseRequestTarget(req.url);
-  if (req.method !== "GET" || !target || !isUpgradePath(target.pathname)) return socket.destroy();
+  if (req.method !== "GET" || !target || !isUpgradePath(target.pathname) || bodyFraming(req.method, req.headers).reject) return socket.destroy();
   proxyUpgrade(req, socket, head, backend, target.path);
 });
 

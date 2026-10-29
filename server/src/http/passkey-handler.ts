@@ -614,13 +614,10 @@ async function loginBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise<
       }).from(schema.passkeys).where(activePasskeysOf(user.id))
       : [];
     // 未登録・passkey 無しでも同じ形で返し、登録の有無を外から分からなくする。
+    // transports は付けない。本物だけに付くと、偽物との形の違いで登録の有無が分かる
+    // (transports は認証器を探す順番のヒントで、無くてもブラウザは全経路を試す)。
     allowCredentials = rows.length > 0
-      ? rows.map((r) => ({
-        id: r.credentialId,
-        transports: Array.isArray(r.transports)
-          ? (r.transports as AuthenticatorTransportFuture[])
-          : undefined,
-      }))
+      ? rows.map((r) => ({ id: r.credentialId }))
       : passkeyLoginDecoy(email, config.jwtSecret);
   }
 

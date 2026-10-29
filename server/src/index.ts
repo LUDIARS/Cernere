@@ -32,6 +32,10 @@ async function main() {
   // 未設定なら全インターフェース。 本社のテスト用 Cernere は 127.0.0.1 (spec/setup/hq-test-instance.md)、
   // 外部公開する本番はループバック + tailnet (spec/setup/public-exposure.md)。
   const listenHosts = readListenHosts(process.env);
+  // 本番で未設定だと全インターフェースで待ち受け、SG の開け忘れ 1 つで Cloudflare を素通りされる。
+  if (config.isProduction && !listenHosts) {
+    throw new Error("LISTEN_HOST is required in production (spec/setup/public-exposure.md)");
+  }
 
   await runMigrations();
   await purgeExpiredFaceConsents();
@@ -60,6 +64,12 @@ async function main() {
   // 審査待ちの利用申請を admin へまとめて知らせる (許可制 案 A)。
   startAccessRequestDigest();
 }
+
+// 1 リクエストの取りこぼした reject でプロセスごと落とさない (Node の既定は unhandledRejection で終了)。
+// 原因は記録して直す。起動前の失敗は下の main().catch が拾うので、ここでは止めない。
+process.on("unhandledRejection", (reason) => {
+  console.error("[server] Unhandled rejection (request kept the process alive):", reason);
+});
 
 main().catch((err) => {
   console.error("[server] Fatal error:", err);

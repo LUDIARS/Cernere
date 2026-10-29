@@ -6,7 +6,7 @@
 # - データは旧 compose (project 名 cernere) が作った volume をそのまま使う。
 #
 #   docker compose -p cernere -f deploy/datastores/docker-compose.yaml \
-#     --env-file /home/ubuntu/.config/cernere/datastores.env up -d
+#     --env-file ~/.config/cernere/datastores.env up -d
 name: cernere
 
 services:

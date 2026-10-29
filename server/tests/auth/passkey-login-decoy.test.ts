@@ -15,6 +15,7 @@ describe("passkey login decoy", () => {
   it("looks like a credential id (base64url, 32 bytes)", () => {
     const [decoy] = passkeyLoginDecoy("a@example.com", "s1");
     expect(decoy.id).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(decoy.transports.length).toBeGreaterThan(0);
+    // 本物の allowCredentials と同じく id だけを持つ (形の違いで登録有無を見分けさせない)。
+    expect(Object.keys(decoy)).toEqual(["id"]);
   });
 });

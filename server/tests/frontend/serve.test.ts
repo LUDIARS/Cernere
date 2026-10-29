@@ -88,7 +88,7 @@ describe("frontend backend proxy", () => {
   it("writes the normalized path, not the raw request line, for upgrades", () => {
     const backend = new URL("http://127.0.0.1:8086");
     const head = upgradeRequestHead({ method: "GET", url: "/raw/../auth", headers: { host: "cr.example", upgrade: "websocket" } }, backend, "/auth");
-    expect(head).toBe("GET /auth HTTP/1.1\r\nhost: 127.0.0.1:8086\r\nupgrade: websocket\r\n\r\n");
+    expect(head).toBe("GET /auth HTTP/1.1\r\nhost: 127.0.0.1:8086\r\nconnection: Upgrade\r\nupgrade: websocket\r\n\r\n");
   });
 });
 
