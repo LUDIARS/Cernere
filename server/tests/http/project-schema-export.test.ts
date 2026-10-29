@@ -131,6 +131,8 @@ describe("GET /api/admin/projects/schema-export handler (db mocked)", () => {
 
   it("200s for a valid project/service token (no users table lookup needed)", async () => {
     const token = generateProjectToken("client-1", "ostiarius");
+    // export-auth が最初に呼出元 project の service_scopes を引く (scope 宣言が要る)。
+    mockProjectsRows.mockReturnValueOnce([{ schemaDefinition: { service_scopes: ["project-schema:read"] } } as never]);
     mockProjectsRows.mockReturnValue([activeProject("vantan_user", true)]);
 
     const result = await exportProjectSchemas(`Bearer ${token}`, "");
@@ -143,6 +145,8 @@ describe("GET /api/admin/projects/schema-export handler (db mocked)", () => {
 
   it("?key= filters to a single project and includes it even when inactive", async () => {
     const token = generateProjectToken("client-1", "ostiarius");
+    // export-auth が最初に呼出元 project の service_scopes を引く (scope 宣言が要る)。
+    mockProjectsRows.mockReturnValueOnce([{ schemaDefinition: { service_scopes: ["project-schema:read"] } } as never]);
     mockProjectsRows.mockReturnValue([activeProject("retired_project", false)]);
 
     const result = await exportProjectSchemas(`Bearer ${token}`, "key=retired_project");
@@ -154,9 +158,17 @@ describe("GET /api/admin/projects/schema-export handler (db mocked)", () => {
 
   it("404s when ?key= does not match any project", async () => {
     const token = generateProjectToken("client-1", "ostiarius");
+    // export-auth が最初に呼出元 project の service_scopes を引く (scope 宣言が要る)。
+    mockProjectsRows.mockReturnValueOnce([{ schemaDefinition: { service_scopes: ["project-schema:read"] } } as never]);
     mockProjectsRows.mockReturnValue([]);
 
     await expect(exportProjectSchemas(`Bearer ${token}`, "key=nonexistent"))
       .rejects.toThrow(/not found/i);
+  });
+
+  it("403s for a project token whose project has not declared project-schema:read", async () => {
+    const token = generateProjectToken("client-9", "some-game");
+    mockProjectsRows.mockReturnValue([activeProject("vantan_user", true)]);
+    await expect(exportProjectSchemas(`Bearer ${token}`, "")).rejects.toThrow(/scope project-schema:read is required/);
   });
 });

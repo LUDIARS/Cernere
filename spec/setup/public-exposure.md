@@ -42,6 +42,21 @@ AWS の cernere は本社 Vault から値を受け取り、拠点固有の値だ
 | `CERNERE_IDENTITY_VERIFICATION_DISABLED` | 本社の `cernere` の紐付けから**外す** | — | 残すと `CERNERE_ENV=production` で起動時に例外になり、Cernere が起動しない |
 | `CERNERE_ENV` / `CERNERE_TRUSTED_PROXIES` / `NODE_ENV` | **入れない** | — | catalog が持つ。Vault に入れると catalog の値より優先されて崩れる |
 
+## export 系の口の scope (反映前に宣言する)
+
+passkey の公開鍵一括取得・名簿・スキーマ取得・kiosk の authCode 交換は、project token に加えて
+呼出元 project の `service_scopes` (管理者所有) に次の scope の宣言を要る。宣言の無い project の token は 403 になる。
+以前は有効な project token なら何でも通っていた (どのサービスの client_secret でも全利用者の台帳を引けた)。
+
+| 口 | scope | 使う project (2026-10 時点) |
+|---|---|---|
+| `GET /api/auth/passkey/export` | `passkey:export` | Ostiarius |
+| `GET /api/identity/roster` | `identity-roster:read` | Ostiarius |
+| `POST /api/auth/code/exchange` | `auth-code:kiosk-exchange` | Ostiarius |
+| `GET /api/admin/projects/schema-export` | `project-schema:read` | Foedus |
+
+反映する前に、Cernere の管理画面でこれらの project の service_scopes に宣言を足す (管理者ユーザーの token は scope 無しで通る)。
+
 ## 手順 (順番どおりに行う)
 
 1. **本社**: `cernere` の紐付けから `CERNERE_IDENTITY_VERIFICATION_DISABLED` を外す。

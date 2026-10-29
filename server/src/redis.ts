@@ -34,11 +34,28 @@ export interface RedisSession {
   authorization?: UserSessionState;
 }
 
+/**
+ * WS の再接続用セッションを保存する。寿命は元の access token の期限で打ち切る。
+ * 7 日のままだと、漏れた access token で 1 回つないだだけで、token の期限切れ後も
+ * 利用者のログアウト後も session_id で再接続できてしまう (2026-10-29 の点検)。
+ */
 export async function putSession(session: RedisSession): Promise<void> {
   const authorization = await verifyToken(session.accessToken);
   if (authorization.sub !== session.userId) throw new Error("Session user mismatch");
+  const expiresAtMs = sessionExpiry(Date.parse(session.expiresAt), authorization.exp);
+  const ttlSecs = Math.max(1, Math.ceil((expiresAtMs - Date.now()) / 1000));
   const key = `session:${session.id}`;
-  await redis.set(key, JSON.stringify({ ...session, authorization, authenticationVersion: 3 }), "EX", SESSION_TTL_SECS);
+  await redis.set(key, JSON.stringify({
+    ...session, expiresAt: new Date(expiresAtMs).toISOString(), authorization, authenticationVersion: 3,
+  }), "EX", ttlSecs);
+}
+
+/** 要求された期限と access token の exp (秒) の早いほう。どちらも無効なら今から SESSION_TTL_SECS。 */
+export function sessionExpiry(requestedMs: number, tokenExpSecs: unknown, now = Date.now()): number {
+  const candidates = [now + SESSION_TTL_SECS * 1000];
+  if (Number.isFinite(requestedMs)) candidates.push(requestedMs);
+  if (typeof tokenExpSecs === "number" && Number.isFinite(tokenExpSecs)) candidates.push(tokenExpSecs * 1000);
+  return Math.min(...candidates);
 }
 
 export async function getSession(sessionId: string): Promise<RedisSession | null> {

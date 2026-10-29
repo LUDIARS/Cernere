@@ -18,6 +18,7 @@ import type { ClientMessage, ServerMessage } from "./protocol.js";
 import { logUserWsConnect, logUserWsDisconnect } from "../logging/auth-logger.js";
 import { resolveWsActionTarget } from "../auth/action-policy.js";
 import { actionProofStore, wsActionBinding } from "../auth/action-proof.js";
+import { GUEST_LIMITS, guestSlots } from "./guest-limits.js";
 import { config } from "../config.js";
 
 const PING_INTERVAL_MS = 30_000;
@@ -26,6 +27,18 @@ const PING_INTERVAL_MS = 30_000;
 export const GUEST_MAX_MESSAGE_BYTES = 16 * 1024;
 
 const pingTimers = new Map<string, ReturnType<typeof setInterval>>();
+/** ゲストのままでいられる時間を過ぎたら切るタイマー (sessionId ごと)。 */
+const guestTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** ゲスト枠と寿命タイマーを片付ける。閉じたときと昇格したときに 1 回だけ効く。 */
+function releaseGuest(data: WsUserData, guestSessionId: string): void {
+  const timer = guestTimers.get(guestSessionId);
+  if (timer) { clearTimeout(timer); guestTimers.delete(guestSessionId); }
+  if (data.guestSlot !== undefined) {
+    guestSlots.release(data.guestSlot);
+    delete data.guestSlot;
+  }
+}
 
 async function sessionIsActive(ws: uWS.WebSocket<WsUserData>): Promise<boolean> {
   const data = ws.getUserData();
@@ -89,6 +102,11 @@ export async function handleWsOpen(ws: uWS.WebSocket<WsUserData>): Promise<void>
 
   if (data.isGuest) {
     send(ws, { type: "guest_connected", session_id: data.sessionId });
+    const guestSessionId = data.sessionId;
+    guestTimers.set(guestSessionId, setTimeout(() => {
+      guestTimers.delete(guestSessionId);
+      if (!data.closed && data.isGuest && !data.promoted) ws.end(1008, "Guest session expired");
+    }, GUEST_LIMITS.lifetimeMs));
     return;
   }
 
@@ -155,6 +173,7 @@ export async function handleWsMessage(
             expiresAt: new Date(now + SESSION_TTL_SECS * 1000).toISOString(),
             accessToken: result.accessToken,
           });
+          releaseGuest(data, data.sessionId);
           data.userId = result.userId;
           data.sessionId = newSessionId;
           data.isGuest = false;
@@ -241,6 +260,7 @@ export async function handleWsClose(ws: uWS.WebSocket<WsUserData>): Promise<void
   // 最優先: send() が走らないよう同期的にフラグを立てる。
   // これ以降の await 内で別経路 (setInterval 等) が send を試みても握り潰される。
   data.closed = true;
+  releaseGuest(data, data.sessionId);
   const timer = pingTimers.get(data.sessionId);
   if (timer) { clearInterval(timer); pingTimers.delete(data.sessionId); }
 

@@ -43,6 +43,7 @@ import {
   handleWsClose,
 } from "./ws/handler.js";
 import { resolveWsAuth } from "./ws/auth.js";
+import { guestSlots } from "./ws/guest-limits.js";
 import {
   handleProjectWsOpen,
   handleProjectWsMessage,
@@ -69,6 +70,8 @@ export interface WsUserData {
   promoted: boolean;
   /** upgrade 時の接続元 IP (ゲストログインの per-IP レート制限に使う。監査用途)。 */
   ip?: string;
+  /** ゲスト枠を取った接続元 (ws/guest-limits.ts)。閉じるか昇格したときに返して消す。 */
+  guestSlot?: string;
   /**
    * close 後に send() するレースを防ぐフラグ。close ハンドラで即 true にする。
    * uWS は閉じた WebSocket を触ると例外を投げるため、async の await 挟み後の
@@ -346,9 +349,15 @@ export function createApp() {
       const auth = await resolveWsAuth(token, sessionId);
       if (aborted) return;
 
+      // 資格情報なしはゲスト。接続元ごと・全体の同時接続数に上限を置く (ws/guest-limits.ts)。
+      const guestSource = auth ? undefined : (ip ?? "anon");
+      if (guestSource !== undefined && !guestSlots.acquire(guestSource)) {
+        res.cork(() => { res.writeStatus("429 Too Many Requests").end("Too many guest connections"); });
+        return;
+      }
       const userData: WsUserData = auth
         ? { userId: auth.userId, sessionId: auth.sessionId, isGuest: false, promoted: false, closed: false, ip }
-        : { userId: "", sessionId: `guest_${crypto.randomUUID()}`, isGuest: true, promoted: false, closed: false, ip };
+        : { userId: "", sessionId: `guest_${crypto.randomUUID()}`, isGuest: true, promoted: false, closed: false, ip, guestSlot: guestSource };
 
       res.cork(() => {
         res.upgrade(userData, secWsKey, echoProtocol, secWsExtensions, context);

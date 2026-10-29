@@ -11,7 +11,7 @@ import { z } from "zod";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { AppError } from "../error.js";
-import { requireExportAuth } from "./export-auth.js";
+import { EXPORT_SCOPES, requireExportAuth } from "./export-auth.js";
 
 export interface IdentityRosterRouteResult { status: string; data: unknown }
 
@@ -23,7 +23,7 @@ export async function handleIdentityRosterRoute(
   query: string,
 ): Promise<IdentityRosterRouteResult> {
   if (method !== "GET") throw AppError.notFound("Unknown identity roster route");
-  await requireExportAuth(authHeader);
+  await requireExportAuth(authHeader, EXPORT_SCOPES.identityRoster);
   const parsed = querySchema.safeParse(Object.fromEntries(new URLSearchParams(query)));
   if (!parsed.success) throw AppError.badRequest("facilityId is required");
 

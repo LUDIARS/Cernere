@@ -25,7 +25,7 @@ import { hashRefreshToken } from "../auth/token-hash.js";
 import { AppError } from "../error.js";
 import { devLog } from "../logging/dev-logger.js";
 import { redis } from "../redis.js";
-import { requireExportAuth } from "./export-auth.js";
+import { EXPORT_SCOPES, requireExportAuth } from "./export-auth.js";
 
 export interface AuthCodeExchangeResult {
   status: string;
@@ -43,7 +43,7 @@ interface StoredAuthCode {
 }
 
 export async function handleAuthCodeExchange(body: string, authHeader: string): Promise<AuthCodeExchangeResult> {
-  const principal = await requireExportAuth(authHeader);
+  const principal = await requireExportAuth(authHeader, EXPORT_SCOPES.kioskCodeExchange);
   const code = parseCode(body);
   // The public exchange route consumes the same keyspace. GETDEL keeps the
   // one-time guarantee even when both endpoints receive the code concurrently.

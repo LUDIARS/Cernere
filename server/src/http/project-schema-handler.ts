@@ -19,13 +19,13 @@
  */
 
 import { exportProjectSchemaDefinitions } from "../project/service.js";
-import { requireExportAuth } from "./export-auth.js";
+import { EXPORT_SCOPES, requireExportAuth } from "./export-auth.js";
 import { devLog } from "../logging/dev-logger.js";
 
 interface RouteResult { status: string; data: unknown }
 
 export async function exportProjectSchemas(authHeader: string, query: string): Promise<RouteResult> {
-  await requireExportAuth(authHeader);
+  await requireExportAuth(authHeader, EXPORT_SCOPES.projectSchema);
 
   const key = new URLSearchParams(query).get("key") ?? undefined;
   const projects = await exportProjectSchemaDefinitions(key);

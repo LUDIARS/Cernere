@@ -9,7 +9,10 @@ const mocks = vi.hoisted(() => ({
   hashRefreshToken: vi.fn((token: string) => `hashed:${token}`),
 }));
 
-vi.mock("../../src/http/export-auth.js", () => ({ requireExportAuth: mocks.requireExportAuth }));
+vi.mock("../../src/http/export-auth.js", () => ({
+  requireExportAuth: mocks.requireExportAuth,
+  EXPORT_SCOPES: { kioskCodeExchange: "auth-code:kiosk-exchange" },
+}));
 vi.mock("../../src/redis.js", () => ({ redis: { getdel: mocks.redisGetDel } }));
 vi.mock("../../src/auth/token-hash.js", () => ({ hashRefreshToken: mocks.hashRefreshToken }));
 vi.mock("../../src/db/connection.js", () => ({

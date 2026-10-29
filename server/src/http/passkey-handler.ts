@@ -58,7 +58,7 @@ import { issueAuthCode } from "../auth/auth-code.js";
 import { ConsentRequiredError, consentRequiredBody, type ServiceConsentRequest } from "../consent/gate.js";
 import { logUserLogin, logUserLoginFailed, logUserRegister } from "../logging/auth-logger.js";
 import { devError, devLog } from "../logging/dev-logger.js";
-import { requireExportAuth } from "./export-auth.js";
+import { EXPORT_SCOPES, requireExportAuth } from "./export-auth.js";
 import { actionProofStore, httpActionBinding } from "../auth/action-proof.js";
 import {
   CERNERE_ORIGINS,
@@ -937,7 +937,7 @@ async function deletePasskey(
 // service 限定 (requireExportAuth)。 CONTRACTS.md §2。
 
 async function exportPasskeys(authHeader: string, query: string): Promise<RouteResult> {
-  await requireExportAuth(authHeader);
+  await requireExportAuth(authHeader, EXPORT_SCOPES.passkeyExport);
 
   // ?project=<key> は将来の絞り込み用。 passkeys テーブルに project 概念が
   // 無い (= user に紐付くのみ) ため、 現状は受け取るだけで全件を返す。
