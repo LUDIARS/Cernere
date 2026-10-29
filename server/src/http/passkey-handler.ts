@@ -70,8 +70,9 @@ import {
 } from "../auth/webauthn-policy.js";
 import {
   passkeyAnonymousRateLimitScope,
-  passkeyLoginRateLimitScope,
+  passkeyLoginRateLimits,
 } from "../auth/passkey-rate-limit.js";
+import { passkeyLoginDecoy } from "../auth/passkey-login-decoy.js";
 import { publicPasskeyCompositeError } from "../auth/passkey-public-error.js";
 import { AppError } from "../error.js";
 import { requireServiceAccess } from "../federation/subject.js";
@@ -595,29 +596,32 @@ async function loginBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise<
   // 来なければ "usernameless" (= 認証器が自分の登録済 credential を提示) を許す。
   const email = typeof p.email === "string" ? p.email.trim() : "";
   // project WS では email もサービスが自由に変えられるため、常に authenticated
-  // projectKey を使う。REST は従来どおり対象 email、usernameless は接続元 IP。
-  const loginLimitScope = passkeyLoginRateLimitScope(email, ctx);
-  await checkRateLimit(`passkey-login:${loginLimitScope}`, 30, 900);
+  // projectKey を使う。REST は接続元 IP と「email × 接続元」で数え、email 単独では数えない
+  // (他人のアドレスを送り続けて本人を締め出せないように)。
+  for (const rule of passkeyLoginRateLimits(email, ctx)) await checkRateLimit(rule.key, rule.max, rule.windowSecs);
 
   let allowCredentials: { id: string; transports?: AuthenticatorTransportFuture[] }[] | undefined;
-  let challengeOwner = "anon:" + crypto.randomUUID();
+  // 応答に userId を載せない (email から内部 ID を引けてしまう)。検証は credential 側で利用者を引く。
+  const challengeOwner = "anon:" + crypto.randomUUID();
 
   if (email) {
     const user = (await db.select({ id: schema.users.id })
       .from(schema.users).where(eq(schema.users.email, email)).limit(1))[0];
-    if (user) {
-      const rows = await db.select({
+    const rows = user
+      ? await db.select({
         credentialId: schema.passkeys.credentialId,
         transports: schema.passkeys.transports,
-      }).from(schema.passkeys).where(activePasskeysOf(user.id));
-      allowCredentials = rows.map((r) => ({
+      }).from(schema.passkeys).where(activePasskeysOf(user.id))
+      : [];
+    // 未登録・passkey 無しでも同じ形で返し、登録の有無を外から分からなくする。
+    allowCredentials = rows.length > 0
+      ? rows.map((r) => ({
         id: r.credentialId,
         transports: Array.isArray(r.transports)
           ? (r.transports as AuthenticatorTransportFuture[])
           : undefined,
-      }));
-      challengeOwner = "user:" + user.id;
-    }
+      }))
+      : passkeyLoginDecoy(email, config.jwtSecret);
   }
 
   const opts = await generateAuthenticationOptions({

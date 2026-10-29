@@ -58,6 +58,7 @@ import {
   type CompositeWsUserData,
 } from "./ws/composite-auth.js";
 import { logProjectWsRejected } from "./logging/auth-logger.js";
+import { resolveClientIp } from "./http/client-ip.js";
 
 // ── uWS UserData (WS 接続ごとに保持) ──────────────────────
 
@@ -78,13 +79,16 @@ export interface WsUserData {
 
 // ── HTTP ヘルパー ──────────────────────────────────────────
 
-function getRemoteIp(res: uWS.HttpResponse): string | undefined {
+/** 接続元 IP。 信頼するプロキシ経由のときだけ CF-Connecting-IP を採る (http/client-ip.ts)。
+ *  uWS の req は await の前にしか読めないので、 ハンドラの先頭で呼ぶこと。 */
+function getRemoteIp(res: uWS.HttpResponse, req: uWS.HttpRequest): string | undefined {
+  let peer: string | undefined;
   try {
-    const text = Buffer.from(res.getRemoteAddressAsText()).toString();
-    return text || undefined;
+    peer = Buffer.from(res.getRemoteAddressAsText()).toString() || undefined;
   } catch {
-    return undefined;
+    peer = undefined;
   }
+  return resolveClientIp(peer, req.getHeader("cf-connecting-ip") || undefined, config.trustedProxies);
 }
 
 /**
@@ -121,9 +125,15 @@ function parseWsAuthProtocol(
   return { creds, echo };
 }
 
+/**
+ * 上限を明示しない route の本文上限。 認証 API の JSON は数 KB で足りる。
+ * 無制限だと未認証の大きな POST を数本並べるだけでメモリを使い切れる (外部公開時の DoS)。
+ */
+export const DEFAULT_MAX_BODY_BYTES = 256 * 1024;
+
 function readBodyBuffer(
   res: uWS.HttpResponse,
-  maxBytes = Number.POSITIVE_INFINITY,
+  maxBytes = DEFAULT_MAX_BODY_BYTES,
   onAborted?: () => void,
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -157,7 +167,7 @@ function readBodyBuffer(
 
 function readBody(
   res: uWS.HttpResponse,
-  maxBytes = Number.POSITIVE_INFINITY,
+  maxBytes = DEFAULT_MAX_BODY_BYTES,
   onAborted?: () => void,
 ): Promise<string> {
   // Buffer として結合してから UTF-8 decode し、chunk 境界での文字化けを防ぐ。
@@ -271,13 +281,14 @@ export function createApp() {
 
   // ── WebSocket: /auth ────────────────────────────────────
   app.ws<WsUserData>("/auth", {
-    maxPayloadLength: 16 * 1024 * 1024,
+    // 未認証のゲストも張れる口なので 1 MiB に抑える。 ゲストはさらに ws/handler.ts で 16 KiB。
+    maxPayloadLength: 1024 * 1024,
     idleTimeout: 120,
 
     upgrade: async (res, req, context) => {
       const query = req.getQuery();
       const params = new URLSearchParams(query);
-      const ip = getRemoteIp(res);
+      const ip = getRemoteIp(res, req);
 
       const secWsKey = req.getHeader("sec-websocket-key");
       const secWsProtocol = req.getHeader("sec-websocket-protocol");
@@ -324,7 +335,7 @@ export function createApp() {
     upgrade: async (res, req, context) => {
       const query = req.getQuery();
       const params = new URLSearchParams(query);
-      const ip = getRemoteIp(res);
+      const ip = getRemoteIp(res, req);
 
       const secWsKey = req.getHeader("sec-websocket-key");
       const secWsProtocol = req.getHeader("sec-websocket-protocol");
@@ -381,7 +392,7 @@ export function createApp() {
     upgrade: async (res, req, context) => {
       const query = req.getQuery();
       const params = new URLSearchParams(query);
-      const ip = getRemoteIp(res);
+      const ip = getRemoteIp(res, req);
 
       const secWsKey = req.getHeader("sec-websocket-key");
       const secWsProtocol = req.getHeader("sec-websocket-protocol");
@@ -450,7 +461,7 @@ export function createApp() {
     const authHeader = req.getHeader("authorization") ?? "";
     const actionProof = req.getHeader("x-cernere-action-proof") ?? "";
     const userAgent = req.getHeader("user-agent") ?? undefined;
-    const ip = getRemoteIp(res);
+    const ip = getRemoteIp(res, req);
     let aborted = false;
 
     try {
@@ -497,7 +508,7 @@ export function createApp() {
     const userAgent = req.getHeader("user-agent") ?? undefined;
     // authCode の交換で Cernere 自身の画面からかを確かめる (uWS の req は await の前にしか読めない)。
     const origin = req.getHeader("origin") ?? "";
-    const ip = getRemoteIp(res);
+    const ip = getRemoteIp(res, req);
     let aborted = false;
     res.onAborted(() => { aborted = true; });
 
@@ -533,7 +544,7 @@ export function createApp() {
     const origin = req.getHeader("origin") ?? "";
     const host = req.getHeader("host") ?? "";
     const rotationId = req.getHeader("x-cernere-rotation-id") ?? "";
-    const ip = getRemoteIp(res);
+    const ip = getRemoteIp(res, req);
     let aborted = false;
     res.onAborted(() => { aborted = true; });
 
@@ -572,7 +583,7 @@ export function createApp() {
     // Device Credential Cookie の属性判定に要求ホストが要る (§10.1)。
     const origin = req.getHeader("origin") ?? "";
     const hostname = new URL("https://" + (req.getHeader("host") ?? "")).hostname;
-    const ip = getRemoteIp(res);
+    const ip = getRemoteIp(res, req);
     let aborted = false;
     res.onAborted(() => { aborted = true; });
 
@@ -604,7 +615,7 @@ export function createApp() {
   app.get("/api/auth/passkey/export", async (res, req) => {
     const authHeader = req.getHeader("authorization") ?? "";
     const query = req.getQuery() ?? "";
-    const ip = getRemoteIp(res);
+    const ip = getRemoteIp(res, req);
     let aborted = false;
     res.onAborted(() => { aborted = true; });
 
@@ -705,7 +716,7 @@ export function createApp() {
   app.get("/api/admin/projects/schema-export", async (res, req) => {
     const authHeader = req.getHeader("authorization") ?? "";
     const query = req.getQuery() ?? "";
-    const ip = getRemoteIp(res);
+    const ip = getRemoteIp(res, req);
     let aborted = false;
     res.onAborted(() => { aborted = true; });
 
@@ -732,7 +743,7 @@ export function createApp() {
   app.post("/api/auth/composite/:action", async (res, req) => {
     const action = req.getParameter(0) ?? "";
     const userAgent = req.getHeader("user-agent") ?? undefined;
-    const ip = getRemoteIp(res);
+    const ip = getRemoteIp(res, req);
     let aborted = false;
     res.onAborted(() => { aborted = true; });
 

@@ -12,7 +12,7 @@ import { handleOnsiteAttestation } from "./onsite-attestation-handler.js";
 interface HttpHelpers {
   readBody(res: uWS.HttpResponse, maxBytes: number, onAborted: () => void): Promise<string>;
   jsonResponse(res: uWS.HttpResponse, status: string, data: unknown, cookies: string[], headers: Readonly<Record<string, string>>): void;
-  getRemoteIp(res: uWS.HttpResponse): string | undefined;
+  getRemoteIp(res: uWS.HttpResponse, req: uWS.HttpRequest): string | undefined;
   classifyError(error: unknown): { status: string; message: string };
 }
 
@@ -29,7 +29,7 @@ export function registerOnsiteRoutes(app: uWS.TemplatedApp, http: HttpHelpers): 
   const endpoint = (handler: Handler, post: boolean, maxBytes: number) => async (res: uWS.HttpResponse, req: uWS.HttpRequest) => {
     const auth = req.getHeader("authorization") ?? "";
     const parameter = req.getParameter(0) ?? "";
-    const ip = http.getRemoteIp(res);
+    const ip = http.getRemoteIp(res, req);
     let aborted = false;
     // readBody registers its own onAborted; uWS rejects a second registration on the same response.
     if (!post) res.onAborted(() => { aborted = true; });

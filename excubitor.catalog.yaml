@@ -16,17 +16,24 @@ services:
     # Excubitor の bootstrap は cwd = 本体 checkout の最上位を要求する (Excubitor src/bootstrap/catalog.ts)。
     cwd: ${ARS_ROOT}/Cernere
     # Keep a native Node root alive: npm.cmd as the root dies with the Windows launcher job.
-    # root の dev:server は server を cwd にして server の dev (tsx watch) を起動する。
-    command: node --run dev:server
-    allow_hot_reload: true
+    # 外部公開する本番なので tsx watch ではなく setup がビルドした server/dist を node で動かす
+    # (spec/setup/public-exposure.md)。コードの反映は deploy (pull → setup のビルド → 再起動)。
+    command: node --run start:server
+    allow_hot_reload: false
     autostart: false
     env:
       LISTEN_PORT: "8086"
+      # 開発用の詳細エラー・詳細ログ・本人確認オフを本番で使わせない (config.ts の isProduction)。
+      # NODE_ENV は setup の npm install から devDependencies を外すので使わない。
+      CERNERE_ENV: production
+      # cloudflared → cernere-frontend (serve/index.mjs) はループバックから来る。その経路だけ CF-Connecting-IP を信用する。
+      # 待受アドレス LISTEN_HOST は拠点の tailnet IP を含むので Vault で渡す (spec/setup/public-exposure.md)。
+      CERNERE_TRUSTED_PROXIES: "127.0.0.1,::1"
       # Keep the active GLab recipients and allow Aedilis's, Tendentia's and Tokyo2070's Composite auth-code handoff.
       CERNERE_COMPOSITE_ALLOWED_ORIGINS: http://localhost:5187,https://glm.ai-run-do.com,https://glab.ai-run-do.com,https://ae.ai-run-do.com,https://tendentia.ai-run-do.com,http://127.0.0.1:4440,http://localhost:4440
     health:
       type: http
-      url: http://localhost:8086/health
+      url: http://127.0.0.1:8086/health
       interval_sec: 30
     # Secret env is injected from Excubitor's shared/project Vault bindings.
     # 全サービスへ配る Cernere の接続先 (URL/port は Excubitor が特定可能 → 各サービスの個別設定不要)。
@@ -51,17 +58,20 @@ services:
     repo: LUDIARS/Cernere
     runtime: node
     cwd: ${ARS_ROOT}/Cernere/frontend
-    # setup (scripts/site/setup.mjs) がビルドした frontend/dist を vite preview で配る。
-    # /api 等は preview proxy で backend へ。dev server で使う場合は cernere-frontend-test か npm run dev。
-    command: npm run preview -- --host 0.0.0.0 --port 5173 --strictPort
+    # setup (scripts/site/setup.mjs) がビルドした frontend/dist を serve/index.mjs で配る
+    # (vite preview は本番用ではない)。/api 等は backend へ中継する。待受はループバックだけで、
+    # 外からは cloudflared 経由でしか届かない。dev server で使う場合は cernere-frontend-test か npm run dev。
+    command: node serve/index.mjs
     allow_hot_reload: false
     depends_on: [cernere]
     autostart: false
     env:
-      VITE_BACKEND_URL: http://localhost:8086
+      HOST: 127.0.0.1
+      PORT: "5173"
+      VITE_BACKEND_URL: http://127.0.0.1:8086
     health:
       type: http
-      url: http://localhost:5173/
+      url: http://127.0.0.1:5173/
       interval_sec: 30
     # CERNERE_FRONTEND_URL はブラウザが開く URL (GLAB の passkey popup / redirect 先。WebAuthn の
     # RP ID もこの origin)。拠点内の http://${host}:${port} を配ると利用者の端末から届かず RP ID も

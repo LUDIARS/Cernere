@@ -19,20 +19,20 @@ export function createWorkloadApp(
   return app;
 }
 
-/** host は一般待受と同じ LISTEN_HOST (null = 全インターフェース)。 */
+/** hosts は一般待受と同じ LISTEN_HOST (null = 全インターフェース)。 */
 export function startWorkloadListener(
-  config: WorkloadListenerConfig, http: WorkloadHttpHelpers, host: string | null = null,
+  config: WorkloadListenerConfig, http: WorkloadHttpHelpers, hosts: readonly string[] | null = null,
 ): uWS.TemplatedApp {
   const app = createWorkloadApp(config.tls, http);
-  const onListen = (listenSocket: uWS.us_listen_socket | false) => {
+  const onListen = (host: string | null) => (listenSocket: uWS.us_listen_socket | false) => {
     if (listenSocket) {
       console.log(`[server] Workload TLS: https://${displayHost(host)}:${config.port}/api/workload/*`);
     } else {
-      console.error(`[server] Failed to listen for workload TLS on port ${config.port}`);
+      console.error(`[server] Failed to listen for workload TLS on ${displayHost(host)}:${config.port}`);
       process.exit(1);
     }
   };
-  if (host) app.listen(host, config.port, onListen);
-  else app.listen(config.port, onListen);
+  if (hosts) for (const host of hosts) app.listen(host, config.port, onListen(host));
+  else app.listen(config.port, onListen(null));
   return app;
 }

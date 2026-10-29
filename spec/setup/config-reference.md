@@ -19,7 +19,8 @@ Cernere が実際に読む環境変数の正本テーブル。各キーは下記
 | `REDIS_URL` | `redis://127.0.0.1:6379` | config.ts | Redis 接続文字列 (prod 必須) |
 | `REDIS_DB` | なし (`REDIS_URL` のまま) | redis-db.ts | Redis の論理 DB 番号 (0〜15)。`REDIS_URL` の DB 番号より優先。本社のテスト用 Cernere を本番と分ける ([hq-test-instance.md](hq-test-instance.md)) |
 | `LISTEN_PORT` | `8080` | config.ts / compose | HTTP/WS listen ポート (※ `LISTEN_ADDR` は読まれない)。Excubitor catalog の `cernere` は `8086` を注入する |
-| `LISTEN_HOST` | なし (全インターフェース) | http/listen-host.ts | 一般待受と workload 待受の bind アドレス (IPv4/IPv6 リテラルか `localhost`)。本社のテスト用 Cernere は `127.0.0.1` ([hq-test-instance.md](hq-test-instance.md)) |
+| `LISTEN_HOST` | なし (全インターフェース) | http/listen-host.ts | 一般待受と workload 待受の bind アドレス (IPv4/IPv6 リテラルか `localhost`、カンマ区切りで複数)。本社のテスト用 Cernere は `127.0.0.1` ([hq-test-instance.md](hq-test-instance.md))、外部公開する本番は `127.0.0.1,::1,<tailnet IP>` ([public-exposure.md](public-exposure.md)) |
+| `CERNERE_TRUSTED_PROXIES` | なし (ヘッダを信用しない) | http/client-ip.ts | `CF-Connecting-IP` を接続元として採るソケット相手の IP (カンマ区切り)。レート制限・監査の IP に効く。本番は `127.0.0.1,::1` (catalog) |
 | `FRONTEND_URL` | `http://localhost:5173` | config.ts | CORS origin + `isHttps` 判定 + WebAuthn 既定 RP/origin |
 | `JWT_SECRET` | 起動毎ランダム生成 (dev、warn) | config.ts | HS256 署名鍵 (user/project/tool/MFA token) (prod 必須) |
 | `CERNERE_PUBLIC_URL` | `http://localhost:<LISTEN_PORT>` | config.ts | 外部到達 URL。 OIDC エンドポイント/issuer の基準 (proxy 配下は公開ホストを指定) |

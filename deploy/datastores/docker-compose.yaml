@@ -1,0 +1,58 @@
+# 本番 Cernere (AWS 拠点) の Postgres / Redis。spec/setup/public-exposure.md の手順で使う。
+#
+# - 待受はループバックだけ (Docker の公開ポートは ufw を素通りするため、bind で絞る)。
+# - Redis は requirepass 必須。値は拠点の env ファイル (0600、リポ外) から渡し、
+#   コマンドライン引数に出さない (ps で読めないように設定ファイルへ書いてから起動する)。
+# - データは旧 compose (project 名 cernere) が作った volume をそのまま使う。
+#
+#   docker compose -p cernere -f deploy/datastores/docker-compose.yaml \
+#     --env-file /home/ubuntu/.config/cernere/datastores.env up -d
+name: cernere
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: cernere-postgres
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      # 初期化済み volume では使われない (初回作成時だけ読む)。新しい volume を作るときは env ファイルに書く。
+      POSTGRES_USER: ${POSTGRES_USER:-cernere}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_DB: ${POSTGRES_DB:-cernere}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: cernere-redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command:
+      - sh
+      - -c
+      - 'umask 077 && printf "requirepass %s\nappendonly yes\n" "$$REDIS_PASSWORD" > /tmp/redis.conf && exec redis-server /tmp/redis.conf'
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pg-data:
+    external: true
+    name: cernere_pg-data
+  redis-data:
+    external: true
+    name: cernere_redis-data

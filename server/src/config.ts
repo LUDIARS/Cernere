@@ -4,6 +4,7 @@
 
 import { loadSessionKeyMaterial } from "./auth/session-keys.js";
 import { readRedisDb } from "./redis-db.js";
+import { readTrustedProxies } from "./http/client-ip.js";
 
 function env(key: string, fallback?: string): string {
   const val = process.env[key];
@@ -111,6 +112,9 @@ export const config = {
     }
     return raw;
   })(),
+
+  // CF-Connecting-IP を信用するソケット相手 (cloudflared / frontend 配信サーバ)。 未設定ならヘッダを信用しない。
+  trustedProxies: readTrustedProxies(process.env),
 
   isHttps: env("FRONTEND_URL", "http://localhost:5173").startsWith("https://"),
   isProduction: isProduction(),

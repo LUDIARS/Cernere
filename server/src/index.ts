@@ -6,7 +6,7 @@ import { assertRuntimeSecrets, config } from "./config.js";
 import { createApp, httpHelpers } from "./app.js";
 import { workloadListenerConfig } from "./http/workload-listener-config.js";
 import { startWorkloadListener } from "./http/workload-listener.js";
-import { displayHost, readListenHost } from "./http/listen-host.js";
+import { displayHost, readListenHosts } from "./http/listen-host.js";
 import { redis } from "./redis.js";
 import { runMigrations } from "./db/migrate.js";
 import { initOidcKeys } from "./auth/oidc-keys.js";
@@ -29,8 +29,9 @@ async function main() {
   assertRuntimeSecrets();
   // workload TLS の片側設定も I/O 前に構成エラーとして止める。
   const workloadListener = workloadListenerConfig(process.env, config.listenPort);
-  // 未設定なら全インターフェース。 本社のテスト用 Cernere は 127.0.0.1 (spec/setup/hq-test-instance.md)。
-  const listenHost = readListenHost(process.env);
+  // 未設定なら全インターフェース。 本社のテスト用 Cernere は 127.0.0.1 (spec/setup/hq-test-instance.md)、
+  // 外部公開する本番はループバック + tailnet (spec/setup/public-exposure.md)。
+  const listenHosts = readListenHosts(process.env);
 
   await runMigrations();
   await purgeExpiredFaceConsents();
@@ -40,20 +41,20 @@ async function main() {
 
   const app = createApp();
 
-  const onListen = (listenSocket: unknown) => {
+  const onListen = (listenHost: string | null) => (listenSocket: unknown) => {
     if (listenSocket) {
       const host = displayHost(listenHost);
       console.log(`[server] Listening on http://${host}:${config.listenPort}`);
       console.log(`[server] WebSocket: ws://${host}:${config.listenPort}/auth`);
       console.log(`[server] Frontend URL: ${config.frontendUrl}`);
     } else {
-      console.error(`[server] Failed to listen on port ${config.listenPort}`);
+      console.error(`[server] Failed to listen on ${displayHost(listenHost)}:${config.listenPort}`);
       process.exit(1);
     }
   };
-  if (listenHost) app.listen(listenHost, config.listenPort, onListen);
-  else app.listen(config.listenPort, onListen);
-  if (workloadListener) startWorkloadListener(workloadListener, httpHelpers, listenHost);
+  if (listenHosts) for (const host of listenHosts) app.listen(host, config.listenPort, onListen(host));
+  else app.listen(config.listenPort, onListen(null));
+  if (workloadListener) startWorkloadListener(workloadListener, httpHelpers, listenHosts);
   // ログイン通知の配送 (SPEC-LOGIN-ALERT)。配送の失敗は認証処理に影響しない。
   startOutboxWorker();
   // 審査待ちの利用申請を admin へまとめて知らせる (許可制 案 A)。

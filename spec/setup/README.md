@@ -12,6 +12,7 @@
 | workload 認証局を配備する・戻す | [workload-deploy.md](workload-deploy.md) |
 | 拠点へ導入する・データを移す (Excubitor bootstrap / data-export / data-import) | [server-bootstrap.md](server-bootstrap.md#拠点への導入-excubitor-bootstrap) / [site-data-transfer.md](site-data-transfer.md) |
 | 本社のテスト用 Cernere (ループバック限定・別 DB) | [hq-test-instance.md](hq-test-instance.md) |
+| 外部公開する本番の設定 (本番モード・待受・接続元 IP・Redis/Postgres・AWS/Cloudflare) | [public-exposure.md](public-exposure.md) |
 
 PostgreSQL / Redis が利用でき、Excubitor の共有・プロジェクト Vault に必要値が登録されていることを前提にします。
 `cernere` に紐付いた名前の値を Excubitor が起動時に注入します。Cernere 自身は secret store へ取得しに行きません。不足時は起動を止めます。

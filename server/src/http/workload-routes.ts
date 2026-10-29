@@ -7,7 +7,7 @@ import { workloadStore } from '../workload/store.js';
 export interface WorkloadHttpHelpers {
   readBody(res: uWS.HttpResponse, maxBytes: number, onAborted: () => void): Promise<string>;
   jsonResponse(res: uWS.HttpResponse, status: string, data: unknown, cookies: string[], headers: Readonly<Record<string, string>>): void;
-  getRemoteIp(res: uWS.HttpResponse): string | undefined;
+  getRemoteIp(res: uWS.HttpResponse, req: uWS.HttpRequest): string | undefined;
   classifyError(error: unknown): { status: string; message: string };
 }
 interface Authority {
@@ -33,7 +33,7 @@ export function registerWorkloadRoutes(
         http.jsonResponse(res, '400 Bad Request', { error: 'JSON is required' }, [], noStore);
         return;
       }
-      const ip = http.getRemoteIp(res) ?? 'unknown';
+      const ip = http.getRemoteIp(res, req) ?? 'unknown';
       let aborted = false;
       try {
         const raw = await http.readBody(res, 16384, () => { aborted = true; });

@@ -18,8 +18,12 @@ import type { ClientMessage, ServerMessage } from "./protocol.js";
 import { logUserWsConnect, logUserWsDisconnect } from "../logging/auth-logger.js";
 import { resolveWsActionTarget } from "../auth/action-policy.js";
 import { actionProofStore, wsActionBinding } from "../auth/action-proof.js";
+import { config } from "../config.js";
 
 const PING_INTERVAL_MS = 30_000;
+
+/** 未昇格ゲストが送れる 1 メッセージの上限。 MFA の確認コード程度しか運ばない。 */
+export const GUEST_MAX_MESSAGE_BYTES = 16 * 1024;
 
 const pingTimers = new Map<string, ReturnType<typeof setInterval>>();
 
@@ -51,27 +55,27 @@ function send(ws: uWS.WebSocket<WsUserData>, msg: ServerMessage): void {
   try {
     data = ws.getUserData();
   } catch {
-    if (process.env.NODE_ENV !== "production") {
+    if (!config.isProduction) {
       console.log(`[ws] send dropped: getUserData failed (type=${msg.type})`);
     }
     return;
   }
   if (data.closed) {
-    if (process.env.NODE_ENV !== "production") {
+    if (!config.isProduction) {
       console.log(`[ws] send dropped: closed flag set (sid=${data.sessionId} type=${msg.type})`);
     }
     return;
   }
   try {
     const ret = ws.send(JSON.stringify(msg));
-    if (process.env.NODE_ENV !== "production") {
+    if (!config.isProduction) {
       // ServerMessage は discriminated union。 module / action は module_response variant
       // にしか無いので、 type で narrow してから参照する。
       const modSuffix = msg.type === "module_response" ? ` ${msg.module}.${msg.action}` : "";
       console.log(`[ws] sent sid=${data.sessionId} type=${msg.type}${modSuffix} ret=${ret}`);
     }
   } catch (err) {
-    if (process.env.NODE_ENV !== "production") {
+    if (!config.isProduction) {
       console.log(`[ws] send threw sid=${data.sessionId} type=${msg.type} err=${(err as Error).message}`);
     }
     data.closed = true;
@@ -115,6 +119,11 @@ export async function handleWsMessage(
   message: ArrayBuffer,
 ): Promise<void> {
   const data = ws.getUserData();
+
+  if (data.isGuest && !data.promoted && message.byteLength > GUEST_MAX_MESSAGE_BYTES) {
+    if (!data.closed) ws.end(1009, "Message too large");
+    return;
+  }
 
   let msg: ClientMessage;
   try {
