@@ -90,6 +90,9 @@ POST /api/auth/project-token
 - **`hub_url` は必須**。`aud` を欠くと「service A 向け token を service B が受理する」横断偽造 (confused deputy) を許すため、未指定は `400` で拒否する (fail-closed)。
 - **HS256 フォールバックは撤去済み** (旧: `hub_url` 無し or PASETO 無効時にマスタ `JWT_SECRET` で署名・`aud` 無し)。マスタ署名鍵の leaf 横展開と `aud` 無し横断偽造を許すセキュリティ欠陥だったため。PASETO 鍵未設定のサーバでは本経路は `500` で拒否する (暗黙降格しない、RULE §7.1)。
 - レートリミット `project_user_token:<userId>:<projectKey>` 60/60s。`managed_projects` に `is_active=true` で存在しない `project_key` は拒否。
+- **現地 MFA 必須の project** (`schema_definition.onsite_mfa.required=true`) は、通常のログインや passkey の MFA だけでは発行しない。証明未提示時は `403` と `{ error: "onsite_mfa_required", mfaRequired: true, mfaToken, mfaMethods: ["onsite"] }` を返す。既存の `/api/auth/mfa/onsite/start` に `mfaToken` を渡し、kiosk の証明受理後、同じ Bearer と project の本エンドポイントへ `mfaToken` を付けて再送する。未充足は `409 onsite_pending`、不正・期限切れ・再利用は拒否する。チケットは認証中のアカウント・Bearer・project に束縛し、現在の assurance／施設要求と一致する現地証明を一回消費した後だけ署名する。現地方針の不正な設定は `503` で拒否する。
+
+関連修正: `actio:1f937dee-ddf8-4ea5-b360-52b49d5aa174`。契約 `C-37 authorizeProjectTokenOnsite(input)` と回帰テストで発行前の関門を確認する。
 
 > **注 (§2 との切り分け)**: サーバ自己認証の project token (§2、`grant_type=project_credentials` → `/ws/project`) は引き続き HS256 (`JWT_SECRET` 共有) を**正当に**使う。撤去したのは本 §3 の user×project フォールバックのみ。
 

@@ -4,6 +4,15 @@
   "importFrom": "@ludiars/log-weaver",
   "contracts": [
     {
+      "id": "C-37",
+      "criterion": "C-37 authorizeProjectTokenOnsite(input): 現地MFA必須のprojectでは証明未提示ならchallengeだけを返し、対象利用者・Bearer・project・現在の要求に束縛された現地証明を一回消費した場合だけ発行を許可する",
+      "symbol": "authorizeProjectTokenOnsite",
+      "file": "server/src/auth/project-token-onsite.ts",
+      "module": "server/src/auth/contracts/project-token-onsite.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
       "id": "C-14",
       "criterion": "C-14 workloadClaims(snapshot, now): 有効な主体・宛先・双方の鍵・完全一致 grant・token の期限と失効を満たす場合だけ Ex wire claims を返す",
       "symbol": "workloadClaims",

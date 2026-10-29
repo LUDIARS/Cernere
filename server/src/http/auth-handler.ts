@@ -34,6 +34,8 @@ import { removeAlertTarget } from "../notify/alert-targets.js";
 import { actionProofStore, httpActionBinding } from "../auth/action-proof.js";
 import { prepareOAuthLinkForUser } from "./oauth-handler.js";
 import type { OAuthLinkProvider } from "../auth/oauth-link.js";
+import { projectOnsiteRequirement } from "../project/onsite-mfa-policy.js";
+import { authorizeProjectTokenOnsite } from "../auth/project-token-onsite.js";
 
 interface RouteResult {
   status: string;
@@ -464,6 +466,16 @@ async function projectUserToken(
   }
 
   const tokenTtl = 15 * 60;
+  const onsiteChallenge = await authorizeProjectTokenOnsite({
+    userId: claims.sub,
+    bearerToken: token,
+    projectKey: project.key,
+    requirement: await projectOnsiteRequirement(project.key),
+    mfaToken: typeof p.mfaToken === "string" ? p.mfaToken : undefined,
+  });
+  if (onsiteChallenge) {
+    return { status: "403 Forbidden", data: { error: "onsite_mfa_required", ...onsiteChallenge } };
+  }
   const accessToken = await signProjectToken({
     userId: user.id,
     projectKey: project.key,

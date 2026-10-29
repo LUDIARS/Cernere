@@ -14,7 +14,7 @@ const onsiteRequirementSchema = z.object({
 }).strict();
 const recordSchema = z.object({
   userId: z.string().uuid(),
-  purpose: z.enum(["rest", "guest", "composite", "manage", "settings"]),
+  purpose: z.enum(["rest", "guest", "composite", "manage", "settings", "project-token"]),
   snapshot: z.string(),
   binding: z.string().nullable(),
   projectKey: z.string().nullable(),

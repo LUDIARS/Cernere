@@ -47,6 +47,7 @@ vi.mock("../../src/auth/onsite-kiosk-registry.js", () => {
 
 const { beginMfaChallenge, verifyMfaChallenge } = await import("../../src/auth/mfa-challenge.js");
 const { startOnsiteChallenge, submitOnsiteAttestation } = await import("../../src/auth/onsite-challenge.js");
+const { authorizeProjectTokenOnsite } = await import("../../src/auth/project-token-onsite.js");
 
 const USER_ID = "33333333-3333-4333-8333-333333333333";
 const CONTEXT = { purpose: "composite" as const, projectKey: "Schedula" };
@@ -66,6 +67,17 @@ async function onsiteChallenge(minAssurance: "high" | "medium" = "high") {
 
 const complete = async () => "session-issued";
 
+const PROJECT_INPUT = { userId: USER_ID, bearerToken: "user-bearer", projectKey: "Schedula",
+  requirement: { minAssurance: "high" as const, allowedPlaceIds: null } };
+
+async function projectChallenge() {
+  const challenge = await authorizeProjectTokenOnsite(PROJECT_INPUT);
+  expect(challenge?.mfaMethods).toEqual(["onsite"]);
+  const mfaToken = challenge!.mfaToken;
+  const started = await startOnsiteChallenge(mfaToken);
+  return { mfaToken, nonce: started.nonce };
+}
+
 beforeEach(() => {
   hoisted.redis.store.clear();
   hoisted.kioskStatus = "active";
@@ -74,6 +86,58 @@ beforeEach(() => {
 });
 
 describe("onsite MFA flow", () => {
+  it("preserves project-token issuance when onsite is not required", async () => {
+    await expect(authorizeProjectTokenOnsite({ ...PROJECT_INPUT, requirement: null })).resolves.toBeNull();
+    expect(hoisted.redis.store.size).toBe(0);
+  });
+
+  it("requires kiosk satisfaction before allowing project-token issuance, then consumes it once", async () => {
+    const challenge = await projectChallenge();
+    const input = { ...PROJECT_INPUT, mfaToken: challenge.mfaToken };
+    await expect(authorizeProjectTokenOnsite(input)).rejects.toMatchObject({ code: "onsite_pending" });
+    await submitOnsiteAttestation(attest(challenge.nonce), "ostiarius");
+    await expect(authorizeProjectTokenOnsite(input)).resolves.toBeNull();
+    await expect(authorizeProjectTokenOnsite(input)).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it.each([
+    { projectKey: "another-project" }, { bearerToken: "another-bearer" }, { userId: "another-user" },
+    { requirement: { minAssurance: "medium" as const, allowedPlaceIds: null } },
+    { requirement: { minAssurance: "high" as const, allowedPlaceIds: ["another-place"] } },
+  ])("rejects project-token proof with changed binding or policy: %j", async (override) => {
+    const challenge = await projectChallenge();
+    await submitOnsiteAttestation(attest(challenge.nonce), "ostiarius");
+    await expect(authorizeProjectTokenOnsite({ ...PROJECT_INPUT, mfaToken: challenge.mfaToken, ...override }))
+      .rejects.toBeInstanceOf(Error);
+    // A failed binding check must not consume the legitimate caller's proof.
+    await expect(authorizeProjectTokenOnsite({ ...PROJECT_INPUT, mfaToken: challenge.mfaToken })).resolves.toBeNull();
+  });
+
+  it("rejects expired project-token proof", async () => {
+    const challenge = await projectChallenge();
+    await submitOnsiteAttestation(attest(challenge.nonce), "ostiarius");
+    const now = Date.now();
+    const time = vi.spyOn(Date, "now").mockReturnValue(now + 301_000);
+    try {
+      await expect(authorizeProjectTokenOnsite({ ...PROJECT_INPUT, mfaToken: challenge.mfaToken }))
+        .rejects.toMatchObject({ statusCode: 401 });
+    } finally { time.mockRestore(); }
+  });
+
+  it("does not let a project-token ticket be exchanged for an ordinary login", async () => {
+    const challenge = await projectChallenge();
+    await submitOnsiteAttestation(attest(challenge.nonce), "ostiarius");
+    await expect(verifyMfaChallenge(challenge.mfaToken, "onsite", "", { purpose: "rest" }, complete))
+      .rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it("rejects a login challenge at the project-token boundary", async () => {
+    const challenge = await onsiteChallenge();
+    await submitOnsiteAttestation(attest(challenge.nonce), "ostiarius");
+    await expect(authorizeProjectTokenOnsite({ ...PROJECT_INPUT, mfaToken: challenge.mfaToken }))
+      .rejects.toMatchObject({ statusCode: 401 });
+  });
+
   it("requires onsite even when the user has no MFA enrolled, and offers only onsite", async () => {
     const challenge = await onsiteChallenge();
     expect(challenge.mfaMethods).toEqual(["onsite"]);
