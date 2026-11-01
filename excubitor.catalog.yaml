@@ -29,8 +29,9 @@ services:
       # cloudflared → cernere-frontend (serve/index.mjs) はループバックから来る。その経路だけ CF-Connecting-IP を信用する。
       # 待受アドレス LISTEN_HOST は拠点の tailnet IP を含むので Vault で渡す (spec/setup/public-exposure.md)。
       CERNERE_TRUSTED_PROXIES: "127.0.0.1,::1"
-      # Keep the active GLab recipients and allow Aedilis's, Tendentia's and Tokyo2070's Composite auth-code handoff.
-      CERNERE_COMPOSITE_ALLOWED_ORIGINS: http://localhost:5187,https://glm.ai-run-do.com,https://glab.ai-run-do.com,https://ae.ai-run-do.com,https://tendentia.ai-run-do.com,http://127.0.0.1:4440,http://localhost:4440
+      # Keep the active GLab recipients and allow Aedilis's, Tendentia's, Tokyo2070's and Actio's Composite auth-code handoff.
+      # Actio: tunnel visitors log in with Cernere (Actio spec/feature/tunnel-cernere-login.md).
+      CERNERE_COMPOSITE_ALLOWED_ORIGINS: http://localhost:5187,https://glm.ai-run-do.com,https://glab.ai-run-do.com,https://ae.ai-run-do.com,https://tendentia.ai-run-do.com,http://127.0.0.1:4440,http://localhost:4440,https://actio.ai-run-do.com
     health:
       type: http
       url: http://127.0.0.1:8086/health
