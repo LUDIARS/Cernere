@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "importFrom": "./ontime-runtime.mjs",
+  "runtimeFile": "scripts/ontime-runtime.mjs",
+  "contracts": [
+    {
+      "id": "C-1",
+      "criterion": "C-1 verifyQsLock(lock): body-parser の qs は要求範囲内の 6.16.2 とし、範囲外の Express の qs と親パッケージは維持する",
+      "symbol": "verifyQsLock",
+      "file": "scripts/verify-qs-lock.mjs",
+      "module": "scripts/qs-lock.contract.mjs",
+      "mode": "observe",
+      "sample": 1
+    }
+  ]
+}

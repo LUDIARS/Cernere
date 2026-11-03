@@ -1,0 +1,8 @@
+{
+  "service": "cernere-demo-lock",
+  "include": ["scripts/verify-qs-lock.mjs"],
+  "exclude": ["**/*.test.mjs"],
+  "runtime": { "autoImport": false, "entrypoints": [] },
+  "rules": { "silent-catch": false, "spawn-watch": false, "interval-guard": false, "listener-guard": false },
+  "importFrom": "./scripts/ontime-runtime.mjs"
+}
