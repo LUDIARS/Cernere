@@ -2,7 +2,7 @@
 export default {
   post: (result: boolean, method: string | undefined, assurance: string | undefined, minimum: string): true | string => {
     if (!result) return true;
-    if (method === 'staff_override' || method === 'session' || method === 'password') return 'rejected method was accepted';
+    if (method === 'staff_override' || method === 'session' || method === 'password' || method === 'lan') return 'rejected method was accepted';
     if (assurance !== 'high' && assurance !== 'medium') return 'manual / low assurance was accepted';
     return minimum !== 'high' || assurance === 'high' || 'medium assurance was accepted for a high requirement';
   },

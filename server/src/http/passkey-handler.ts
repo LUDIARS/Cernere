@@ -82,6 +82,8 @@ import { AppError } from "../error.js";
 import { requireServiceAccess } from "../federation/subject.js";
 import { summarizeUserAgent } from "../lib/user-agent-summary.js";
 import { recordSecurityEvent } from "../notify/security-events.js";
+import { applyVenueSignup, precheckVenueSignup } from "../auth/venue-registration-signup.js";
+import { logAuthEvent } from "../logging/auth-logger.js";
 import { requireUserId } from "./bearer-user.js";
 import { RECOVERY_CODE_ACTIONS, handleRecoveryCodeRoute } from "./recovery-code-handler.js";
 import {
@@ -131,6 +133,11 @@ const signupFinishSchema = z.object({
    * この端末用のアカウントを作り、同じトランザクションで承認者の連携へ加える。
    */
   federation: z.object({ requestId: z.string().uuid(), deviceSecret: z.string().min(16).max(512) }).strict().optional(),
+  /**
+   * 会場ネットワーク限定の新規登録 (spec/feature/venue-network-registration.md §6): 会場確認済みの challenge。
+   * 指定なしは会場外 (例外、pending)。指定ありで無効なら 422 venue_challenge_invalid で何も作らない。
+   */
+  venueChallengeId: z.string().uuid().optional(),
 }).strict();
 
 /** 連携で作ったアカウントの表示名の出所。名前は主のものを使うので名前入力へ送らない。 */
@@ -316,6 +323,8 @@ async function signupBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise
 interface SignedUpAccount {
   userId: string;
   role: string;
+  /** venue = 会場 LAN 経由 (active) / outside_venue = 会場外 (pending) / null = 引き継ぎで作った端末用アカウント */
+  registrationOrigin: "venue" | "outside_venue" | null;
 }
 
 /** ユーザ作成トランザクション内で追加処理 (refresh session の挿入等) を差し込む口。 */
@@ -336,6 +345,12 @@ async function finalizePasskeySignup(
   const parsed = signupFinishSchema.safeParse(p);
   if (!parsed.success) throw new Error("signupId and response are required");
   const response = parsed.data.response as RegistrationResponseJSON;
+  // 引き継ぎは承認済みの既存アカウントへ端末を足す経路で、新規の登録経路 (会場 / 会場外) に当たらない。
+  if (parsed.data.federation && parsed.data.venueChallengeId) {
+    throw AppError.badRequest("A sign-in transfer does not take a venue check");
+  }
+  // ceremony を消費する前に無効な会場確認を弾く (端末は指定を外して例外経路を選び直せる)。
+  const venue = parsed.data.federation ? null : await precheckVenueSignup(parsed.data.venueChallengeId);
 
   // GETDEL により、成功・失敗を問わず ceremony は一度だけ検証できる。
   const rawPending = await redis.getdel(signupKey(parsed.data.signupId));
@@ -359,7 +374,8 @@ async function finalizePasskeySignup(
   // 先着の公開 signup に管理権限を渡さない。admin は bootstrap-admin で明示的に付ける
   // (SPEC-ADMIN-BOOTSTRAP)。
   const role = "general";
-  const account: SignedUpAccount = { userId: pending.userId, role };
+  const account: SignedUpAccount = { userId: pending.userId, role, registrationOrigin: null };
+  let venuePlaceId: string | null = null;
 
   await db.transaction(async (tx) => {
     await tx.insert(schema.users).values({
@@ -386,10 +402,16 @@ async function finalizePasskeySignup(
       aaguid: info.aaguid,
       createdAt: now,
     });
+    if (venue) {
+      const applied = await applyVenueSignup(tx, pending.userId, venue, now);
+      account.registrationOrigin = applied.origin;
+      venuePlaceId = applied.placeId;
+    }
     if (withinTx) await withinTx(tx, account);
   });
 
   logUserRegister(pending.userId, "(passkey-only)", "passkey", { ip: ctx.ip });
+  if (venuePlaceId) logAuthEvent({ event: "user.venue_registration.joined", userId: pending.userId, placeId: venuePlaceId });
   return account;
 }
 
@@ -473,6 +495,7 @@ function signupResponse(
         // 引き継ぎで作ったアカウントは主の名前を使うので名前入力へ送らない (§4.1-5)。
         needsProfile: !federated,
         federated,
+        registrationOrigin: account.registrationOrigin,
       },
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,

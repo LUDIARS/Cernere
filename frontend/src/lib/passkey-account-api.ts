@@ -22,7 +22,11 @@ import { rememberRegisteredPasskeyCookie } from "./login-cookie";
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 interface SessionResponse {
-  user: { id: string; displayName: string | null; role: string; needsProfile?: boolean };
+  user: {
+    id: string; displayName: string | null; role: string; needsProfile?: boolean;
+    /** venue = 会場で登録 (許可済み) / outside_venue = 会場外 (例外、許可待ち) */
+    registrationOrigin?: "venue" | "outside_venue" | null;
+  };
   accessToken: string;
   refreshToken: string;
 }
@@ -56,11 +60,18 @@ function storeSession(data: SessionResponse): void {
   setStoredUser({ id: data.user.id, name: data.user.displayName ?? "", email: "", role: data.user.role });
 }
 
-/** 新しく始める: この端末に新しいパスキーを作り、そのままログインする。 */
-export async function signupWithPasskey(): Promise<SessionResponse> {
+/**
+ * 新しく始める: この端末に新しいパスキーを作り、そのままログインする。
+ * venueChallengeId は会場確認済みのときだけ付ける (spec/feature/venue-network-registration.md §6)。
+ * 無効なら 422 (code venue_challenge_invalid) で、アカウントは作られない。
+ */
+export async function signupWithPasskey(options: { venueChallengeId?: string } = {}): Promise<SessionResponse> {
   const begin = await post<{ signupId: string; options: PublicKeyCredentialCreationOptionsJSON }>("signup-begin", {});
   const response = await startRegistration({ optionsJSON: begin.options });
-  const data = await post<SessionResponse>("signup-finish", { signupId: begin.signupId, response });
+  const data = await post<SessionResponse>("signup-finish", {
+    signupId: begin.signupId, response,
+    ...(options.venueChallengeId ? { venueChallengeId: options.venueChallengeId } : {}),
+  });
   rememberRegisteredPasskeyCookie();
   storeSession(data);
   return data;

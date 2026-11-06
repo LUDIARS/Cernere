@@ -4,12 +4,16 @@
  * 申請の詳細表示と決定は分けて、決定ごとにこの端末のパスキーで確かめる (user_access.decide)。
  * 申請本文はリンクを含んでいても開かない (テキストとして表示するだけ)。表示名や申請本文だけで
  * 本人と判断せず、別の連絡手段で確かめてから許可する。
+ *
+ * 会場外からの登録 (registration_origin = outside_venue) は例外として表示し、拒否を既定の操作にする
+ * (spec/feature/venue-network-registration.md §7)。会場登録で自動許可された利用者も許可済みタブから停止できる。
  */
 
 import { useCallback, useEffect, useState } from "react";
 import { bodyTextStyle, messageStyle, pageStyle, panelStyle, primaryButton, secondaryButton } from "../../components/security/panel-styles";
 import { useAuth } from "../../contexts/AuthContext";
 import { userAccess, type AccessDecision, type AccessReviewItem, type AccessStatus } from "../../lib/user-access-api";
+import { orderedReviewActions, registrationOriginLabel } from "./access-review-origin";
 
 type Tab = "requests" | AccessStatus;
 
@@ -76,6 +80,12 @@ export function AccessReviewPage() {
           <div style={{ fontWeight: 600 }}>{item.displayName || "(名前未設定)"}</div>
           <div style={{ ...bodyTextStyle, fontFamily: "monospace", marginBottom: "0.25rem" }}>{item.userId}</div>
           <div style={bodyTextStyle}>登録: {new Date(item.createdAt).toLocaleString()} / 状態: {item.status}</div>
+          {registrationOriginLabel(item) && (
+            <div role={item.exception ? "note" : undefined}
+              style={{ ...bodyTextStyle, fontWeight: item.exception ? 700 : 400, color: item.exception ? "var(--danger, #c0392b)" : "var(--text-muted)" }}>
+              {registrationOriginLabel(item)}
+            </div>
+          )}
           {item.request && (
             <div style={{ ...bodyTextStyle, whiteSpace: "pre-wrap", color: "var(--text)", borderLeft: "3px solid var(--border)", paddingLeft: "0.75rem" }}>
               {item.request.purpose}
@@ -83,9 +93,9 @@ export function AccessReviewPage() {
             </div>
           )}
           <div style={{ display: "flex", gap: "0.5rem" }}>
-            {ACTIONS[item.status].map((a) => (
+            {orderedReviewActions(item, ACTIONS[item.status]).map(({ action: a, primary }) => (
               <button key={a.decision} type="button" disabled={busy || item.userId === user.id}
-                style={a.decision === "approve" || a.decision === "unlock" ? primaryButton(busy) : secondaryButton(busy)}
+                style={primary ? primaryButton(busy) : secondaryButton(busy)}
                 onClick={() => { void decide(item, a.decision, a.reason); }}>
                 {a.label}
               </button>

@@ -17,6 +17,7 @@ import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { AppError } from "../error.js";
 import { recordSecurityEvent, type SecurityEventKind } from "../notify/security-events.js";
+import { accessReviewOrigin, type AccessReviewOrigin } from "./access-review-origin.js";
 
 export type AccessStatus = "pending" | "active" | "locked";
 
@@ -213,12 +214,14 @@ export async function decideAccess(actorUserId: string, input: DecisionInput): P
   });
 }
 
-export interface AccessReviewItem {
+export interface AccessReviewItem extends AccessReviewOrigin {
   userId: string;
   displayName: string;
   status: AccessStatus;
   revision: number;
   createdAt: string;
+  /** 会場登録で所属した組織 (organizations.id)。会場外・従来の登録は null */
+  registrationPlaceId: string | null;
   request: { id: string; purpose: string; createdAt: string } | null;
 }
 
@@ -231,6 +234,8 @@ export async function listAccessReview(actorUserId: string, status: AccessStatus
     status: schema.users.accessStatus,
     revision: schema.users.accessRevision,
     createdAt: schema.users.createdAt,
+    registrationOrigin: schema.users.registrationOrigin,
+    registrationPlaceId: schema.users.registrationPlaceId,
     requestId: schema.registrationRequests.id,
     purpose: schema.registrationRequests.purpose,
     requestedAt: schema.registrationRequests.createdAt,
@@ -250,6 +255,8 @@ export async function listAccessReview(actorUserId: string, status: AccessStatus
     status: parseAccessStatus(r.status),
     revision: r.revision,
     createdAt: r.createdAt.toISOString(),
+    ...accessReviewOrigin(r.registrationOrigin),
+    registrationPlaceId: r.registrationPlaceId ?? null,
     request: r.requestId ? { id: r.requestId, purpose: r.purpose ?? "", createdAt: r.requestedAt!.toISOString() } : null,
   }));
 }

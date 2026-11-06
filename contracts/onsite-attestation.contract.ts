@@ -4,7 +4,7 @@ type Satisfaction = {
   readonly placeId: string; readonly lanId: string; readonly issuedAt: number; readonly acceptedAt: number;
 };
 const ACCEPTED = new Set(['high', 'medium']);
-const REJECTED_METHODS = new Set(['staff_override', 'session', 'password']);
+const REJECTED_METHODS = new Set(['staff_override', 'session', 'password', 'lan']);
 const FRESHNESS_MS = 120_000;
 
 export default {

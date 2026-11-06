@@ -10,6 +10,7 @@ import { config } from "./config.js";
 import { handleAuthRoute } from "./http/auth-handler.js";
 import { registerMfaRoutes } from "./http/mfa-routes.js";
 import { registerOnsiteRoutes } from "./http/onsite-routes.js";
+import { registerVenueRegistrationRoutes } from "./http/venue-registration-routes.js";
 import { registerWorkloadRoutes } from './http/workload-routes.js';
 import { handlePasskeyRoute } from "./http/passkey-handler.js";
 import { handleDeviceRoute } from "./http/device-handler.js";
@@ -300,6 +301,7 @@ export function createApp() {
   registerWorkloadRoutes(app, httpHelpers, false);
   registerMfaRoutes(app, { readBody, jsonResponse, getRemoteIp, classifyError });
   registerOnsiteRoutes(app, { readBody, jsonResponse, getRemoteIp, classifyError });
+  registerVenueRegistrationRoutes(app, { readBody, jsonResponse, getRemoteIp, classifyError });
 
   // ── CORS preflight ──────────────────────────────────────
   app.options("/*", (res) => {

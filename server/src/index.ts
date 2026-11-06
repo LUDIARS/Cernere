@@ -12,6 +12,7 @@ import { runMigrations } from "./db/migrate.js";
 import { initOidcKeys } from "./auth/oidc-keys.js";
 import { startOutboxWorker } from "./notify/outbox-worker.js";
 import { startAccessRequestDigest } from "./notify/access-request-digest.js";
+import { startVenueChallengeSweeper } from "./auth/venue-challenge-sweeper.js";
 import { purgeExpiredFaceConsents } from "./identity/face-consent-store.js";
 import { purgeExpiredFaceRevocations } from "./identity/face-revocation-store.js";
 
@@ -63,6 +64,8 @@ async function main() {
   startOutboxWorker();
   // 審査待ちの利用申請を admin へまとめて知らせる (許可制 案 A)。
   startAccessRequestDigest();
+  // 期限切れの会場確認 challenge を 1 日で回収する (spec/feature/venue-network-registration.md §5)。
+  startVenueChallengeSweeper();
 }
 
 // 1 リクエストの取りこぼした reject でプロセスごと落とさない (Node の既定は unhandledRejection で終了)。

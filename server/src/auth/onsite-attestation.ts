@@ -1,5 +1,6 @@
 /**
  * kiosk (Ostiarius) が送る purpose:"mfa" attestation の検証 (契約 A / C、 Os spec §4.2)。
+ * purpose:"registration" (会場ネットワーク限定の新規登録) は形式だけ共有し、 ここでは purpose_mismatch で拒否する。
  *
  * 形式: base64url(JSON payload) + "." + base64url(Ed25519 署名)。 署名対象は payload の
  * base64url 文字列そのもの (Ostiarius の signAttestation と同一)。 検証順は §4.2 の 1〜7 に固定し、
@@ -23,7 +24,7 @@ const MAX_ATTESTATION_LENGTH = 4096;
 export const ONSITE_ATTESTATION_ERRORS = [
   "invalid_format", "unknown_kiosk", "revoked_kiosk", "invalid_signature", "purpose_mismatch",
   "nonce_unknown", "nonce_used", "subject_mismatch", "stale", "assurance_insufficient",
-  "place_not_allowed", "mfa_revision_changed",
+  "place_not_allowed", "mfa_revision_changed", "organization_unknown",
 ] as const;
 export type OnsiteAttestationErrorCode = (typeof ONSITE_ATTESTATION_ERRORS)[number];
 
@@ -31,6 +32,7 @@ const STATUS: Readonly<Record<OnsiteAttestationErrorCode, number>> = {
   invalid_format: 400, stale: 400,
   unknown_kiosk: 401, revoked_kiosk: 401, invalid_signature: 401,
   purpose_mismatch: 403, subject_mismatch: 403, assurance_insufficient: 403, place_not_allowed: 403,
+  organization_unknown: 403,
   nonce_unknown: 404,
   nonce_used: 409, mfa_revision_changed: 409,
 };
@@ -40,8 +42,12 @@ export function onsiteAttestationError(code: OnsiteAttestationErrorCode): AppErr
   return AppError.withCode(STATUS[code], code, code);
 }
 
+export const ATTESTATION_PURPOSES = ["attendance", "mfa", "registration"] as const;
+export type AttestationPurpose = (typeof ATTESTATION_PURPOSES)[number];
+
 const payloadSchema = z.object({
-  sub: z.string().min(1).max(128),
+  // null only for purpose "registration" (venue registration has no subject yet); checked per purpose.
+  sub: z.string().min(1).max(128).nullable(),
   placeId: z.string().min(1).max(128),
   lanId: z.string().min(1).max(128),
   nonce: z.string().min(1).max(128),
@@ -49,7 +55,7 @@ const payloadSchema = z.object({
   method: z.enum(ATTESTATION_METHODS).optional(),
   assurance: z.enum(ATTESTATION_ASSURANCES).optional(),
   // Missing purpose means the legacy attendance format (contract A).
-  purpose: z.enum(["attendance", "mfa"]).optional(),
+  purpose: z.enum(ATTESTATION_PURPOSES).optional(),
 }).strict();
 export type OnsiteAttestationPayload = z.infer<typeof payloadSchema>;
 
@@ -101,7 +107,13 @@ export interface AcceptedOnsiteAttestation {
   satisfaction: OnsiteSatisfaction;
 }
 
-function verifySignature(parsed: ParsedAttestation, publicKeyPem: string): boolean {
+/** Missing purpose is the legacy attendance format (contract A). */
+export function attestationPurpose(payload: OnsiteAttestationPayload): AttestationPurpose {
+  return payload.purpose ?? "attendance";
+}
+
+/** Shared with venue registration (auth/venue-attestation.ts); never throws. */
+export function verifyKioskSignature(parsed: ParsedAttestation, publicKeyPem: string): boolean {
   try {
     return cryptoVerify(null, Buffer.from(parsed.body), createPublicKey(publicKeyPem), parsed.signature);
   } catch {
@@ -119,10 +131,10 @@ export async function checkOnsiteAttestation(token: unknown, deps: OnsiteAttesta
   const kiosk = await deps.findKiosk(payload.lanId);
   if (!kiosk) throw onsiteAttestationError("unknown_kiosk");
   if (kiosk.status !== "active") throw onsiteAttestationError("revoked_kiosk");
-  if (!verifySignature(parsed, kiosk.publicKeyPem)) throw onsiteAttestationError("invalid_signature");
+  if (!verifyKioskSignature(parsed, kiosk.publicKeyPem)) throw onsiteAttestationError("invalid_signature");
 
-  // 2. purpose
-  if ((payload.purpose ?? "attendance") !== "mfa") throw onsiteAttestationError("purpose_mismatch");
+  // 2. purpose: attendance and venue "registration" attestations are never MFA evidence
+  if (attestationPurpose(payload) !== "mfa") throw onsiteAttestationError("purpose_mismatch");
 
   // 3. binding: nonce belongs to a live onsite challenge of the same subject
   const challenge = await deps.lookupNonce(payload.nonce);

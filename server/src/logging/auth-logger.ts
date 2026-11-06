@@ -34,6 +34,10 @@ type AuthEventType =
   | "user.mfa.settings.changed"
   | "user.mfa.onsite.accepted"
   | "user.mfa.onsite.rejected"
+  // 会場ネットワーク限定の新規登録。spec/feature/venue-network-registration.md
+  | "user.venue_registration.verified"
+  | "user.venue_registration.rejected"
+  | "user.venue_registration.joined"
   | "admin.onsite_kiosk.registered"
   | "admin.onsite_kiosk.revoked"
   | "project.login"

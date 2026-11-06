@@ -1,6 +1,7 @@
 # feature: 会場ネットワーク限定の新規登録 (venue registration)
 
-**Status: Designed** (2026-11-06、neco 指示。実装は Cr / Os の別タスク)
+**Status: Implemented (Cernere 分)** (2026-11-06、neco 指示。Os 分は別タスク)
+Actio: `actio:a09cb7a1-f539-4673-88d9-e0d165c25bda` / ID: `SPEC-VENUE-REGISTRATION`
 
 関連: [mfa-authenticator.md](mfa-authenticator.md) (SPEC-MFA-ONSITE、kiosk レジストリと LAN 内の nonce 受け渡し) /
 [../plan/2026-10-14-registration-approval-design-astra.md](../plan/2026-10-14-registration-approval-design-astra.md) (許可制) /
@@ -151,3 +152,30 @@ signup の扱い:
 |---|---|
 | Cernere | migration、§6 の API、signup の分岐、許可待ち一覧の表示、登録画面の会場確認 (LAN の Os への送信とポーリング)、MFA onsite 側の `registration` 拒否 |
 | Ostiarius | `POST /api/venue-registration/sessions` (LAN 送信元限定・CORS)、`purpose: "registration"` の署名と Cr への送信、出席・MFA 経路での `registration` 拒否、`OSTIARIUS_FACILITY_ID` を組織 UUID にする設定変更 |
+
+## 11. Cernere の実装 (SPEC-VENUE-REGISTRATION)
+
+| 責務 | 置き場所 |
+|---|---|
+| migration (`venue_registration_challenges`、`users.registration_origin` / `registration_place_id`) | `migrations/080_venue_registration.sql` |
+| attestation §3 の判定 (形式・署名は SPEC-MFA-ONSITE と共有) | `server/src/auth/venue-attestation.ts` (`parseOnsiteAttestation` / `verifyKioskSignature` を再利用) |
+| challenge の発行・確認・消費・回収 | `server/src/auth/venue-challenge-store.ts` / `venue-challenge-sweeper.ts` (1 時間ごと、期限から 1 日で削除) |
+| 状態と signup の分岐 (副作用なし) | `server/src/auth/venue-challenge-state.ts` |
+| start / attestations / status | `server/src/auth/venue-registration.ts`、HTTP は `server/src/http/venue-registration-{handler,routes}.ts` |
+| signup の `venueChallengeId` 分岐 | `server/src/auth/venue-registration-signup.ts` (`passkey-handler.ts` の `finalizePasskeySignup` から呼ぶ) |
+| 許可待ち一覧の登録経路 | `server/src/auth/access-review-origin.ts`、画面は `frontend/src/pages/admin/AccessReviewPage.tsx` |
+| 登録画面の会場確認 | `frontend/src/lib/venue-check.ts` / `venue-registration-api.ts`、`frontend/src/pages/onboarding/{useVenueCheck.ts,VenueCheckPanel.tsx,StartPage.tsx}` |
+
+実装で決めたこと:
+
+- attestation の語彙に `method: "lan"` / `assurance: "network"` / `purpose: "registration"` を足した。`lan` は MFA の手段にならない
+  (`meetsOnsiteAssurance` が常に不充足)。MFA onsite (`checkOnsiteAttestation`) は `registration` を `purpose_mismatch` で拒否する。
+- `sub` は `registration` のときだけ null を許す (それ以外の purpose で null なら `subject_mismatch`)。
+- 失敗コード `organization_unknown` は 403。placeId が UUID でない kiosk (例 `glab-main`) は DB を引かずに `organization_unknown`。
+- signup は WebAuthn ceremony を消費する前に `venueChallengeId` を確かめ (無効なら 422)、user 作成と同じトランザクションで
+  条件付き UPDATE により消費する。並行した 2 つ目の消費は 422 で巻き戻す (1 回の確認で 1 人)。
+- 会場登録の自動許可は `access_decisions` に actor なし・`reason_code = venue_registration` で記録する。
+- 引き継ぎ (federation) で作る端末用アカウントは新規の登録経路ではないので `registration_origin` は NULL のまま。
+  引き継ぎと `venueChallengeId` の同時指定は 400。
+- 状態確認は消費済み・期限切れ・未知の challenge をすべて `expired` として返す。
+- 登録画面は「会場確認済み」か「会場の外から続ける (例外)」を選んだときだけ「はじめる」を押せる。422 が返ったら確認をやり直す。

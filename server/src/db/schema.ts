@@ -74,6 +74,10 @@ export const users = pgTable("users", {
   accessStatus: text("access_status").notNull().default("pending"),
   accessRevision: integer("access_revision").notNull().default(0),
   accessChangedAt: timestamp("access_changed_at", { withTimezone: true }),
+  // 登録の経路 (migration 080、spec/feature/venue-network-registration.md §5)。
+  // 'venue' = 会場 LAN 経由 / 'outside_venue' = 会場外 (例外) / NULL = 本機能以前の登録。
+  registrationOrigin: text("registration_origin"),
+  registrationPlaceId: text("registration_place_id"),
 
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -405,6 +409,23 @@ export const onsiteKiosks = pgTable("onsite_kiosks", {
 }, (t) => [
   index("idx_onsite_kiosks_status_place").on(t.status, t.placeId),
   check("onsite_kiosks_status_check", sql`${t.status} IN ('active', 'revoked')`),
+]);
+
+// ── Venue registration challenges (migration 080) ───────────
+//
+// 会場ネットワーク限定の新規登録の challenge。nonce は SHA-256 で保存する。
+// verified_at は kiosk attestation の受理、consumed_at は signup での一回消費。
+export const venueRegistrationChallenges = pgTable("venue_registration_challenges", {
+  id: uuid("id").primaryKey(),
+  nonceHash: text("nonce_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  lanId: text("lan_id"),
+  placeId: text("place_id"),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("idx_venue_registration_challenges_expires").on(t.expiresAt),
 ]);
 
 export const organizationMembers = pgTable("organization_members", {

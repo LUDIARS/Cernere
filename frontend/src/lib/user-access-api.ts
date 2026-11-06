@@ -12,12 +12,21 @@ export interface MyAccess {
   request: { id: string; state: string; purpose: string; createdAt: string } | null;
 }
 
+/** 登録経路 (会場ネットワーク限定の新規登録)。null は本機能以前の登録。 */
+export type RegistrationOrigin = "venue" | "outside_venue" | null;
+
 export interface AccessReviewItem {
   userId: string;
   displayName: string;
   status: AccessStatus;
   revision: number;
   createdAt: string;
+  registrationOrigin: RegistrationOrigin;
+  registrationPlaceId: string | null;
+  /** 会場外からの登録 (例外) */
+  exception: boolean;
+  /** 既定にする操作。会場外からの登録は拒否 */
+  defaultDecision: "reject" | null;
   request: { id: string; purpose: string; createdAt: string } | null;
 }
 

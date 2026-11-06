@@ -5,18 +5,19 @@
  * - staff_override (manual) / session / password (low) は MFA として受理しない
  * - passkey (kiosk 経由、 medium) は要求値が medium 以下なら受理する
  * - 要求値 high は assurance high (face) だけが満たす
+ * - lan / network は会場ネットワーク限定の新規登録 (purpose:"registration") 専用で、本人確認ではないので MFA にしない
  * @implements SPEC-MFA-ONSITE
  */
 
 import type { OnsiteMinAssurance } from "../project/onsite-mfa.js";
 
 /** Ostiarius server/attestation.ts の AttestationMethod / AttestationAssurance と同じ語彙。 */
-export const ATTESTATION_METHODS = ["face", "face_passive", "passkey", "staff_override", "session", "password"] as const;
-export const ATTESTATION_ASSURANCES = ["high", "medium", "manual", "low"] as const;
+export const ATTESTATION_METHODS = ["face", "face_passive", "passkey", "staff_override", "session", "password", "lan"] as const;
+export const ATTESTATION_ASSURANCES = ["high", "medium", "manual", "low", "network"] as const;
 export type AttestationMethod = (typeof ATTESTATION_METHODS)[number];
 export type AttestationAssurance = (typeof ATTESTATION_ASSURANCES)[number];
 
-const NEVER_MFA_METHODS: ReadonlySet<string> = new Set(["staff_override", "session", "password"]);
+const NEVER_MFA_METHODS: ReadonlySet<string> = new Set(["staff_override", "session", "password", "lan"]);
 const RANK: Readonly<Record<string, number>> = { medium: 1, high: 2 };
 
 export function meetsOnsiteAssurance(method: AttestationMethod | undefined, assurance: AttestationAssurance | undefined,

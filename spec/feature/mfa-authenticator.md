@@ -146,7 +146,7 @@ attestation を受理しても ticket は消費しない。ticket に「onsite �
 `{ sub, placeId, lanId, nonce, issuedAt, method, assurance, purpose }` (purpose 欠落 = attendance)。
 
 1. 署名: 登録済み・active の kiosk 公開鍵で検証 (`unknown_kiosk` / `revoked_kiosk` / `invalid_signature`)。
-2. 用途: `purpose == "mfa"` (`purpose_mismatch`)。
+2. 用途: `purpose == "mfa"` (`purpose_mismatch`)。`attendance` と会場登録の `registration` ([venue-network-registration.md](venue-network-registration.md)) は受理しない。`method: "lan"` は MFA の手段にならない。
 3. 束縛: nonce が有効な onsite challenge に一致し (`nonce_unknown` / `nonce_used`)、`sub` が challenge の
    userId と一致する (`subject_mismatch`)。
 4. 鮮度: `issuedAt` が 120 秒以内 (`stale`)。nonce は受理時に原子的に used へ遷移する。

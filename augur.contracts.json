@@ -335,6 +335,42 @@
       "module": "server/src/signup-fields/contracts/shared-source.contract.ts",
       "mode": "observe",
       "sample": 1
+    },
+    {
+      "id": "C-38",
+      "criterion": "C-38 decideVenueAttestation(evidence): 登録済み active kiosk の署名・purpose=registration・有効な venue challenge・sub=null・120 秒鮮度・lan/network・kiosk の placeId・組織の解決をすべて満たす attestation だけを受理し、組織は kiosk 登録の placeId から決める",
+      "symbol": "decideVenueAttestation",
+      "file": "server/src/auth/venue-attestation.ts",
+      "module": "server/src/auth/contracts/venue-attestation.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-39",
+      "criterion": "C-39 venueChallengeState(row, now): 状態確認は pending / verified / expired だけを返し、消費済み・期限切れ・未知の challenge は expired、未消費・期限内で確認済みのときだけ verified にする",
+      "symbol": "venueChallengeState",
+      "file": "server/src/auth/venue-challenge-state.ts",
+      "module": "server/src/auth/contracts/venue-challenge-state.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-40",
+      "criterion": "C-40 venueSignupOutcome(venueChallengeId, row, now): 指定なしは outside_venue、確認済み・未消費・期限内の challenge だけが venue (その placeId の組織) になり、無効な指定は outside_venue に落とさず invalid にする",
+      "symbol": "venueSignupOutcome",
+      "file": "server/src/auth/venue-challenge-state.ts",
+      "module": "server/src/auth/contracts/venue-signup-outcome.contract.ts",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-41",
+      "criterion": "C-41 accessReviewOrigin(value): 許可待ち一覧で outside_venue (未知の値を含む) を例外として拒否を既定の操作にし、venue と本機能以前の登録は例外にしない",
+      "symbol": "accessReviewOrigin",
+      "file": "server/src/auth/access-review-origin.ts",
+      "module": "server/src/auth/contracts/access-review-origin.contract.ts",
+      "mode": "observe",
+      "sample": 1
     }
   ]
 }

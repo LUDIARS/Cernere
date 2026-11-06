@@ -84,6 +84,14 @@ describe("checkOnsiteAttestation", () => {
     await expect(checkOnsiteAttestation(attest({ purpose: undefined }), deps())).rejects.toMatchObject({ code: "purpose_mismatch" });
   });
 
+  it("2: rejects a venue registration attestation (purpose registration) as MFA evidence", async () => {
+    // spec/feature/venue-network-registration.md §3-2: MFA onsite never accepts "registration".
+    await expect(checkOnsiteAttestation(attest({ purpose: "registration", sub: null, method: "lan", assurance: "network" }), deps()))
+      .rejects.toMatchObject({ code: "purpose_mismatch", statusCode: 403 });
+    await expect(checkOnsiteAttestation(attest({ purpose: "registration" }), deps()))
+      .rejects.toMatchObject({ code: "purpose_mismatch" });
+  });
+
   it("3: rejects an unknown and an already used nonce", async () => {
     await expect(checkOnsiteAttestation(attest(), deps({ nonce: { state: "unknown" } }))).rejects.toMatchObject({ code: "nonce_unknown" });
     await expect(checkOnsiteAttestation(attest(), deps({ nonce: { state: "used" } }))).rejects.toMatchObject({ code: "nonce_used" });
@@ -148,5 +156,8 @@ describe("meetsOnsiteAssurance", () => {
     expect(meetsOnsiteAssurance("staff_override", "high", "medium")).toBe(false);
     expect(meetsOnsiteAssurance("face", "low", "medium")).toBe(false);
     expect(meetsOnsiteAssurance(undefined, undefined, "medium")).toBe(false);
+    // Venue registration's network presence is not a factor.
+    expect(meetsOnsiteAssurance("lan", "network", "medium")).toBe(false);
+    expect(meetsOnsiteAssurance("lan", "high", "medium")).toBe(false);
   });
 });
