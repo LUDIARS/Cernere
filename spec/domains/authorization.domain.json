@@ -5,6 +5,18 @@
   "templateRules": [],
   "membership": [
     {
+      "pathPattern": "(^|/)server/(src|tests)/auth/composite-session-(store|redis)(\\.test)?\\.ts$"
+    },
+    {
+      "pathPattern": "(^|/)server/(src|tests)/(auth/composite-(delegation|operation-permission)|http/composite-delegation)"
+    },
+    {
+      "pathPattern": "(^|/)server/(src|tests)/consent/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)server/(src|tests)/project/service-operation-policy(\\.test)?\\.ts$"
+    },
+    {
       "pathPattern": "/server/src/project/profile-"
     },
     {
@@ -31,6 +43,8 @@
   ],
   "cardTemplate": "Summarise the \"authorization\" domain: Permission model and the 4-layer destructive-operation defense: system roles (admin/general), org roles (owner/admin/member), token→TTL→user-state→resource-ownership checks.",
   "specRefs": [
+    "SPEC-COMPOSITE-DELEGATION",
+    "SPEC-COMPOSITE-OPERATION-GUARD",
     "Step 5: 認可モデルの適用",
     "Step 6: 破壊的操作の防御層の実装",
     "多層防御",

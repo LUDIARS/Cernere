@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { CompositeLoginFrame } from "../../../packages/composite/src/ui/CompositeLoginFrame";
+vi.mock("../../../packages/composite/src/ui/pkce.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../../../packages/composite/src/ui/pkce.js")>(),
+  createCompositePkce: async () => ({ codeVerifier: "v".repeat(43), codeChallenge: "c".repeat(43), state: "s".repeat(43) }),
+}));
 
 let view: ReactTestRenderer | undefined;
 afterEach(async () => { if (view) await act(() => view!.unmount()); vi.unstubAllGlobals(); });
@@ -16,21 +20,21 @@ describe("embedded Composite", () => {
     vi.stubGlobal("window", { location: { origin: "https://glab.example", assign }, open,
       addEventListener: (_type: string, callback: typeof listener) => { listener = callback; }, removeEventListener: remove });
     const onAuthCode = vi.fn();
-    const props = { cernereUrl: "https://cr.example", onAuthCode };
+    const props = { cernereUrl: "https://cr.example", clientId: "glab-client", onAuthCode };
     await act(() => { view = create(createElement(CompositeLoginFrame, props), { createNodeMock: () => ({ contentWindow: child }) }); });
     const frame = view!.root.findByType("iframe");
     expect(frame.props.src).toContain("origin=https%3A%2F%2Fglab.example");
     expect(frame.props.sandbox).not.toContain("allow-top-navigation");
     expect(frame.props.sandbox).not.toContain("allow-popups");
     expect(frame.props.allow).toContain("publickey-credentials-create");
-    const message = { origin: "https://cr.example", source: child, data: { type: "cernere:auth", authCode: "code" } };
+    const message = { origin: "https://cr.example", source: child, data: { type: "cernere:auth", authCode: "code", state: "s".repeat(43) } };
     await act(() => { listener!({ ...message, source: {} }); listener!({ ...message, origin: "https://evil.example" }); });
     expect(onAuthCode).not.toHaveBeenCalled();
     await act(() => listener!(message));
     const changedCallback = vi.fn();
     await act(() => view!.update(createElement(CompositeLoginFrame, { ...props, onAuthCode: changedCallback })));
     await act(() => listener!(message));
-    expect(onAuthCode).toHaveBeenCalledExactlyOnceWith("code");
+    expect(onAuthCode).toHaveBeenCalledExactlyOnceWith("code", "v".repeat(43));
     expect(changedCallback).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled(); expect(assign).not.toHaveBeenCalled();
     await act(() => view!.unmount()); view = undefined;

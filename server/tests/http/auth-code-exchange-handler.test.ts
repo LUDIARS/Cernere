@@ -1,81 +1,39 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-
-// kiosk 交換は「service 認可 → Redis の one-time 消費 → refreshToken を返さない」
-// に加えて token 応答のキャッシュ抑止が要。認可と Redis と DB はモックして配線を見る。
-const mocks = vi.hoisted(() => ({
-  requireExportAuth: vi.fn(),
-  redisGetDel: vi.fn<(key: string) => Promise<string | null>>(),
-  deleteWhere: vi.fn(),
-  hashRefreshToken: vi.fn((token: string) => `hashed:${token}`),
-}));
-
-vi.mock("../../src/http/export-auth.js", () => ({
-  requireExportAuth: mocks.requireExportAuth,
-  EXPORT_SCOPES: { kioskCodeExchange: "auth-code:kiosk-exchange" },
-}));
-vi.mock("../../src/redis.js", () => ({ redis: { getdel: mocks.redisGetDel } }));
-vi.mock("../../src/auth/token-hash.js", () => ({ hashRefreshToken: mocks.hashRefreshToken }));
-vi.mock("../../src/db/connection.js", () => ({
-  db: { delete: () => ({ where: (condition: unknown) => { mocks.deleteWhere(condition); return Promise.resolve(); } }) },
-}));
-
+import { beforeEach, describe, expect, it, vi } from "vitest";
+const mocks = vi.hoisted(() => ({ authorize: vi.fn(), consume: vi.fn(), current: vi.fn(), active: vi.fn(), access: vi.fn() }));
+vi.mock("../../src/http/export-auth.js", () => ({ requireExportAuth: mocks.authorize, EXPORT_SCOPES: { kioskCodeExchange: "auth-code:kiosk-exchange" } }));
+vi.mock("../../src/auth/auth-code.js", () => ({ authCodeStore: { consume: mocks.consume } }));
+vi.mock("../../src/auth/user-session-state.js", () => ({ assertUserSessionCurrent: mocks.current }));
+vi.mock("../../src/federation/subject.js", () => ({ requireServiceAccess: mocks.active }));
+vi.mock("../../src/auth/jwt.js", () => ({ generateAccessToken: mocks.access, ACCESS_TOKEN_SECONDS: 900 }));
 const { handleAuthCodeExchange } = await import("../../src/http/auth-code-exchange-handler.js");
-
-const STORED = JSON.stringify({
-  accessToken: "access-1",
-  refreshToken: "refresh-1",
-  user: { id: "user-1", displayName: "K", email: null, role: "general" },
+beforeEach(() => {
+  vi.resetAllMocks();
+  mocks.authorize.mockResolvedValue({ kind: "project", projectKey: "ostiarius" });
+  mocks.consume.mockResolvedValue({ subject: { sub: "account", role: "general", authEpoch: 3 } });
+  mocks.access.mockResolvedValue("access-1");
 });
-
-describe("handleAuthCodeExchange", () => {
-  beforeEach(() => {
-    mocks.requireExportAuth.mockReset();
-    mocks.redisGetDel.mockReset();
-    mocks.deleteWhere.mockReset();
-    mocks.requireExportAuth.mockResolvedValue({ kind: "project", subject: "client-1", projectKey: "ostiarius" });
-    mocks.redisGetDel.mockResolvedValue(STORED);
+describe("kiosk code exchange", () => {
+  it("requires the kiosk scope and consumes only a code for this kiosk project", async () => {
+    const result = await handleAuthCodeExchange('{"code":"code"}', "Bearer project");
+    expect(mocks.authorize).toHaveBeenCalledWith("Bearer project", "auth-code:kiosk-exchange");
+    expect(mocks.consume).toHaveBeenCalledWith("code", { audience: "kiosk", projectKey: "ostiarius" });
+    expect(result.data).toEqual({ userId: "account", accessToken: "access-1", expiresIn: 900 });
+    expect(result.headers["Cache-Control"]).toBe("no-store");
+    expect(result.data).not.toHaveProperty("refreshToken");
   });
-
-  it("userId と accessToken だけを返し、 refreshToken は返さない", async () => {
-    const result = await handleAuthCodeExchange(JSON.stringify({ code: "c1" }), "Bearer service");
-
-    expect(result.status).toBe("200 OK");
-    expect(result.data).toEqual({ userId: "user-1", accessToken: "access-1", expiresIn: 900 });
-    expect(result.headers).toEqual({ "Cache-Control": "no-store", Pragma: "no-cache" });
-    expect(JSON.stringify(result.data)).not.toContain("refresh-1");
+  it("does not accept an administrator user token in place of the kiosk project", async () => {
+    mocks.authorize.mockResolvedValue({ kind: "admin" });
+    await expect(handleAuthCodeExchange('{"code":"code"}', "Bearer admin")).rejects.toMatchObject({ statusCode: 401 });
+    expect(mocks.consume).not.toHaveBeenCalled();
   });
-
-  it("authCode を Redis から原子的に取得・削除する (one-time)", async () => {
-    await handleAuthCodeExchange(JSON.stringify({ code: "c1" }), "Bearer service");
-
-    expect(mocks.redisGetDel).toHaveBeenCalledOnce();
-    expect(mocks.redisGetDel).toHaveBeenCalledWith("authcode:c1");
+  it("rejects mismatched, expired and reused codes before issuing credentials", async () => {
+    mocks.consume.mockResolvedValue(null);
+    await expect(handleAuthCodeExchange('{"code":"code"}', "Bearer project")).rejects.toMatchObject({ statusCode: 401 });
+    expect(mocks.access).not.toHaveBeenCalled();
   });
-
-  it("誰にも渡さない refresh session 行を削除する", async () => {
-    await handleAuthCodeExchange(JSON.stringify({ code: "c1" }), "Bearer service");
-
-    expect(mocks.hashRefreshToken).toHaveBeenCalledWith("refresh-1");
-    expect(mocks.deleteWhere).toHaveBeenCalledTimes(1);
-  });
-
-  it("service 認可に失敗したら Redis を読まない", async () => {
-    mocks.requireExportAuth.mockRejectedValue(new Error("Forbidden"));
-
-    await expect(handleAuthCodeExchange(JSON.stringify({ code: "c1" }), "Bearer bad")).rejects.toThrow(/Forbidden/);
-    expect(mocks.redisGetDel).not.toHaveBeenCalled();
-  });
-
-  it("失効 / 再利用済みの code は 401", async () => {
-    mocks.redisGetDel.mockResolvedValue(null);
-
-    await expect(handleAuthCodeExchange(JSON.stringify({ code: "c1" }), "Bearer service"))
-      .rejects.toMatchObject({ statusCode: 401 });
-    expect(mocks.deleteWhere).not.toHaveBeenCalled();
-  });
-
-  it("code が無い body は 400", async () => {
-    await expect(handleAuthCodeExchange("{}", "Bearer service")).rejects.toMatchObject({ statusCode: 400 });
-    expect(mocks.redisGetDel).not.toHaveBeenCalled();
+  it("checks revocation again at exchange", async () => {
+    mocks.current.mockRejectedValue(new Error("revoked"));
+    await expect(handleAuthCodeExchange('{"code":"code"}', "Bearer project")).rejects.toThrow("revoked");
+    expect(mocks.access).not.toHaveBeenCalled();
   });
 });

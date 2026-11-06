@@ -143,6 +143,7 @@ export async function decideConsentTicket(ticketId: string, input: TicketDecisio
   const { issueAuthCode } = await import("../auth/auth-code.js");
   const authCode = await issueAuthCode({
     ...ticket.authUser,
+    binding: ticket.authCodeBinding,
     service: { subject: { projectKey: resolved.subject.key }, channel: ticket.channel },
   });
   const { ensureUserProjectRow } = await import("../project/service.js");

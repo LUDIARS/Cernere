@@ -20,6 +20,7 @@ import { handleIdentityRosterRoute } from "./http/identity-roster-handler.js";
 import { handleActionAuthRoute } from "./http/action-auth-handler.js";
 import { handleFederationRoute } from "./http/federation-handler.js";
 import { handleAuthCodeExchange } from "./http/auth-code-exchange-handler.js";
+import { handleCompositeServiceRoute } from "./http/composite-service-handler.js";
 import { exportProjectSchemas } from "./http/project-schema-handler.js";
 import { getPublicKeys } from "./auth/paseto.js";
 import { handleCompositeRoute } from "./http/composite-handler.js";
@@ -543,6 +544,35 @@ export function createApp() {
   });
 
   // ── Auth REST: POST /api/auth/:action ───────────────────
+  app.post("/api/auth/service/:action", async (res, req) => {
+    const action = req.getParameter(0) ?? "";
+    const authHeader = req.getHeader("authorization") ?? "";
+    let aborted = false;
+    try {
+      const body = await readBody(res, 32_768, () => { aborted = true; });
+      if (aborted) return;
+      const result = await handleCompositeServiceRoute(action, body, authHeader);
+      if (!aborted) jsonResponse(res, result.status, result.data, [], NO_STORE_HEADERS);
+    } catch (error) {
+      if (aborted) return;
+      const { status, message, code } = classifyError(error);
+      jsonResponse(res, status, code ? { error: message, code } : { error: message }, [], NO_STORE_HEADERS);
+    }
+  });
+  app.post("/api/auth/exchange/self", async (res, req) => {
+    const origin = req.getHeader("origin") ?? "";
+    let aborted = false;
+    try {
+      const body = await readBody(res, 4096, () => { aborted = true; });
+      if (aborted) return;
+      const result = await handleAuthRoute("exchange/self", body, "", { origin });
+      if (!aborted) jsonResponse(res, result.status, result.data, [], NO_STORE_HEADERS);
+    } catch (error) {
+      if (aborted) return;
+      const { status, message, code } = classifyError(error);
+      jsonResponse(res, status, code ? { error: message, code } : { error: message }, [], NO_STORE_HEADERS);
+    }
+  });
   app.post("/api/auth/:action", async (res, req) => {
     const action = req.getParameter(0) ?? "";
     const authHeader = req.getHeader("authorization") ?? "";
@@ -783,6 +813,7 @@ export function createApp() {
   app.post("/api/auth/composite/:action", async (res, req) => {
     const action = req.getParameter(0) ?? "";
     const userAgent = req.getHeader("user-agent") ?? undefined;
+    const origin = req.getHeader("origin") ?? "";
     const ip = getRemoteIp(res, req);
     let aborted = false;
 
@@ -791,7 +822,7 @@ export function createApp() {
       const body = await readBody(res, DEFAULT_MAX_BODY_BYTES, () => { aborted = true; });
       if (aborted) return;
       devLog("http.composite.body", { action, bodyLen: body.length });
-      const result = await handleCompositeRoute(action, body, { ip, userAgent });
+      const result = await handleCompositeRoute(action, body, { ip, userAgent, origin });
       devLog("http.composite.ok", { action, status: result.status });
       jsonResponse(res, result.status, result.data);
     } catch (err) {
@@ -837,11 +868,15 @@ export function createApp() {
   // フロント (CompositeLoginPage / CompositeCallbackPage) が authCode の送信先
   // (postMessage origin / redirect_uri) を forward 前に検証するための許可リスト。
   // 権威はサーバ側 config。 許可リストは秘密ではないため認証不要・キャッシュ可。
-  app.get("/api/auth/composite/allowed-origins", (res) => {
-    res.cork(() => {
-      res.writeHeader("cache-control", "public, max-age=300");
-      jsonResponse(res, "200 OK", { origins: compositeAllowedOrigins() });
-    });
+  app.get("/api/auth/composite/allowed-origins", async (res) => {
+    let aborted = false;
+    res.onAborted(() => { aborted = true; });
+    try {
+      const origins = await compositeAllowedOrigins();
+      if (!aborted) jsonResponse(res, "200 OK", { origins }, [], NO_STORE_HEADERS);
+    } catch {
+      if (!aborted) jsonResponse(res, "503 Service Unavailable", { error: "Composite policy unavailable" }, [], NO_STORE_HEADERS);
+    }
   });
 
   // ── Auth REST: GET /api/auth/me ─────────────────────────

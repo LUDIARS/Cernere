@@ -65,6 +65,16 @@ beforeEach(() => {
 });
 
 describe("enforceServiceConsent", () => {
+  it.each(["off", "warn"] as const)("new Composite grants require consent when legacy mode is %s", async mode => {
+    resolver.project = subject(mode);
+    await expect(enforceServiceConsent(user, { subject: { projectKey: "svc" }, channel: "browser", requireConsent: true }))
+      .rejects.toBeInstanceOf(ConsentRequiredError);
+    expect(tickets.created).toHaveLength(1);
+  });
+  it("new Composite grants fail closed when their consent target disappears", async () => {
+    await expect(enforceServiceConsent(user, { subject: { projectKey: "svc" }, channel: "browser", requireConsent: true }))
+      .rejects.toMatchObject({ statusCode: 403 });
+  });
   it("off (既定) は判定しない — 同意を読まずに通す (既存サービスのログインは変わらない)", async () => {
     resolver.project = subject("off");
     await expect(enforceServiceConsent(user, { subject: { projectKey: "svc" }, channel: "browser" })).resolves.toBeUndefined();
@@ -94,6 +104,7 @@ describe("enforceServiceConsent", () => {
   it("enforce で未充足なら authCode を出さず consentTicket と /consent の URL を返す", async () => {
     resolver.project = subject("enforce");
     const error = await enforceServiceConsent(user, {
+      authCodeBinding: { audience: "service", projectKey: "svc", origin: "https://svc.example.com", codeChallenge: "a".repeat(43) },
       subject: { projectKey: "svc" },
       continuation: { mode: "redirect", target: "https://svc.example.com/after" },
       channel: "browser",
@@ -123,6 +134,7 @@ describe("enforceServiceConsent", () => {
   it("composite 許可 origin の popup は postMessage の継続先になる", async () => {
     resolver.byOrigin = subject("enforce");
     await enforceServiceConsent(user, {
+      authCodeBinding: { audience: "service", projectKey: "svc", origin: "https://popup-host.example.com", codeChallenge: "a".repeat(43) },
       subject: { origin: "https://popup-host.example.com" },
       continuation: { mode: "post_message", target: "https://popup-host.example.com" },
       channel: "browser",
@@ -134,9 +146,10 @@ describe("enforceServiceConsent", () => {
 
   it("サービス経由で送り先の指定が無ければサービスの frontend_url へ戻す (edge は redirect)", async () => {
     resolver.project = subject("enforce");
-    await enforceServiceConsent(user, { subject: { projectKey: "svc" }, channel: "service" }).catch(() => undefined);
+    const authCodeBinding = { audience: "service" as const, projectKey: "svc", origin: "https://svc.example.com", codeChallenge: "a".repeat(43) };
+    await enforceServiceConsent(user, { authCodeBinding, subject: { projectKey: "svc" }, channel: "service" }).catch(() => undefined);
     await enforceServiceConsent(user, {
-      subject: { projectKey: "svc" }, channel: "service", deliverAuthCode: false, defaultContinuation: "redirect",
+      authCodeBinding, subject: { projectKey: "svc" }, channel: "service", deliverAuthCode: false, defaultContinuation: "redirect",
     }).catch(() => undefined);
     expect(tickets.created).toEqual([
       expect.objectContaining({ continuation: { kind: "post_message", origin: "https://svc.example.com" }, channel: "service" }),

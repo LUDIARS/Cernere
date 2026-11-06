@@ -35,6 +35,7 @@ export interface AuthSessionUser {
 }
 
 export interface AuthSession {
+  authCodeBinding?: import("./auth-code-store.js").AuthCodeBinding;
   ticket: string;
   state: AuthSessionState;
   user: AuthSessionUser;
@@ -64,7 +65,7 @@ function key(ticket: string): string {
 
 export async function createAuthSession(
   user: AuthSessionUser,
-  ctx: { ip?: string; userAgent?: string; projectKey?: string } = {},
+  ctx: { ip?: string; userAgent?: string; projectKey?: string; authCodeBinding?: import("./auth-code-store.js").AuthCodeBinding } = {},
 ): Promise<AuthSession> {
   const ticket = crypto.randomUUID();
   const current = await currentUserSessionState(user.userId);
@@ -77,6 +78,7 @@ export async function createAuthSession(
     ip: ctx.ip,
     userAgent: ctx.userAgent,
     projectKey: ctx.projectKey,
+    authCodeBinding: ctx.authCodeBinding,
     createdAt: Date.now(),
   };
   await redis.set(key(ticket), JSON.stringify(session), "EX", AUTH_SESSION_TTL);

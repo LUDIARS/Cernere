@@ -12,6 +12,7 @@
 import { isTargetAllowed } from "./composite-redirect";
 
 export interface CompositeAuthHandoffOptions {
+  state?: string;
   /** Cernere 単独フロントの /login (authCode を自分のトークンに交換) */
   self: boolean;
   /** popup モードの postMessage 送信先 (URL クエリ由来 = 未検証) */
@@ -78,7 +79,7 @@ export class CompositeAuthHandoff {
         onError("許可されていない送信先のため認証を中止しました。");
         return;
       }
-      receiver.postMessage({ type: "cernere:auth", authCode }, new URL(origin).origin);
+      receiver.postMessage({ type: "cernere:auth", authCode, state: this.opts.state }, new URL(origin).origin);
       if (window.parent === window) window.close();
       return;
     }
@@ -89,6 +90,7 @@ export class CompositeAuthHandoff {
       }
       const url = new URL(redirectUri);
       url.searchParams.set("code", authCode);
+      if (this.opts.state) url.searchParams.set("state", this.opts.state);
       window.location.href = url.toString();
       return;
     }

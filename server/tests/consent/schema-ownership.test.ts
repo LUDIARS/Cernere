@@ -21,6 +21,16 @@ function definition(extra: Record<string, unknown>): ProjectDefinition {
 }
 
 describe("schema_definition の consent / consent_mode の所有", () => {
+  it("project clients cannot replace or erase Composite origins or audience", () => {
+    const saved = { composite_origins: ["https://svc.example.com"], hub_url: "https://api.svc.example.com" };
+    const { projectOwned, submittedAdminOwned } = splitAdminOwnedSchemaFields({
+      composite_origins: ["https://evil.example"], hub_url: "https://evil.example", user_data: { columns: {} },
+    });
+    expect(submittedAdminOwned).toEqual(["composite_origins", "hub_url"]);
+    const merged = preserveExistingDefinitionFields(definition(projectOwned), definition(saved));
+    expect(merged.composite_origins).toEqual(saved.composite_origins);
+    expect(merged.hub_url).toEqual(saved.hub_url);
+  });
   it("project client の update_schema から consent_mode を落とし、consent は残す", () => {
     const { projectOwned, submittedAdminOwned } = splitAdminOwnedSchemaFields({
       consent, consent_mode: "off", profile_access: { users: "all", read: ["email"], write: [] },

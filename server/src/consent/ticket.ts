@@ -11,6 +11,7 @@ import { redis } from "../redis.js";
 import type { AuthenticationEvidence } from "../lib/authentication-evidence.js";
 import type { ConsentContinuation } from "./continuation.js";
 import type { ConsentSubject } from "./store.js";
+import type { AuthCodeBinding } from "../auth/auth-code-store.js";
 
 export const CONSENT_TICKET_TTL_SECONDS = 10 * 60;
 
@@ -33,6 +34,7 @@ export interface TicketAuthUser {
 export type ConsentChannel = "browser" | "service";
 
 export interface ConsentTicket {
+  authCodeBinding?: AuthCodeBinding;
   authUser: TicketAuthUser;
   subject: ConsentSubject;
   continuation: ConsentContinuation | null;

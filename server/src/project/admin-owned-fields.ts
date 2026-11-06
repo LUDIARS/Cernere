@@ -11,7 +11,7 @@
  */
 
 export const ADMIN_OWNED_SCHEMA_FIELDS = [
-  "data_sharing", "identity_claims", "service_scopes", "profile_access", "onsite_mfa", "consent_mode",
+  "data_sharing", "identity_claims", "service_scopes", "profile_access", "onsite_mfa", "consent_mode", "composite_origins", "hub_url", "service_operations",
 ] as const;
 export type AdminOwnedSchemaField = (typeof ADMIN_OWNED_SCHEMA_FIELDS)[number];
 

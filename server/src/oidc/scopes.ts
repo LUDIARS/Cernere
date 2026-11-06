@@ -4,8 +4,8 @@
  * 純粋関数のみ。 DB / Redis に依存しないのでユニットテストしやすい。
  */
 
-import { createHash, timingSafeEqual } from "node:crypto";
 import { config } from "../config.js";
+export { verifyPkceS256 } from "../lib/crypto/pkce.js";
 
 export const SUPPORTED_SCOPES = ["openid", "email", "profile"] as const;
 export const SUPPORTED_RESPONSE_TYPES = ["code"] as const;
@@ -72,14 +72,6 @@ export function intersectScopes(requested: string[], clientScopes: string[]): st
  * PKCE (RFC 7636) S256 検証。 plain は弱いので非対応。
  * code_challenge === BASE64URL(SHA256(code_verifier)) を定数時間比較する。
  */
-export function verifyPkceS256(codeVerifier: string, codeChallenge: string): boolean {
-  const computed = createHash("sha256").update(codeVerifier).digest("base64url");
-  const a = Buffer.from(computed);
-  const b = Buffer.from(codeChallenge);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
-
 /** `/.well-known/openid-configuration` のボディ。 issuer 基準で endpoint を組む。 */
 export function discoveryDocument(): Record<string, unknown> {
   const issuer = config.oidcIssuer;

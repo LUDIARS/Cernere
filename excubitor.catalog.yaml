@@ -31,7 +31,6 @@ services:
       CERNERE_TRUSTED_PROXIES: "127.0.0.1,::1"
       # Keep the active GLab recipients and allow Aedilis's, Tendentia's, Tokyo2070's and Actio's Composite auth-code handoff.
       # Actio: tunnel visitors log in with Cernere (Actio spec/feature/tunnel-cernere-login.md).
-      CERNERE_COMPOSITE_ALLOWED_ORIGINS: http://localhost:5187,https://glm.ai-run-do.com,https://glab.ai-run-do.com,https://ae.ai-run-do.com,https://tendentia.ai-run-do.com,http://127.0.0.1:4440,http://localhost:4440,https://actio.ai-run-do.com
     health:
       type: http
       url: http://127.0.0.1:8086/health
@@ -101,7 +100,6 @@ services:
       LISTEN_PORT: "8090"
       CERNERE_PUBLIC_URL: http://127.0.0.1:8090
       FRONTEND_URL: http://127.0.0.1:5174
-      CERNERE_COMPOSITE_ALLOWED_ORIGINS: http://localhost:5188,http://127.0.0.1:5188
     health:
       type: http
       url: http://127.0.0.1:8090/health

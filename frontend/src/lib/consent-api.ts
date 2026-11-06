@@ -22,7 +22,7 @@ export interface ConsentAudienceView {
 
 export interface ConsentPermissionView {
   key: string;
-  kind: "identity" | "profile" | "identity_claim" | "user_data" | "oidc";
+  kind: "identity" | "profile" | "identity_claim" | "user_data" | "oidc" | "service_operation";
   level: "required" | "recommended";
   purpose: string | null;
   visibleTo: ConsentAudienceView[];
@@ -50,7 +50,7 @@ export interface ConsentTicketInfo {
 }
 
 export type ConsentOutcome =
-  | { kind: "post_message"; origin: string; message: { type: "cernere:auth"; authCode?: string; error?: "consent_denied" } }
+  | { kind: "post_message"; origin: string; message: { type: "cernere:auth"; authCode?: string; error?: "consent_denied"; state?: string } }
   | { kind: "redirect"; url: string }
   | { kind: "none" };
 

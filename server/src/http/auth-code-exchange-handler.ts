@@ -1,30 +1,9 @@
-/**
- * kiosk 向け限定 authCode 交換 (`POST /api/auth/code/exchange`)。
- *
- * 既存の `POST /api/auth/exchange` は無認可で `{ accessToken, refreshToken, user }`
- * を丸ごと返す。 共有端末 (Ostiarius kiosk) にそれを渡すと、 生徒が立ち去った後も
- * 30 日有効な refreshToken が端末側に残る。 顔テンプレート登録の立会いフローは
- * 「生徒が今ここに居ること」 だけを確かめられればよいので、 交換口を分ける。
- *
- * 契約 (Ostiarius/spec/interface/cernere-face-template.md §認証):
- *   - 呼び出しは service token (export と同じ CERNERE_SERVICE_TOKEN)。 無認可では開けない
- *   - 返すのは `{ userId, accessToken, expiresIn }` のみ。 refreshToken は返さない
- *   - authCode は one-time。 交換と同時に Redis から削除する
- *   - 併せて issueAuthCode が先に作った refresh_sessions 行も削除する。
- *     誰にも渡さない refreshToken の行を 30 日残さないため
- *
- * accessToken (15 分) は Ostiarius が同意記録 `POST /api/identity/face-consent` を
- * 生徒本人として打つためだけに使い、 保存しない。
- */
-
-import { eq } from "drizzle-orm";
-import { db } from "../db/connection.js";
-import * as schema from "../db/schema.js";
-import { ACCESS_TOKEN_SECONDS } from "../auth/jwt.js";
-import { hashRefreshToken } from "../auth/token-hash.js";
+/** Kiosk-only code exchange. Service/self codes and legacy records never enter this path. */
+import { ACCESS_TOKEN_SECONDS, generateAccessToken } from "../auth/jwt.js";
+import { assertUserSessionCurrent } from "../auth/user-session-state.js";
+import { requireServiceAccess } from "../federation/subject.js";
+import { authCodeStore } from "../auth/auth-code.js";
 import { AppError } from "../error.js";
-import { devLog } from "../logging/dev-logger.js";
-import { redis } from "../redis.js";
 import { EXPORT_SCOPES, requireExportAuth } from "./export-auth.js";
 
 export interface AuthCodeExchangeResult {
@@ -33,61 +12,19 @@ export interface AuthCodeExchangeResult {
   headers: Readonly<Record<string, string>>;
 }
 
-interface StoredAuthCode {
-  audience?: unknown;
-  accessToken?: unknown;
-  refreshToken?: unknown;
-  /** 発行したアカウント (連携していてもアカウント自身)。顔の同意はアカウント単位なのでこちらを返す。 */
-  accountId?: unknown;
-  user?: { id?: unknown } | null;
-}
-
 export async function handleAuthCodeExchange(body: string, authHeader: string): Promise<AuthCodeExchangeResult> {
   const principal = await requireExportAuth(authHeader, EXPORT_SCOPES.kioskCodeExchange);
-  const code = parseCode(body);
-  // The public exchange route consumes the same keyspace. GETDEL keeps the
-  // one-time guarantee even when both endpoints receive the code concurrently.
-  const raw = await redis.getdel(`authcode:${code}`);
-  devLog("auth.codeExchange.lookup", { principal: principal.kind, found: raw !== null });
-  if (!raw) throw AppError.unauthorized("Invalid or expired auth code");
-
-  const stored = parseStored(raw);
-  // 顔の同意 (POST /api/identity/face-consent) は accessToken のアカウントで記録されるので、
-  // kiosk へ返す userId も同じアカウントにそろえる (連携番号ではない)。旧形式は user.id。
-  const userId = typeof stored.accountId === "string" ? stored.accountId
-    : typeof stored.user?.id === "string" ? stored.user.id : null;
-  const accessToken = typeof stored.accessToken === "string" ? stored.accessToken : null;
-  if (!userId || !accessToken) throw AppError.unauthorized("Invalid or expired auth code");
-  // Cernere 自身の /login 用の code (許可待ちでも出る) は kiosk に渡さない (許可制 案 A)。
-  if (stored.audience === "cernere") {
-    await dropRefreshSession(stored.refreshToken);
-    throw AppError.unauthorized("Invalid or expired auth code");
-  }
-  await dropRefreshSession(stored.refreshToken);
-
-  devLog("auth.codeExchange.done");
-  return {
-    status: "200 OK",
-    data: { userId, accessToken, expiresIn: ACCESS_TOKEN_SECONDS },
-    headers: { "Cache-Control": "no-store", Pragma: "no-cache" },
-  };
-}
-
-function parseCode(body: string): string {
-  let parsed: unknown;
-  try { parsed = JSON.parse(body || "{}"); } catch { throw AppError.badRequest("Invalid JSON"); }
-  const code = (parsed as { code?: unknown } | null)?.code;
-  if (typeof code !== "string" || !code) throw AppError.badRequest("code is required");
-  return code;
-}
-
-function parseStored(raw: string): StoredAuthCode {
-  try { return JSON.parse(raw) as StoredAuthCode; } catch { throw AppError.unauthorized("Invalid or expired auth code"); }
-}
-
-/** 交換先へ渡さない refreshToken のセッション行を消す (残すと未使用の長期資格情報になる)。 */
-async function dropRefreshSession(refreshToken: unknown): Promise<void> {
-  if (typeof refreshToken !== "string" || !refreshToken) return;
-  await db.delete(schema.refreshSessions)
-    .where(eq(schema.refreshSessions.refreshToken, hashRefreshToken(refreshToken)));
+  if (principal.kind !== "project") throw AppError.unauthorized("Invalid or expired auth code");
+  let input: unknown;
+  try { input = JSON.parse(body); } catch { throw AppError.badRequest("Invalid JSON"); }
+  const code = input && typeof input === "object" ? (input as { code?: unknown }).code : undefined;
+  if (typeof code !== "string") throw AppError.badRequest("code is required");
+  const record = await authCodeStore.consume(code, { audience: "kiosk", projectKey: principal.projectKey });
+  if (!record) throw AppError.unauthorized("Invalid or expired auth code");
+  await assertUserSessionCurrent(record.subject);
+  await requireServiceAccess(record.subject.sub);
+  const accessToken = await generateAccessToken(record.subject.sub, record.subject.role, record.subject.authentication,
+    { authEpoch: record.subject.authEpoch, deviceId: record.subject.deviceId });
+  return { status: "200 OK", data: { userId: record.subject.sub, accessToken, expiresIn: ACCESS_TOKEN_SECONDS },
+    headers: { "Cache-Control": "no-store", Pragma: "no-cache" } };
 }

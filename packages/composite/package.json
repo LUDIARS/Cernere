@@ -24,7 +24,6 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@ludiars/cernere-service-adapter": "^0.1.0",
     "@simplewebauthn/browser": "^13.3.0"
   },
   "peerDependencies": {

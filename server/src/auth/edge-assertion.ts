@@ -53,6 +53,7 @@ export class EdgeAssertionError extends Error {
 }
 
 export interface EdgeAssertionParams {
+  authCodeBinding?: import("./auth-code-store.js").AuthCodeBinding;
   projectKey: string;
   assertion: string;
   /** Hub が転送した `CF_Authorization` クッキーの値 (get-identity 用)。 */
@@ -103,6 +104,9 @@ export async function verifyEdgeAssertion(
 export async function authenticateEdgeAssertion(
   params: EdgeAssertionParams,
 ): Promise<EdgeAssertionResult> {
+  if (params.authCodeBinding?.audience !== "service" || params.authCodeBinding.projectKey !== params.projectKey) {
+    throw new Error("Service authorization code binding is required");
+  }
   const now = params.now ?? Date.now();
   const fetchImpl = params.fetchImpl ?? fetch;
 
@@ -139,6 +143,7 @@ export async function authenticateEdgeAssertion(
   // 同意が要るときは ConsentRequiredError が上がる。同意後は継続先へ戻すだけで authCode は出さず、
   // Hub がアサーションを再送して (groups 付きで) ログインし直す。
   const authCode = await issueAuthCodeForUserId(userId, {
+    authCodeBinding: params.authCodeBinding,
     subject: { projectKey: binding.projectKey },
     continuation: params.returnTo ? { mode: "redirect", target: params.returnTo } : null,
     channel: "service",

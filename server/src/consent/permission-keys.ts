@@ -12,6 +12,7 @@
 
 import { PROFILE_READ_FIELDS, PROFILE_WRITE_FIELDS } from "../project/profile-access.js";
 import { IDENTITY_CLAIMS } from "../project/schema.js";
+import { serviceOperationsSchema } from "../project/service-operation-policy.js";
 
 export const IDENTITY_BASIC = "identity.basic";
 
@@ -22,7 +23,7 @@ const PROFILE_FIELDS: ReadonlySet<string> = new Set<string>([...PROFILE_READ_FIE
 const CLAIMS: ReadonlySet<string> = new Set<string>(IDENTITY_CLAIMS);
 const OIDC_SCOPES: ReadonlySet<string> = new Set<string>(OIDC_CONSENT_SCOPES);
 
-export type PermissionKind = "identity" | "profile" | "identity_claim" | "user_data" | "oidc";
+export type PermissionKind = "identity" | "profile" | "identity_claim" | "user_data" | "oidc" | "service_operation";
 
 export interface ParsedPermissionKey {
   kind: PermissionKind;
@@ -36,6 +37,8 @@ export interface ConsentCaps {
   identityClaims: string[];
   userDataModules: string[];
   oidcScopes: string[];
+  /** Administrator-owned operation grants for service-local data; no Cr data columns implied. */
+  serviceOperations?: string[];
 }
 
 export const EMPTY_CAPS: ConsentCaps = { profileFields: [], identityClaims: [], userDataModules: [], oidcScopes: [] };
@@ -51,6 +54,7 @@ export function parsePermissionKey(key: string): ParsedPermissionKey | null {
     case "profile": return PROFILE_FIELDS.has(name) ? { kind: "profile", name } : null;
     case "identity_claim": return CLAIMS.has(name) ? { kind: "identity_claim", name } : null;
     case "oidc": return OIDC_SCOPES.has(name) ? { kind: "oidc", name } : null;
+    case "service_operation": return /^[A-Za-z][A-Za-z0-9_.:-]{1,127}$/.test(name) ? { kind: "service_operation", name } : null;
     case "user_data": {
       if (!name.startsWith("module:")) return null;
       const module = name.slice("module:".length);
@@ -68,6 +72,7 @@ export function isWithinCaps(parsed: ParsedPermissionKey, caps: ConsentCaps): bo
     case "identity_claim": return caps.identityClaims.includes(parsed.name);
     case "user_data": return caps.userDataModules.includes(parsed.name);
     case "oidc": return caps.oidcScopes.includes(parsed.name);
+    case "service_operation": return caps.serviceOperations?.includes(parsed.name) ?? false;
   }
 }
 
@@ -78,6 +83,7 @@ export function permissionKeysWithinCaps(caps: ConsentCaps): string[] {
     ...caps.identityClaims.map((c) => `identity_claim.${c}`),
     ...caps.userDataModules.map((m) => `user_data.module:${m}`),
     ...caps.oidcScopes.map((s) => `oidc.${s}`),
+    ...(caps.serviceOperations ?? []).map(operation => `service_operation.${operation}`),
   ];
 }
 
@@ -86,6 +92,7 @@ export function capsFromProjectDefinition(definition: unknown): ConsentCaps {
   const def = (definition && typeof definition === "object" ? definition : {}) as {
     profile_access?: { read?: unknown; write?: unknown };
     identity_claims?: unknown;
+    service_operations?: unknown;
     user_data?: { columns?: Record<string, { module?: unknown; _deleted?: unknown }> };
   };
   const strings = (value: unknown): string[] => Array.isArray(value)
@@ -96,7 +103,11 @@ export function capsFromProjectDefinition(definition: unknown): ConsentCaps {
   const modules = Object.values(def.user_data?.columns ?? {})
     .filter((column) => column && column._deleted !== true && typeof column.module === "string")
     .map((column) => column.module as string);
-  return { profileFields, identityClaims, userDataModules: [...new Set(modules)].sort(), oidcScopes: [] };
+  const operationPolicies = serviceOperationsSchema.safeParse(def.service_operations);
+  const serviceOperations = operationPolicies.success ? [...new Set(operationPolicies.data.flatMap(policy => policy.permissions)
+    .map(key => parsePermissionKey(key)).filter((key): key is ParsedPermissionKey => key?.kind === "service_operation")
+    .map(key => key.name))] : [];
+  return { profileFields, identityClaims, userDataModules: [...new Set(modules)].sort(), oidcScopes: [], serviceOperations };
 }
 
 /** oidc_clients.scopes から上限を導く。OIDC client は oidc.* だけを持つ。 */

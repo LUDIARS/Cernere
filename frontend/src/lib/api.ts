@@ -188,11 +188,11 @@ export const auth = {
 
   /** composite authCode を自分 (Cernere frontend) のトークンに交換する。
    *  /login を composite フローへ一本化した際の self モード完了処理。 */
-  async exchangeAuthCode(code: string): Promise<AuthResponse> {
-    const res = await fetch(`${API_BASE}/api/auth/exchange`, {
+  async exchangeAuthCode(code: string, codeVerifier: string): Promise<AuthResponse> {
+    const res = await fetch(`${API_BASE}/api/auth/exchange/self`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({ code, code_verifier: codeVerifier }),
     });
     const data = await res.json() as AuthResponse & { error?: string };
     if (!res.ok || !data.accessToken) throw new Error(data.error || "Auth code exchange failed");

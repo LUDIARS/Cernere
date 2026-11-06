@@ -10,6 +10,9 @@ describe("WebAuthn embedding boundary", () => {
   it("accepts the exact allowed signed top origin", () => {
     expect(() => assertWebauthnFrameAllowed(encode({ crossOrigin: true, topOrigin: allowed[0] }), allowed)).not.toThrow();
   });
+  it("rejects another registered project's embedding origin for this project", () => {
+    expect(() => assertWebauthnFrameAllowed(encode({ crossOrigin: true, topOrigin: "https://other-service.example" }), allowed)).toThrow();
+  });
   it("supports Level 2 clients without topOrigin under the hosted frame policy", () => {
     expect(() => assertWebauthnFrameAllowed(encode({ crossOrigin: true }), allowed, true)).not.toThrow();
     expect(() => assertWebauthnFrameAllowed(encode({ crossOrigin: true }), allowed)).toThrow();

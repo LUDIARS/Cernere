@@ -1,38 +1,20 @@
-/**
- * authCode 発行ヘルパー。
- *
- * 認証済みユーザー用のアクセストークン/リフレッシュトークンペアを生成し、
- * Redis `authcode:{code}` キー (TTL 60 秒) に格納する。
- * 受け取り側は `POST /api/auth/exchange { code }` で実トークンに交換する。
- *
- * 従来 composite-auth.ts 内に限定されていたが、ダッシュボード等からも
- * 「認証済みで別サービスを開く」操作に再利用するため共通モジュール化。
- */
-
+/** Authorization codes carry a purpose-bound subject, never bearer credentials. */
 import { eq } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
-import { generateTokenPair, REFRESH_TOKEN_DAYS } from "./jwt.js";
-import { hashRefreshToken } from "./token-hash.js";
 import { redis } from "../redis.js";
-import { loadServiceIdentity, requireServiceAccess } from "../federation/subject.js";
+import { requireServiceAccess } from "../federation/subject.js";
 import { enforceServiceConsent, type ServiceConsentRequest } from "../consent/gate.js";
-
+import { assertUserSessionCurrent, currentUserSessionState, type UserSessionState } from "./user-session-state.js";
+import { AuthCodeStore, type AuthCodeBinding } from "./auth-code-store.js";
+import { projectCompositeTarget } from "./composite-redirect.js";
 import type { AuthenticationEvidence } from "../lib/authentication-evidence.js";
-import type { UserSessionState } from "./user-session-state.js";
 
-const AUTH_CODE_TTL = 60;
-
-/**
- * authCode の用途 (許可制 案 A)。
- *   service  サービスへ渡す (popup / redirect / silent SSO / サービス経由)。active のユーザーにだけ発行する
- *   cernere  Cernere 自身の /login。許可待ちでも発行するが、交換は Cernere の画面からだけ受け付ける
- */
-export type AuthCodeAudience = "service" | "cernere";
-
+export const authCodeStore = new AuthCodeStore(redis);
+export type AuthCodeAudience = AuthCodeBinding["audience"];
 export interface AuthCodeUser {
-  /** 既定は service (外へ出る側に倒す) */
   audience?: AuthCodeAudience;
+  binding?: AuthCodeBinding;
   authentication?: AuthenticationEvidence;
   authEpoch?: number;
   deviceId?: string;
@@ -40,73 +22,34 @@ export interface AuthCodeUser {
   displayName: string;
   email: string | null;
   role: string;
-  /**
-   * サービス向け (audience = "service") では必須: どのサービスへ渡すか。
-   * 同意の関門 (spec/plan/2026-10-15-service-consent-design.md §4.1) がこれで判定する。
-   */
   service?: ServiceConsentRequest;
 }
 
 export async function issueAuthCode(user: AuthCodeUser): Promise<string> {
-  const audience = user.audience ?? "service";
-  // サービスへ渡す利用者 (§3 of spec/plan/2026-10-15-account-federation-design.md): 番号は連携番号、名前・email・role は主のもの。
-  // Cernere 自身の /login 用 (audience = cernere) はアカウントそのもの。
-  let exposed = { id: user.userId, displayName: user.displayName, email: user.email, role: user.role };
-  if (audience === "service") {
-    // 許可待ち・停止中のユーザーをサービスへ入れない (連携していれば主の許可状態で決める)。refresh 行を作る前に止める。
+  const binding = user.binding ?? user.service?.authCodeBinding;
+  if (!binding || (user.audience && user.audience !== binding.audience)) throw new Error("Authorization code binding is required");
+  const current = await currentUserSessionState(user.userId);
+  const subject = { ...current, authEpoch: user.authEpoch ?? current.authEpoch,
+    authentication: user.authentication, deviceId: user.deviceId };
+  await assertUserSessionCurrent(subject);
+  if (binding.audience === "service") {
     await requireServiceAccess(user.userId);
-    const identity = await loadServiceIdentity(user.userId);
-    if (!identity) throw new Error("issueAuthCode: user not found");
-    exposed = { id: identity.subject, displayName: identity.displayName, email: identity.email, role: identity.role };
-    if (!user.service) throw new Error("issueAuthCode: a service target is required for service auth codes");
-    // 同意が要るなら authCode を出さず ConsentRequiredError を投げる (consent_mode 既定 off)。
-    await enforceServiceConsent({
-      userId: user.userId, displayName: user.displayName, email: user.email, role: user.role,
-      authentication: user.authentication, authEpoch: user.authEpoch, deviceId: user.deviceId,
-    }, user.service);
+    const rows = await db.select({ clientId: schema.managedProjects.clientId }).from(schema.managedProjects)
+      .where(eq(schema.managedProjects.key, binding.projectKey)).limit(1);
+    await projectCompositeTarget(rows[0]?.clientId ?? "", binding.origin);
+    if (!user.service) throw new Error("Service consent context is required");
+    await enforceServiceConsent({ ...user, authEpoch: subject.authEpoch }, {
+      ...user.service, subject: { projectKey: binding.projectKey }, authCodeBinding: binding, requireConsent: true,
+    });
   }
-  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(user.userId, user.role, user.authentication, { authEpoch: user.authEpoch, deviceId: user.deviceId });
-  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
-  await db.insert(schema.refreshSessions).values({
-    authentication: user.authentication, deviceId: user.deviceId, authEpoch, id: crypto.randomUUID(),
-    userId: user.userId,
-    refreshToken: hashRefreshToken(refreshToken),
-    expiresAt,
-  });
-  const authCode = crypto.randomUUID();
-  await redis.set(`authcode:${authCode}`, JSON.stringify({
-    audience,
-    accessToken,
-    refreshToken,
-    // accessToken / refreshToken は Cernere 内部のアカウントのもの。kiosk の限定交換口 (顔の同意) だけが使い、
-    // 公開の交換口はサービスへ返す前に外す。
-    accountId: user.userId,
-    user: exposed,
-  }), "EX", AUTH_CODE_TTL);
-  return authCode;
+  if (binding.audience === "kiosk") await requireServiceAccess(user.userId);
+  return authCodeStore.issue(binding, subject);
 }
 
-/** userId から users テーブルを引いて、サービス向けの authCode を発行する */
-export async function issueAuthCodeForUserId(
-  userId: string,
-  service: ServiceConsentRequest,
-  source?: UserSessionState,
-): Promise<string | null> {
+export async function issueAuthCodeForUserId(userId: string, service: ServiceConsentRequest, source?: UserSessionState): Promise<string | null> {
   if (source && source.sub !== userId) throw new Error("Auth code source mismatch");
-  const rows = await db.select({
-    id: schema.users.id,
-    displayName: schema.users.displayName,
-    email: schema.users.email,
-    role: schema.users.role,
-  }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
-  if (rows.length === 0) return null;
-  const u = rows[0];
-  return issueAuthCode({
-    authentication: source?.authentication, authEpoch: source?.authEpoch, deviceId: source?.deviceId,
-    userId: u.id,
-    displayName: u.displayName ?? "",
-    email: u.email,
-    role: u.role ?? "general",
-    service,
-  });
+  const user = (await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1))[0];
+  if (!user) return null;
+  return issueAuthCode({ userId, displayName: user.displayName ?? "", email: user.email, role: user.role ?? "general",
+    authentication: source?.authentication, authEpoch: source?.authEpoch, deviceId: source?.deviceId, service });
 }

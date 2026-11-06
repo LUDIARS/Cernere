@@ -15,6 +15,8 @@ import { createAuthSession } from "../auth/auth-session.js";
 import type { AuthenticationEvidence } from "../lib/authentication-evidence.js";
 import { compositeWsPath, compositeWsUrl } from "../auth/composite-ws-url.js";
 import { config } from "../config.js";
+import { resolveAuthCodeBinding } from "../auth/composite-redirect.js";
+import type { AuthCodeBinding } from "../auth/auth-code-store.js";
 
 interface RouteResult {
   status: string;
@@ -22,6 +24,8 @@ interface RouteResult {
 }
 
 export interface CompositeCtx {
+  origin?: string;
+  authCodeBinding?: AuthCodeBinding;
   ip?: string;
   userAgent?: string;
   /**
@@ -62,8 +66,8 @@ export async function executeCompositeAction(
 }
 
 /** auth_session 作成時に projectKey を伝搬する共通ラッパ */
-function sessionCtx(ctx: CompositeCtx): { ip?: string; userAgent?: string; projectKey?: string } {
-  return { ip: ctx.ip, userAgent: ctx.userAgent, projectKey: ctx.projectKey };
+function sessionCtx(ctx: CompositeCtx): { ip?: string; userAgent?: string; projectKey?: string; authCodeBinding?: AuthCodeBinding } {
+  return { ip: ctx.ip, userAgent: ctx.userAgent, projectKey: ctx.projectKey, authCodeBinding: ctx.authCodeBinding };
 }
 
 function parseBody(body: string): Record<string, unknown> {
@@ -106,6 +110,7 @@ async function openAuthSession(
 }
 
 async function compositeMfaVerify(p: Record<string, unknown>, ctx: CompositeCtx): Promise<RouteResult> {
+  ctx = { ...ctx, authCodeBinding: await resolveAuthCodeBinding(p, ctx) };
   const { mfaToken, method, code } = parseMfaInput(p);
   return verifyMfaChallenge(mfaToken ?? "", requireMfaMethod(method), code ?? "",
     { purpose: "composite", projectKey: ctx.projectKey }, async (user, _tx, authentication) => openAuthSession(user, ctx, authentication));

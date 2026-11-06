@@ -1,4 +1,6 @@
 export { CompositeLogin } from "./CompositeLogin.js";
+export { createCompositePkce } from "./pkce.js";
+export type { CompositePkce, CompositeAuthorizationRequest } from "./pkce.js";
 export { CompositeLoginFrame } from "./CompositeLoginFrame.js";
 export type { CompositeLoginFrameProps } from "./CompositeLoginFrame.js";
 export { installBrowserResumeReload } from "./browser-resume.js";

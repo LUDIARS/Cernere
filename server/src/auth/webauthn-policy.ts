@@ -6,13 +6,31 @@
 import type { AuthenticatorTransportFuture } from "@simplewebauthn/server";
 
 import { config } from "../config.js";
-import { mergeWebauthnOrigins } from "./webauthn-origins.js";
 
 export const RP_NAME = config.webauthnRpName;
 export const RP_ID = config.webauthnRpId;
-// 埋め込み SDK を描画する first-party サービスの origin でも ceremony が走るため、
-// composite の許可 origin を expectedOrigin に合流させる (auth/webauthn-origins.ts)。
-export const ORIGINS = mergeWebauthnOrigins(config.webauthnOrigins, config.compositeAllowedOrigins);
+/** Token audience constrains the authenticator-signed origin, not a spoofable HTTP header.
+ * @implements SPEC-COMPOSITE-PROJECT-PKCE
+ */
+export function assertionOrigins(
+  audience: "cernere" | "service" | "kiosk",
+  destination?: { origin: string; ceremonyOrigin?: string },
+): string[] {
+  switch (audience) {
+    case "cernere": return [...config.webauthnOrigins];
+    case "service": case "kiosk": {
+      if (!destination) throw new Error("Missing passkey destination");
+      // The hosted Cr page signs its own origin. Direct service ceremonies sign
+      // only this project's destination; another project's origin never suffices.
+      const origin = destination.ceremonyOrigin ?? destination.origin;
+      if (origin !== destination.origin && !config.webauthnOrigins.includes(origin)) {
+        throw new Error("Passkey ceremony origin does not match the destination");
+      }
+      return [origin];
+    }
+    default: throw new Error("Unknown passkey assertion audience");
+  }
+}
 /**
  * アカウントの作成・端末追加・回復の ceremony は Cernere 自身の origin でだけ受け付ける
  * (SPEC-PASSKEY-CONTINUE)。埋め込み先サービスの origin (XSS を含む) からはログインしかさせない。

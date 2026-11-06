@@ -11,11 +11,12 @@ import augurContract_95a9033a from './contracts/continuation.contract.js'; /* au
 
 export type ConsentContinuation =
   /** popup: 親窓 (opener) へ postMessage で authCode / consent_denied を返す */
-  | { kind: "post_message"; origin: string }
+  | { kind: "post_message"; origin: string; state?: string }
   /** 同一窓 / 新しいタブ: url へ遷移する (authCode は ?code=、拒否は ?error=consent_denied) */
   | { kind: "redirect"; url: string };
 
 export interface ContinuationRequest {
+  state?: string;
   mode: "post_message" | "redirect";
   /** 呼び出し元が渡した送り先 (未検証)。post_message は origin、redirect は完全 URL */
   target: string;
@@ -32,11 +33,13 @@ function parseHttpUrl(value: string): URL | null {
   }
 }
 
-/** 契約 C-26 (server/src/consent/contracts/continuation.contract.ts) は augur inject が包む。 */
+/** 契約 C-26 (server/src/consent/contracts/continuation.contract.ts) は augur inject が包む。 @implements SPEC-COMPOSITE-PROJECT-PKCE */
 export function buildConsentContinuation(request: ContinuationRequest, allowedOrigins: readonly string[]): ConsentContinuation | null {
   const url = parseHttpUrl(request.target);
   if (!url || url.origin === "null" || !allowedOrigins.includes(url.origin)) return null;
-  if (request.mode === "post_message") return { kind: "post_message", origin: url.origin };
+  const state = request.state && /^[A-Za-z0-9_-]{32,512}$/.test(request.state) ? request.state : undefined;
+  if (request.mode === "post_message") return { kind: "post_message", origin: url.origin, ...(state ? { state } : {}) };
+  if (state) url.searchParams.set("state", state);
   url.hash = "";
   return { kind: "redirect", url: url.toString() };
 }
@@ -51,7 +54,7 @@ export function originOf(value: string | null | undefined): string | null {
 }
 
 export type ContinuationOutcome =
-  | { kind: "post_message"; origin: string; message: { type: "cernere:auth"; authCode?: string; error?: "consent_denied" } }
+  | { kind: "post_message"; origin: string; message: { type: "cernere:auth"; authCode?: string; error?: "consent_denied"; state?: string } }
   | { kind: "redirect"; url: string }
   | { kind: "none" };
 
@@ -66,8 +69,9 @@ export function completeContinuation(
     return {
       kind: "post_message",
       origin: continuation.origin,
-      message: denied ? { type: "cernere:auth", error: "consent_denied" }
-        : result.authCode ? { type: "cernere:auth", authCode: result.authCode } : { type: "cernere:auth" },
+      message: { ...(denied ? { type: "cernere:auth" as const, error: "consent_denied" as const }
+        : result.authCode ? { type: "cernere:auth" as const, authCode: result.authCode } : { type: "cernere:auth" as const }),
+        ...(continuation.state ? { state: continuation.state } : {}) },
     };
   }
   const url = new URL(continuation.url);

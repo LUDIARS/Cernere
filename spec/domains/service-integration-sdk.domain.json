@@ -30,10 +30,24 @@
     },
     {
       "pathPattern": "(^|/)packages/service-adapter/(?:.*/)?[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)packages/composite/src/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)packages/composite/tests/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)packages/native-composite/src/[^/]+$"
     }
   ],
   "cardTemplate": "Summarise the \"service-integration-sdk\" domain: SDKs and adapters letting external services authenticate against Cernere: service-adapter WebSocket auth, id-service SDK, id-cache, and compatibility shims.",
   "specRefs": [
+    "SPEC-COMPOSITE-DELEGATION",
+    "SPEC-COMPOSITE-OPERATION-GUARD",
+    "SPEC-COMPOSITE-SCOPED-IDENTITY",
+    "SPEC-CR-NATIVE-COMPOSITE",
+    "SPEC-COMPOSITE-PROJECT-PKCE",
     "サービスインターフェース",
     "2. @cernere/id-service",
     "3. @cernere/auth",

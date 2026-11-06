@@ -54,6 +54,7 @@ function seedToPrivateKey(seed: Buffer): KeyObject {
  *  iat / exp は paseto v3.1.4 の規約で ISO 8601 日付文字列。 Unix epoch number を
  *  そのまま入れると verify 側で `payload.exp must be a string` で reject される。 */
 export interface PasetoProjectClaims {
+  compositeGrant?: { version: 1; id: string };
   sub: string;          // userId (UUID)
   projectKey: string;   // managed_projects.key (例: "memoria")
   role: string;         // users.role (例: "general" / "admin")
@@ -187,6 +188,7 @@ const PROJECT_TOKEN_TTL_SEC = 15 * 60;
 
 /** project-token を PASETO v4 で署名する。 keys 未設定なら例外。 */
 export async function signProjectToken(params: {
+  compositeGrant?: { version: 1; id: string };
   userId: string;
   projectKey: string;
   role: string;
@@ -198,6 +200,7 @@ export async function signProjectToken(params: {
   const nowMs = Date.now();
   const ttlSec = params.ttlSec ?? PROJECT_TOKEN_TTL_SEC;
   const claims: PasetoProjectClaims = {
+    ...(params.compositeGrant ? { compositeGrant: params.compositeGrant } : {}),
     sub: params.userId,
     projectKey: params.projectKey,
     role: params.role,

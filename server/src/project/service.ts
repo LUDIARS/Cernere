@@ -24,6 +24,7 @@ import { validateConsentDeclaration } from "../consent/declaration.js";
 import { capsFromProjectDefinition } from "../consent/permission-keys.js";
 import { validateSignupFieldsDeclaration } from "../signup-fields/declaration.js";
 import { loadSharedProjectDefinitions, sourceProjectsOf } from "../signup-fields/sources.js";
+import { isCompositeOrigin } from "./composite-origin-policy.js";
 
 // ── Project definition helpers ───────────────────────────────
 
@@ -236,6 +237,7 @@ export async function registerProject(payload: unknown, userId?: string, deliver
     throw AppError.badRequest(`Invalid project definition: ${parsed.error.issues.map((i) => i.message).join(", ")}`);
   }
   definition = parsed.data;
+  assertCompositeRegistration(definition);
   // 登録 (管理者) でも同意の宣言は上限の内側に限る。
   assertConsentDeclaration(definition, null);
   await assertSignupFieldsDeclaration(definition, definition, null);
@@ -389,6 +391,15 @@ export function preserveExistingDefinitionFields(
     ...(definition.identity_claims === undefined && existing.identity_claims !== undefined
       ? { identity_claims: existing.identity_claims }
       : {}),
+    ...(definition.composite_origins === undefined && existing.composite_origins !== undefined
+      ? { composite_origins: existing.composite_origins }
+      : {}),
+    ...(definition.hub_url === undefined && existing.hub_url !== undefined
+      ? { hub_url: existing.hub_url }
+      : {}),
+    ...(definition.service_operations === undefined && existing.service_operations !== undefined
+      ? { service_operations: existing.service_operations }
+      : {}),
     ...(definition.profile_access === undefined && existing.profile_access !== undefined
       ? { profile_access: existing.profile_access }
       : {}),
@@ -420,6 +431,16 @@ export function assertConsentDeclaration(definition: ProjectDefinition, existing
   const checked = validateConsentDeclaration(definition.consent, capsFromProjectDefinition(definition),
     previous?.version ?? null, previous);
   if (!checked.ok) throw AppError.badRequest(`Invalid consent declaration: ${checked.errors.join("; ")}`);
+}
+
+export function assertCompositeRegistration(definition: ProjectDefinition): void {
+  const key = definition.project.key;
+  if (definition.composite_origins?.some(origin => !isCompositeOrigin(origin, key, config.isDevelopment))) {
+    throw AppError.badRequest("composite_origins must contain canonical HTTPS origins (development exceptions require cernere-test)");
+  }
+  if (definition.hub_url !== undefined && !isCompositeOrigin(definition.hub_url, key, config.isDevelopment)) {
+    throw AppError.badRequest("hub_url must be a canonical HTTPS origin");
+  }
 }
 
 /**
@@ -462,6 +483,7 @@ export async function updateProjectSchema(key: string, payload: unknown, userId?
   const oldDef = rows[0].schemaDefinition as ProjectDefinition;
   // DDL より先に宣言を検証する (上限は管理者所有フィールドを合成した後の定義で見る)。
   const merged = preserveExistingDefinitionFields(definition, oldDef);
+  assertCompositeRegistration(merged);
   assertConsentDeclaration(merged, oldDef);
   await assertSignupFieldsDeclaration(definition, merged, oldDef);
 
@@ -797,29 +819,11 @@ export async function issueProjectOpenUrl(
   const frontendUrl = def?.endpoint?.frontend_url;
   if (!frontendUrl) throw AppError.badRequest("Project has no frontend_url configured");
 
-  const { issueAuthCodeForUserId } = await import("../auth/auth-code.js");
-  const { ConsentRequiredError } = await import("../consent/gate.js");
-  let authCode: string | null;
-  try {
-    // 同意後は同じ frontend_url へ ?code= 付きで遷移させる (継続先は関門が frontend_url の origin で検証)。
-    authCode = await issueAuthCodeForUserId(userId, {
-      subject: { projectKey },
-      continuation: { mode: "redirect", target: frontendUrl },
-      channel: "browser",
-    });
-  } catch (error) {
-    // ダッシュボードは consentUrl を開いたタブで /consent を表示する。
-    if (error instanceof ConsentRequiredError) return { consentRequired: true, consentUrl: error.consentUrl };
-    throw error;
-  }
-  if (!authCode) throw AppError.forbidden("User not found");
-
-  // ユーザ × プロジェクトの初回 "use" を確定: Cernere DB に空行を作る
-  await ensureUserProjectRow(userId, projectKey);
-
-  const separator = frontendUrl.includes("?") ? "&" : "?";
-  const url = `${frontendUrl}${separator}code=${encodeURIComponent(authCode)}`;
-  return { url };
+  // The destination owns PKCE initiation. A dashboard cannot manufacture a verifier
+  // for another service's browser session, so navigation never carries a bearer code.
+  const { projectCompositeTarget } = await import("../auth/composite-redirect.js");
+  await projectCompositeTarget(proj[0].clientId, frontendUrl);
+  return { url: frontendUrl };
 }
 
 export async function listUserProjectsOverview(userId: string): Promise<UserProjectOverview[]> {

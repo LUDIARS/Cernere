@@ -79,6 +79,10 @@
   ],
   "cardTemplate": "Summarise the \"authentication\" domain: Credential verification, token issuance, and the face consent / revocation-instruction contract (biometric templates and photos live only on facility kiosk hosts).",
   "specRefs": [
+    "SPEC-COMPOSITE-DELEGATION",
+    "SPEC-COMPOSITE-OPERATION-GUARD",
+    "SPEC-COMPOSITE-SCOPED-IDENTITY",
+    "SPEC-COMPOSITE-PROJECT-PKCE",
     "1.1 Cernere 概要",
     "Step 1: WebSocket 接続の確立",
     "1. cernere (コアサーバー) / 認証機能",

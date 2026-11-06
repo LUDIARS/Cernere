@@ -6,6 +6,11 @@ export default defineConfig({
     alias: {
       react: fileURLToPath(new URL("./node_modules/react", import.meta.url)),
       "react-router-dom": fileURLToPath(new URL("../frontend/node_modules/react-router-dom/dist/index.mjs", import.meta.url)),
+      // The registered server-only review setup prepares this real test runtime
+      // dependency, pinned to the frontend/SDK's existing 13.3.0 artifact. Source
+      // aliases must not assume SDK-local or frontend node_modules junctions.
+      // Frontend production still dedupes to its own declared runtime copy.
+      "@simplewebauthn/browser": fileURLToPath(new URL("./node_modules/@simplewebauthn/browser/esm/index.js", import.meta.url)),
       "@ludiars/cernere-composite/ui": fileURLToPath(new URL("../packages/composite/src/ui/index.ts", import.meta.url)),
     },
   },

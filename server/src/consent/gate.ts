@@ -12,7 +12,6 @@
 
 import { config } from "../config.js";
 import { AppError } from "../error.js";
-import { compositeAllowedOrigins } from "../auth/composite-redirect.js";
 import { logAuthEvent } from "../logging/auth-logger.js";
 import { devLog } from "../logging/dev-logger.js";
 import { buildConsentContinuation, type ConsentContinuation, type ContinuationRequest } from "./continuation.js";
@@ -22,12 +21,16 @@ import { evaluateConsentRequirement, type ConsentRequirement } from "./requireme
 import { serviceSubjectId } from "../federation/subject.js";
 import { getConsentRecord } from "./store.js";
 import { createConsentTicket, type ConsentChannel, type TicketAuthUser } from "./ticket.js";
+import type { AuthCodeBinding } from "../auth/auth-code-store.js";
 
 export const CONSENT_REQUIRED = "consent_required";
 export const CONSENT_DENIED = "consent_denied";
 
 /** サービス向け authCode の対象。全経路が必ず渡す (渡せない経路は subject: null と理由)。 */
 export interface ServiceConsentRequest {
+  authCodeBinding?: AuthCodeBinding;
+  /** New Composite grants require an actual consent decision even for legacy off/warn projects. */
+  requireConsent?: boolean;
   subject: { projectKey: string } | { origin: string } | null;
   /** 同意後にどこへ戻すか (未検証。関門が許可 origin で検証する) */
   continuation?: ContinuationRequest | null;
@@ -77,14 +80,15 @@ export async function evaluateForUser(userId: string, resolved: ResolvedConsentS
   });
 }
 
-function resolveContinuation(request: ServiceConsentRequest, resolved: ResolvedConsentSubject): ConsentContinuation | null {
-  const allowed = [...new Set([...compositeAllowedOrigins(), ...(resolved.frontendOrigin ? [resolved.frontendOrigin] : [])])];
+async function resolveContinuation(request: ServiceConsentRequest, resolved: ResolvedConsentSubject): Promise<ConsentContinuation | null> {
+  const allowed = request.authCodeBinding?.audience === "service" ? [request.authCodeBinding.origin] : [];
   if (request.continuation) return buildConsentContinuation(request.continuation, allowed);
   // サービス経由 (project WS / edge) で送り先の指定が無ければ、サービスの画面 (frontend_url) へ戻す。
-  if (request.channel === "service" && resolved.frontendOrigin) {
+  const boundOrigin = request.authCodeBinding?.audience === "service" ? request.authCodeBinding.origin : null;
+  if (request.channel === "service" && boundOrigin) {
     return request.defaultContinuation === "redirect"
-      ? { kind: "redirect", url: `${resolved.frontendOrigin}/` }
-      : { kind: "post_message", origin: resolved.frontendOrigin };
+      ? { kind: "redirect", url: `${boundOrigin}/` }
+      : { kind: "post_message", origin: boundOrigin };
   }
   return null;
 }
@@ -101,15 +105,17 @@ export async function enforceServiceConsent(authUser: TicketAuthUser, request: S
   const resolved = await resolveRequestSubject(request);
   if (!resolved) {
     devLog("consent.gate.noSubject", { userId: authUser.userId, reason: request.reason ?? "unresolved" });
+    if (request.requireConsent) throw AppError.forbidden("Service consent target is not registered");
     return;
   }
   // 同意記録・サインアップ入力は連携番号で持つ (account-federation §3)。ticket はログインしたアカウントのまま。
   const subjectId = await serviceSubjectId(authUser.userId);
   const fieldsMissing = await hasMissingSignupFields(subjectId, resolved);
-  if (resolved.mode === "off" && !fieldsMissing) return;
+  if (resolved.mode === "off" && !fieldsMissing && !request.requireConsent) return;
 
   const requirement = await evaluateForUser(subjectId, resolved);
-  const action = fieldsMissing ? "block" : decideConsentGate(resolved.mode, requirement.satisfied);
+  const action = fieldsMissing || (request.requireConsent && !requirement.satisfied)
+    ? "block" : decideConsentGate(resolved.mode, requirement.satisfied);
   if (action === "pass") return;
   if (action === "warn") {
     logAuthEvent({ event: "consent.would_block", userId: authUser.userId, projectKey: resolved.subject.key });
@@ -119,7 +125,8 @@ export async function enforceServiceConsent(authUser: TicketAuthUser, request: S
   const ticket = await createConsentTicket({
     authUser,
     subject: resolved.subject,
-    continuation: resolveContinuation(request, resolved),
+    continuation: await resolveContinuation(request, resolved),
+    authCodeBinding: request.authCodeBinding,
     channel: request.channel,
     declarationVersion: requirement.view.version,
     deliverAuthCode: request.deliverAuthCode ?? true,

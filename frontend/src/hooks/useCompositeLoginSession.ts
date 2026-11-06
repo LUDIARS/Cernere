@@ -11,11 +11,12 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { auth as authApi, getAccessToken } from "../lib/api";
+import { getAccessToken } from "../lib/api";
 import { CernereCompositeAuthAdapter } from "../lib/composite-auth-adapter";
 import { CompositeAuthHandoff, resolveSelfRedirectTarget } from "../lib/composite-auth-handoff";
 import { fetchAllowedOrigins, isTargetAllowed } from "../lib/composite-redirect";
 import { wantsCrossDevice } from "../pages/continue/continue-links";
+import { readCompositeLoginRequest } from "../lib/composite-pkce";
 
 export interface CompositeLoginSessionArgs {
   /** Cernere 単独フロントの /login (authCode を自分のトークンに交換) */
@@ -78,9 +79,10 @@ export function useCompositeLoginSession(args: CompositeLoginSessionArgs): Compo
     origin,
     redirectUri,
     redirectParam,
-    exchange: (code) => authApi.exchangeAuthCode(code),
+    exchange: (code) => adapter.exchangeSelfCode(code),
+    state: readCompositeLoginRequest(window.location.search)?.state,
     onError: setHandoffError,
-  }), [self, origin, redirectUri, redirectParam]);
+  }), [self, origin, redirectUri, redirectParam, adapter]);
 
   // ── 送信先 (origin / redirect_uri) をサーバ許可リストで事前検証 (VULNWEB-001) ──
   // 不正な送信先ならログイン UI を出す前に停止し、 authCode を発行させない。
@@ -97,6 +99,8 @@ export function useCompositeLoginSession(args: CompositeLoginSessionArgs): Compo
       if (cancelled) return;
       handoff.setAllowedOrigins(allowed);
       const target = origin ?? redirectUri;
+      const serviceRequest = readCompositeLoginRequest(window.location.search);
+      if (!serviceRequest) { setBlockedReason("サービスのログイン要求が不完全です。元の画面からやり直してください。"); return; }
       if (!target) {
         setBlockedReason("送信先が指定されていません (origin / redirect_uri が必要です)。");
         return;
@@ -114,7 +118,7 @@ export function useCompositeLoginSession(args: CompositeLoginSessionArgs): Compo
           const res = await fetch(`${apiBase}/api/auth/composite-session-code`, {
             method: "POST",
             headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-            body: JSON.stringify({ target, targetMode: origin ? "post_message" : "redirect" }),
+            body: JSON.stringify({ ...serviceRequest, target, targetMode: origin ? "post_message" : "redirect" }),
           });
           if (!cancelled && res.ok) {
             const body = await res.json().catch(() => null) as { authCode?: string } | null;

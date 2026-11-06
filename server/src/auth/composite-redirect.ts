@@ -1,48 +1,55 @@
-/**
- * Composite 認証フローの redirect 先検証。
- *
- * composite ログインは認証成功後に authCode を「呼び出し元が指定した送信先」
- * (postMessage の origin / redirect_uri) へ返す。 この送信先は呼び出し元 URL の
- * クエリ由来で攻撃者が細工しうるため、 完全一致の origin 許可リストで検証する。
- * 検証を怠ると、 攻撃者が被害者を `?redirect_uri=https://evil` へ誘導するだけで
- * one-time authCode を奪い、 `POST /api/auth/exchange` でトークンを窃取できる
- * (VULNWEB-001)。
- *
- * 権威はサーバ側の許可リスト (config.compositeAllowedOrigins)。 フロントの検証は
- * この許可リストを取得して行う二次防御であり、 単独では信頼しない。
- */
-
+/** Live project-owned Composite destination lookup. No global origin allow-list. */
+import { eq } from "drizzle-orm";
+import { db } from "../db/connection.js";
+import { managedProjects } from "../db/schema.js";
 import { config } from "../config.js";
+import { AppError } from "../error.js";
+import { declaredCompositeOrigins, isCompositeOrigin, isOriginAllowed } from "../project/composite-origin-policy.js";
+import { isPkceS256Challenge } from "../lib/crypto/pkce.js";
+import type { AuthCodeBinding } from "./auth-code-store.js";
+import { declaredServiceScopes } from "../project/service-scopes.js";
 
-/**
- * target (origin 文字列 or 完全 URL) の **origin** が許可リストに完全一致するか。
- * 純粋関数 (config 非依存) — テスト・呼び出し側で許可リストを差し替え可能。
- *
- * - パース不能 / 空 → false
- * - opaque origin ("null": javascript:, data:, about:blank 等) → false
- * - path / query / fragment は無視し origin 部分のみで判定
- */
-export function isOriginAllowed(
-  target: string | null | undefined,
-  allowedOrigins: readonly string[],
-): boolean {
-  if (!target) return false;
-  let origin: string;
-  try {
-    origin = new URL(target).origin;
-  } catch {
-    return false;
+export async function compositeAllowedOrigins(): Promise<string[]> {
+  const projects = await db.select({ key: managedProjects.key, definition: managedProjects.schemaDefinition })
+    .from(managedProjects).where(eq(managedProjects.isActive, true));
+  return [...new Set(projects.flatMap(project => declaredCompositeOrigins(project.definition, project.key, config.isDevelopment)))];
+}
+
+export async function projectCompositeTarget(clientId: string, target: string): Promise<typeof managedProjects.$inferSelect> {
+  const project = (await db.select().from(managedProjects).where(eq(managedProjects.clientId, clientId)).limit(1))[0];
+  if (!project?.isActive || !isOriginAllowed(target, declaredCompositeOrigins(project.schemaDefinition, project.key, config.isDevelopment))) {
+    throw AppError.unauthorized("Invalid Composite destination");
   }
-  if (!origin || origin === "null") return false;
-  return allowedOrigins.includes(origin);
+  return project;
 }
 
-/** config の許可リストで target を検証する実運用向けラッパ。 */
-export function isCompositeTargetAllowed(target: string | null | undefined): boolean {
-  return isOriginAllowed(target, config.compositeAllowedOrigins);
+export function registeredHubUrl(definition: unknown, projectKey: string): string {
+  const value = definition && typeof definition === "object" ? (definition as { hub_url?: unknown }).hub_url : undefined;
+  if (!isCompositeOrigin(value, projectKey, config.isDevelopment)) throw new Error("Composite hub_url is not registered");
+  return value;
 }
 
-/** フロントへ公開する許可リスト (完全一致 origin の配列)。 */
-export function compositeAllowedOrigins(): string[] {
-  return [...config.compositeAllowedOrigins];
+/** Trusted binding carried through passkey completion and consent tickets. */
+export async function resolveAuthCodeBinding(
+  input: Record<string, unknown>, context: { origin?: string; projectKey?: string },
+): Promise<AuthCodeBinding> {
+  const codeChallenge = input.code_challenge;
+  if (!isPkceS256Challenge(codeChallenge)) throw AppError.badRequest("S256 code_challenge is required");
+  const target = typeof input.target === "string" ? input.target : "";
+  if (!target && !context.projectKey) {
+    const ownOrigin = new URL(config.frontendUrl).origin;
+    if (context.origin !== ownOrigin) throw AppError.unauthorized("Invalid Composite destination");
+    return { audience: "cernere", origin: ownOrigin, codeChallenge };
+  }
+  const clientId = typeof input.client_id === "string" ? input.client_id : "";
+  if (!clientId || !target) throw AppError.badRequest("client_id and target are required");
+  const project = await projectCompositeTarget(clientId, target);
+  if (context.projectKey && context.projectKey !== project.key) throw AppError.unauthorized("Invalid Composite destination");
+  registeredHubUrl(project.schemaDefinition, project.key);
+  if (input.code_audience === "kiosk") {
+    if (!declaredServiceScopes(project.schemaDefinition).includes("auth-code:kiosk-exchange")) throw AppError.unauthorized("Invalid Composite destination");
+    return { audience: "kiosk", projectKey: project.key };
+  }
+  if (input.code_audience !== undefined && input.code_audience !== "service") throw AppError.badRequest("Invalid authorization code audience");
+  return { audience: "service", projectKey: project.key, origin: new URL(target).origin, codeChallenge };
 }

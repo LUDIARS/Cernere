@@ -55,6 +55,9 @@ import {
 import { buildDeviceCookie } from "../auth/device-cookie.js";
 import { assertDeviceOrigin } from "../auth/device-origin.js";
 import { issueAuthCode } from "../auth/auth-code.js";
+import { resolveAuthCodeBinding } from "../auth/composite-redirect.js";
+import type { AuthCodeBinding } from "../auth/auth-code-store.js";
+import { PasskeyLoginChallengeStore, type PasskeyLoginIntent } from "../auth/passkey-login-challenge.js";
 import { ConsentRequiredError, consentRequiredBody, type ServiceConsentRequest } from "../consent/gate.js";
 import { logUserLogin, logUserLoginFailed, logUserRegister } from "../logging/auth-logger.js";
 import { devError, devLog } from "../logging/dev-logger.js";
@@ -63,7 +66,7 @@ import { actionProofStore, httpActionBinding } from "../auth/action-proof.js";
 import {
   CERNERE_ORIGINS,
   CHALLENGE_TTL_SEC,
-  ORIGINS,
+  assertionOrigins,
   REGISTRATION_AUTHENTICATOR_SELECTION,
   RP_ID,
   RP_NAME,
@@ -157,6 +160,7 @@ export async function handlePasskeyRoute(
     case "register-begin":  return registerBegin(authHeader, actionProof);
     case "register-finish": return registerFinish(authHeader, parseBody(body));
     case "login-begin":     return loginBegin(parseBody(body), ctx);
+    case "composite-login-begin": return compositeLoginBegin(parseBody(body), ctx);
     case "login-finish":    return loginFinish(parseBody(body), ctx);
     /* composite (= popup-based SSO) からの passkey verify。 通常の login-finish と違い、
      * JWT を直接返さず authCode (= Redis 1-shot ticket) を発行する。 親サービスは
@@ -236,7 +240,7 @@ export async function executePasskeyCompositeAction(
       throw AppError.withCode(410, "signup_moved_to_popup", "Create the account in the Cernere sign-in window");
     }
     switch (action) {
-      case "passkey-login-begin":   return (await loginBegin(payload, ctx)).data;
+      case "passkey-login-begin":   return (await compositeLoginBegin(payload, ctx)).data;
       case "passkey-login-finish":  return (await compositeLoginFinish(payload, ctx)).data;
     }
   } catch (error) {
@@ -481,12 +485,16 @@ function signupResponse(
  * 呼び出し元サービスは自分の backend 経由で /api/auth/exchange して service_token を得る。
  */
 async function compositeSignupFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
+  const binding = await resolveAuthCodeBinding(p, ctx);
   // 引き継ぎ (連携) は Cernere 自身の画面 (/federate) からだけ行う。
   if (p.federation !== undefined) throw AppError.badRequest("Finish the sign-in transfer in Cernere");
-  const account = await finalizePasskeySignup(p, ctx);
+  const registration = { ...p };
+  for (const key of ["target", "targetMode", "client_id", "code_challenge", "state", "code_audience"]) delete registration[key];
+  const account = await finalizePasskeySignup(registration, ctx);
   try {
     await ensureProjectRowForComposite(account.userId, ctx);
     const authCode = await issueAuthCode({
+      binding,
       userId: account.userId,
       displayName: "",
       email: null,
@@ -559,7 +567,7 @@ async function registerFinish(authHeader: string, p: Record<string, unknown>): P
   const verification = await verifyRegistrationResponse({
     response,
     expectedChallenge,
-    expectedOrigin: ORIGINS,
+    expectedOrigin: CERNERE_ORIGINS,
     expectedRPID: RP_ID,
     // 登録 options で userVerification:'required' を指示しているので、 finish でも
     // UV フラグを必須化して「UV 無しで作られた passkey」 を弾く。 こうすると Ostiarius
@@ -599,7 +607,33 @@ async function registerFinish(authHeader: string, p: Record<string, unknown>): P
 
 // ─── LOGIN ────────────────────────────────────────────────────────
 
-async function loginBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
+const loginChallenges = new PasskeyLoginChallengeStore(redis, CHALLENGE_TTL_SEC);
+
+function selfLoginIntent(): PasskeyLoginIntent {
+  return { binding: null, expectedOrigins: assertionOrigins("cernere"), embeddingOrigins: null, request: null };
+}
+
+async function compositeLoginIntent(p: Record<string, unknown>, ctx: RequestCtx, binding?: AuthCodeBinding): Promise<PasskeyLoginIntent> {
+  const destination = binding ?? await resolveAuthCodeBinding(p, ctx);
+  const target = typeof p.target === "string" ? p.target : "";
+  const expectedOrigins = destination.audience === "cernere" ? assertionOrigins("cernere")
+    : assertionOrigins(destination.audience, { origin: new URL(target).origin, ceremonyOrigin: ctx.origin });
+  return {
+    binding: destination, expectedOrigins,
+    embeddingOrigins: destination.audience === "cernere" ? null : [new URL(target).origin],
+    request: { target, targetMode: p.targetMode === "redirect" ? "redirect" : "post_message",
+      state: typeof p.state === "string" ? p.state : "", codeChallenge: String(p.code_challenge) },
+  };
+}
+
+async function compositeLoginBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
+  return loginBegin(p, ctx, await compositeLoginIntent(p, ctx));
+}
+
+async function loginBegin(p: Record<string, unknown>, ctx: RequestCtx, intent: PasskeyLoginIntent = selfLoginIntent()): Promise<RouteResult> {
+  if (intent.binding === null && ["client_id", "target", "code_challenge", "code_audience"].some(key => p[key] !== undefined)) {
+    throw AppError.badRequest("Use composite-login-begin for a Composite ceremony");
+  }
   // email が来れば「そのユーザ専用」 のクレデンシャルだけを allow に詰める。
   // 来なければ "usernameless" (= 認証器が自分の登録済 credential を提示) を許す。
   const email = typeof p.email === "string" ? p.email.trim() : "";
@@ -636,7 +670,7 @@ async function loginBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise<
     userVerification: "required",
   });
 
-  await redis.set(challengeKey("login", challengeOwner), opts.challenge, "EX", CHALLENGE_TTL_SEC);
+  await loginChallenges.issue(challengeOwner, opts.challenge, intent);
   return { status: "200 OK", data: { options: opts, challengeOwner } };
 }
 
@@ -646,6 +680,7 @@ async function loginBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise<
 async function verifyPasskeyAssertion(
   p: Record<string, unknown>,
   ctx: RequestCtx,
+  intent: PasskeyLoginIntent = selfLoginIntent(),
 ): Promise<{
   user: typeof schema.users.$inferSelect;
   challengeOwner: string;
@@ -658,8 +693,7 @@ async function verifyPasskeyAssertion(
   if (!response) throw new Error("response is required");
   if (!challengeOwner) throw new Error("challengeOwner is required");
 
-  const expectedChallenge = await redis.getdel(challengeKey("login", challengeOwner));
-  if (!expectedChallenge) throw new Error("Challenge expired or missing — please retry");
+  const expectedChallenge = await loginChallenges.consume(challengeOwner, intent);
 
   // 提示された credential.id (= base64url) で passkey を DB から引く
   // 論理失効済み passkey では認証させない (§7.1)。 hard delete をやめた分、
@@ -677,7 +711,7 @@ async function verifyPasskeyAssertion(
   const verification = await verifyAuthenticationResponse({
     response,
     expectedChallenge,
-    expectedOrigin: ORIGINS,
+    expectedOrigin: intent.expectedOrigins,
     expectedRPID: RP_ID,
     credential: {
       id: cred.credentialId,
@@ -688,7 +722,7 @@ async function verifyPasskeyAssertion(
         : undefined,
     },
     requireUserVerification: true,
-  });
+  }, intent.embeddingOrigins ?? undefined);
   if (!verification.verified) {
     logUserLoginFailed(undefined, "passkey", "signature failed", ctx);
     throw new Error("Unauthorized: passkey signature failed");
@@ -754,15 +788,17 @@ async function loginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise
  *  親サービス (Memoria Hub 等) が postMessage で受け取り、 /api/auth/exchange
  *  経由で実トークンに交換する。 */
 async function compositeLoginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
-  const { user, verifiedAt } = await verifyPasskeyAssertion(p, ctx);
+  const binding = await resolveAuthCodeBinding(p, ctx);
+  const { user, verifiedAt } = await verifyPasskeyAssertion(p, ctx, await compositeLoginIntent(p, ctx, binding));
   // 送り先 (popup / redirect の target) があるか、サービス経由 (project WS) なら、authCode はサービスへ渡る。
   // 送り先の無い REST は Cernere 自身の /login (許可待ちでも入れる。交換は Cernere の画面からだけ)。
-  const audience = ctx.projectKey || (typeof p.target === "string" && p.target) ? "service" : "cernere";
+  const audience = binding.audience;
   if (audience === "service") await requireServiceAccess(user.id);
   let authCode: string;
   try {
     authCode = await issueAuthCode({
       audience,
+      binding,
       userId: user.id,
       displayName: user.displayName,
       email: user.email,
@@ -795,7 +831,7 @@ function compositeConsentRequest(p: Record<string, unknown>, ctx: RequestCtx): S
   if (!target) return { subject: null, channel: "browser", reason: "composite request without target" };
   return {
     subject: { origin: target },
-    continuation: { mode: p.targetMode === "redirect" ? "redirect" : "post_message", target },
+    continuation: { mode: p.targetMode === "redirect" ? "redirect" : "post_message", target, state: typeof p.state === "string" ? p.state : undefined },
     channel: "browser",
   };
 }

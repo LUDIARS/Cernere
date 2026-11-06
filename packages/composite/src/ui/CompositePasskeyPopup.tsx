@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import { compositeLoginUrl, createCompositePkce, type CompositeAuthorizationRequest, type CompositePkce } from "./pkce.js";
 
 const DEFAULT_POPUP_FEATURES = "popup,width=480,height=640,resizable=yes,scrollbars=yes";
 
 export interface CompositePasskeyPopupProps {
   cernereUrl: string;
-  onAuthCode: (authCode: string) => void | Promise<void>;
+  clientId: string;
+  onAuthCode: (authCode: string, codeVerifier: string) => void | Promise<void>;
   onError?: (error: Error) => void;
   origin?: string;
   buttonLabel?: string;
@@ -21,13 +23,15 @@ export interface CompositePasskeyPopupProps {
 interface CernereAuthMessage {
   type: "cernere:auth";
   authCode: string;
+  state: string;
 }
 
 export function buildCompositePasskeyLoginUrl(
   cernereUrl: string,
   origin: string,
+  request: CompositeAuthorizationRequest,
 ): string {
-  const url = new URL("/composite/login", cernereUrl);
+  const url = compositeLoginUrl(cernereUrl, request);
   url.searchParams.set("origin", new URL(origin).origin);
   url.searchParams.set("auth_mode", "passkey");
   return url.toString();
@@ -36,8 +40,9 @@ export function buildCompositePasskeyLoginUrl(
 export function buildCompositePasskeyRedirectLoginUrl(
   cernereUrl: string,
   redirectUri: string,
+  request: CompositeAuthorizationRequest,
 ): string {
-  const url = new URL("/composite/login", cernereUrl);
+  const url = compositeLoginUrl(cernereUrl, request);
   url.searchParams.set("redirect_uri", new URL(redirectUri).toString());
   url.searchParams.set("auth_mode", "passkey");
   return url.toString();
@@ -54,7 +59,7 @@ function isCernereAuthMessage(value: unknown): value is CernereAuthMessage {
   const message = value as Record<string, unknown>;
   return message.type === "cernere:auth"
     && typeof message.authCode === "string"
-    && message.authCode.length > 0;
+    && message.authCode.length > 0 && typeof message.state === "string";
 }
 
 /**
@@ -63,6 +68,7 @@ function isCernereAuthMessage(value: unknown): value is CernereAuthMessage {
  */
 export function CompositePasskeyPopup({
   cernereUrl,
+  clientId,
   onAuthCode,
   onError,
   origin,
@@ -77,54 +83,70 @@ export function CompositePasskeyPopup({
 }: CompositePasskeyPopupProps) {
   const [pending, setPending] = useState(false);
   const cleanupRef = useRef<(() => void) | null>(null);
+  const busyRef = useRef(false);
+  const mountedRef = useRef(true);
 
-  useEffect(() => () => cleanupRef.current?.(), []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; cleanupRef.current?.(); };
+  }, []);
+
+  const releaseBusy = () => { busyRef.current = false; if (mountedRef.current) setPending(false); };
 
   useEffect(() => {
     const callbackUrl = new URL(window.location.href);
-    const state = callbackUrl.searchParams.get("cernere_composite_state");
+    const state = callbackUrl.searchParams.get("state");
     const authCode = callbackUrl.searchParams.get("code");
     if (!state || !authCode) return;
 
-    callbackUrl.searchParams.delete("cernere_composite_state");
+    callbackUrl.searchParams.delete("state");
     callbackUrl.searchParams.delete("code");
     window.history.replaceState({}, "", callbackUrl.toString());
 
-    const expectedState = window.sessionStorage.getItem(REDIRECT_STATE_KEY);
+    const raw = window.sessionStorage.getItem(REDIRECT_STATE_KEY);
     window.sessionStorage.removeItem(REDIRECT_STATE_KEY);
-    if (!expectedState || state !== expectedState) {
+    let pendingRequest: (CompositePkce & { clientId: string; createdAt: number }) | null = null;
+    try { pendingRequest = raw ? JSON.parse(raw) : null; } catch { /* Invalid local state is rejected below. */ }
+    if (!pendingRequest || pendingRequest.clientId !== clientId || state !== pendingRequest.state
+      || typeof pendingRequest.codeVerifier !== "string" || !Number.isFinite(pendingRequest.createdAt)
+      || Date.now() < pendingRequest.createdAt || Date.now() - pendingRequest.createdAt > timeoutMs) {
       onError?.(new Error("ログインの復帰情報を検証できませんでした"));
       return;
     }
-    void Promise.resolve(onAuthCode(authCode)).catch((error: unknown) => {
-      onError?.(error instanceof Error ? error : new Error("ログイン処理に失敗しました"));
-    });
-  }, [onAuthCode, onError]);
+    busyRef.current = true;
+    setPending(true);
+    void Promise.resolve().then(() => onAuthCode(authCode, pendingRequest.codeVerifier)).catch((error: unknown) => {
+      if (mountedRef.current) onError?.(error instanceof Error ? error : new Error("ログイン処理に失敗しました"));
+    }).finally(releaseBusy);
+  }, [onAuthCode, onError, clientId, timeoutMs]);
 
   const fail = (error: Error) => {
-    setPending(false);
-    onError?.(error);
+    releaseBusy();
+    if (mountedRef.current) onError?.(error);
   };
 
-  const openPopup = () => {
+  const openPopup = async () => {
     cleanupRef.current?.();
 
     let loginUrl: string;
     let expectedOrigin: string;
+    const popup = window.open("about:blank", popupName, popupFeatures);
+    if (!popup) { fail(new Error("ログイン画面を開けませんでした。ポップアップを許可してください")); return; }
+    cleanupRef.current = () => popup.close();
+    let request: CompositePkce;
     try {
+      request = await createCompositePkce();
+      if (popup.closed || !mountedRef.current) { popup.close(); releaseBusy(); return; }
       const callerOrigin = origin ?? window.location.origin;
-      loginUrl = buildCompositePasskeyLoginUrl(cernereUrl, callerOrigin);
+      loginUrl = buildCompositePasskeyLoginUrl(cernereUrl, callerOrigin, { ...request, clientId });
       expectedOrigin = new URL(cernereUrl).origin;
     } catch {
+      popup.close();
       fail(new Error("Cernere URL または呼び出し元 origin が不正です"));
       return;
     }
 
-    const popup = window.open(loginUrl, popupName, popupFeatures);
-    if (!popup) {
-      fail(new Error("ログイン画面を開けませんでした。ポップアップを許可してください"));
-      return;
-    }
+    popup.location.replace(loginUrl);
 
     setPending(true);
     let settled = false;
@@ -132,6 +154,7 @@ export function CompositePasskeyPopup({
       window.removeEventListener("message", handleMessage);
       window.clearInterval(closeTimer);
       window.clearTimeout(timeoutTimer);
+      popup.close();
       cleanupRef.current = null;
     };
     const settleError = (error: Error) => {
@@ -144,16 +167,16 @@ export function CompositePasskeyPopup({
       if (settled
         || event.origin !== expectedOrigin
         || event.source !== popup
-        || !isCernereAuthMessage(event.data)) {
+        || !isCernereAuthMessage(event.data) || event.data.state !== request.state) {
         return;
       }
       settled = true;
       cleanup();
-      setPending(false);
       popup.close();
-      void Promise.resolve(onAuthCode(event.data.authCode)).catch((error: unknown) => {
+      const authCode = event.data.authCode;
+      void Promise.resolve().then(() => onAuthCode(authCode, request.codeVerifier)).catch((error: unknown) => {
         fail(error instanceof Error ? error : new Error("ログイン処理に失敗しました"));
-      });
+      }).finally(releaseBusy);
     };
     const closeTimer = window.setInterval(() => {
       if (popup.closed) settleError(new Error("ログインがキャンセルされました"));
@@ -168,23 +191,32 @@ export function CompositePasskeyPopup({
     popup.focus();
   };
 
-  const startLogin = () => {
+  const startLogin = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setPending(true);
     const sameWindow = navigationMode === "same-window"
       || (navigationMode === "auto" && !isMobileBrowser());
     if (!sameWindow) {
-      openPopup();
+      try { await openPopup(); }
+      catch (error) {
+        cleanupRef.current?.();
+        fail(error instanceof Error ? error : new Error("ログインを開始できませんでした"));
+      }
       return;
     }
 
     try {
       const callbackUrl = new URL(window.location.href);
       callbackUrl.searchParams.delete("code");
-      const state = crypto.randomUUID();
-      callbackUrl.searchParams.set("cernere_composite_state", state);
-      window.sessionStorage.setItem(REDIRECT_STATE_KEY, state);
+      callbackUrl.searchParams.delete("state");
+      const request = await createCompositePkce();
+      if (!mountedRef.current) { releaseBusy(); return; }
+      window.sessionStorage.setItem(REDIRECT_STATE_KEY, JSON.stringify({ ...request, clientId, createdAt: Date.now() }));
       const loginUrl = buildCompositePasskeyRedirectLoginUrl(
         cernereUrl,
         callbackUrl.toString(),
+        { ...request, clientId },
       );
       window.location.assign(loginUrl);
     } catch {

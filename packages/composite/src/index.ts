@@ -1,12 +1,12 @@
 export { CernereComposite } from "./composite.js";
+export { CompositeServiceSessions, CompositeAuthorityError } from "./service-session.js";
+export { CompositeDelegations, delegationHeadersDigest } from "./delegation.js";
+export { CompositeServiceIdentity } from "./service-identity.js";
+export type { OwnOrganizationMembership, OwnFaceConsent, ScopedIdentitySession } from "./service-identity.js";
+export type { DelegatedHttpOperation, DelegationTarget, DelegationCredential, DelegationDecision, DelegatedResourceOperation } from "./delegation.js";
+export type { BoundServiceSession, ServiceOperation, ResourceOperation, ServiceOperationDecision, ServiceOperationRisk, AuthorityCall } from "./service-session.js";
 export type {
   CompositeConfig,
   CernereUser,
   ExchangeResult,
 } from "./types.js";
-
-// service-adapter の型を re-export (利用側の便宜)
-export type {
-  ServiceAdapterCallbacks,
-  AdmittedUser,
-} from "@ludiars/cernere-service-adapter";

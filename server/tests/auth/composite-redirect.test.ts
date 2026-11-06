@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isOriginAllowed } from "../../src/auth/composite-redirect";
+import { isOriginAllowed } from "../../src/project/composite-origin-policy";
 
 const ALLOW = ["https://app.example.com", "http://localhost:5173"];
 

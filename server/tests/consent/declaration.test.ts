@@ -98,6 +98,7 @@ describe("上限 (caps) の導出", () => {
       identityClaims: ["discord_id"],
       userDataModules: ["calendar"],
       oidcScopes: [],
+      serviceOperations: [],
     });
   });
 

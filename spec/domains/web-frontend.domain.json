@@ -11,6 +11,9 @@
       "pathPattern": "/packages/composite/src/ui/"
     },
     {
+      "pathPattern": "(^|/)server/tests/frontend/[^/]+$"
+    },
+    {
       "pathPattern": "(^|/)frontend/src/pages/[^/]+$"
     },
     {
@@ -46,6 +49,7 @@
   ],
   "cardTemplate": "Summarise the \"web-frontend\" domain: React 19 + React Router 7 client: pages, hooks, and the WebSocket/auth client library that drives all state changes through the session.",
   "specRefs": [
+    "SPEC-COMPOSITE-PROJECT-PKCE",
     "1.1 Cernere 概要",
     "フロントエンド",
     "SPEC-GOOGLE-OIDC-HANDOFF",

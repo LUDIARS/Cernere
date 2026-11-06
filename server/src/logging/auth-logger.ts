@@ -16,6 +16,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 type AuthEventType =
+  | "service.operation.authorized"
+  | "service.operation.consumed"
+  | "service.operation.rejected"
   | "enterprise.session"
   | "enterprise.session.failed"
   | "user.login"

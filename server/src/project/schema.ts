@@ -3,6 +3,7 @@
  */
 
 import { z } from "zod";
+import { serviceOperationsSchema } from "./service-operation-policy.js";
 import { serializeColumnDefault } from "./column-default.js";
 import { profileAccessSchema } from "./profile-access.js";
 import { onsiteMfaDefinitionSchema } from "./onsite-mfa.js";
@@ -132,6 +133,11 @@ export const projectDefinitionSchema = z.object({
   data_sharing: z.array(dataShareDefinitionSchema).optional(),
   /** 開示を許可された users 側 identity 列 (管理者所有、未宣言なら開示しない) */
   identity_claims: z.array(identityClaimSchema).optional(),
+  /** Administrator-owned exact origins; registration validates environment-specific HTTPS/loopback policy. */
+  composite_origins: z.array(z.string()).max(100).optional(),
+  /** Administrator-owned audience for service-bound PASETO tokens. */
+  hub_url: z.string().optional(),
+  service_operations: serviceOperationsSchema.optional(),
   /** service token に載せる scope (管理者所有、未宣言なら service token を発行しない) */
   service_scopes: z.array(serviceScopeSchema).optional(),
   /** 現地確認 MFA の要求 (管理者所有、未宣言なら要求しない)。 project/onsite-mfa.ts */

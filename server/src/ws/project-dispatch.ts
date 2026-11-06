@@ -67,8 +67,10 @@ export async function dispatchProjectCommand(
         : undefined;
       const returnTo = typeof payload.returnTo === "string" ? payload.returnTo : undefined;
       const { ConsentRequiredError, consentRequiredBody } = await import("../consent/gate.js");
+      const { resolveAuthCodeBinding } = await import("../auth/composite-redirect.js");
+      const authCodeBinding = await resolveAuthCodeBinding(payload, { projectKey });
       try {
-        const result = await authenticateEdgeAssertion({ projectKey, assertion, cfAuthorization, returnTo });
+        const result = await authenticateEdgeAssertion({ projectKey, assertion, cfAuthorization, returnTo, authCodeBinding });
         // composite と同じく、 認証成立時に project_data_<key> の行を確保する。
         await ensureUserProjectRow(result.userId, projectKey);
         return { authCode: result.authCode, groups: result.groups };

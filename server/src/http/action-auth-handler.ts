@@ -28,7 +28,7 @@ interface RouteResult { status: string; data: unknown }
 
 const beginSchema = actionTargetSchema.extend({
   sessionId: z.string().uuid().optional(),
-}).strict();
+}).strict().refine(target => target.action !== "service.operation", "Service operation permits use the project authority endpoint");
 
 const finishSchema = z.object({
   ceremonyId: z.string().uuid(),

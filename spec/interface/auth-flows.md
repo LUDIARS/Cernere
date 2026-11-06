@@ -87,7 +87,7 @@ sequenceDiagram
 
 ## パスキー: 入口の統合 (2026-10-14)
 
-1. 画面は「パスキーで続ける」1 つ。`login-begin` (discoverable) → `navigator.credentials.get()` → `login-finish` / `composite-login-finish`。
+1. 画面は「パスキーで続ける」1 つ。global は `login-begin` → `login-finish`、Composite は `composite-login-begin` → `composite-login-finish`。両者の challenge を相互利用しない。
 2. 取消・パスキー無しのときは「アカウントが無い」と言わず、再試行 / 他の端末にある (ブラウザのクロスデバイス QR・`/recover` のリカバリー QR) / 新しく始める の順に出す。
 3. 新しく始める: Cernere の origin で `signup-begin` (name・email を受け取らない) → `create()` → `signup-finish` → `/onboarding` (名前・リカバリー QR・PC ならスマホ追加・通知)。埋め込み先から来た場合は戻って silent SSO で authCode を渡す。project WS の `passkey-signup-*` は 410 `signup_moved_to_popup`。
 4. 別端末の追加 (`device-link` → `device-register-begin/finish`) は候補を保留し、追加する端末に出た 4 桁を元端末で入力して承認 (`device-pairing-approve`、action proof `passkey.pairing_approve`) したときだけ有効になる。
@@ -292,7 +292,7 @@ sequenceDiagram
   どれにも当たらない応答はカードがエラーとして出す (黙って止まらない)。 SDK 0.5.0 から。
 - `auth_session` Redis TTL: 10 分
 - `device_challenge` Redis TTL: 10 分、最大 5 回試行
-- `authCode` 発行 → `/api/auth/exchange` で one-time 交換 → `accessToken`/`refreshToken`
+- `authCode` は project/origin/PKCE/用途を束縛する。サービスは `/api/auth/exchange` で自分向け `projectToken` だけを受け取る。Cr 自身だけが `/api/auth/exchange/self` で user token pair を受け取る。
 - 経路A の `projectKey` は [user-project-row.md](user-project-row.md) の自動 row 初期化に使われる
 
 ### 5.1 埋め込み SDK のパスキー (WebAuthn) 経路
@@ -306,18 +306,23 @@ Cernere へ往復させるだけでよい。
 
 | 段 | 経路A: project WS (`module:"auth"`) | 経路B: REST (Cernere 同一 origin) | 応答 |
 |---|---|---|---|
-| login begin | `action:"passkey-login-begin"` `{ email? }` | `POST /api/auth/passkey/login-begin` | `{ options, challengeOwner }` |
-| login finish | `action:"passkey-login-finish"` `{ challengeOwner, response }` | `POST /api/auth/passkey/composite-login-finish` | `{ authCode }` |
-| signup begin | `action:"passkey-signup-begin"` `{ name, email? }` | `POST /api/auth/passkey/signup-begin` | `{ signupId, options }` |
-| signup finish | `action:"passkey-signup-finish"` `{ signupId, response }` | `POST /api/auth/passkey/composite-signup-finish` | `{ authCode }` |
+| login begin | `action:"passkey-login-begin"` と binding | `POST /api/auth/passkey/composite-login-begin` と binding | `{ options, challengeOwner }` |
+| login finish | `action:"passkey-login-finish"` `{ challengeOwner, response, ...binding }` | `POST /api/auth/passkey/composite-login-finish` と同じ body | `{ authCode }` |
+| signup begin | 使用不可 (410)、Cr popup へ移動 | `POST /api/auth/passkey/signup-begin` `{}` | `{ signupId, options }` |
+| signup finish | 使用不可 (410)、Cr popup へ移動 | `POST /api/auth/passkey/composite-signup-finish` `{ signupId, response, ...binding }` | `{ authCode }` |
+
+binding はサービスでは `client_id, target, targetMode, state, code_challenge` (S256)、Cr self では
+`code_challenge`。login begin と finish の用途・対象・PKCE・戻り先を challenge の記録と照合し、
+変更も再利用も拒否する。署名の検証前に clientData から対象を選ばない。
 
 - finish は JWT を返さず `authCode` を返す (password 経路と同じ契約)。 経路A では
   `ensureUserProjectRow` で `project_data_<key>` の行も確保する。
 - 経路A の未認証 ceremony は、認証済み project WS に bind された `projectKey` 単位で
   レート制限する。サービスが payload で申告する接続元 IP は詐称可能なので受け付けない。
-- **origin / RP ID**: ceremony はページを開いている origin で走るため、 埋め込み先サービスの
-  origin を `CERNERE_COMPOSITE_ALLOWED_ORIGINS` に登録する (Cernere はこれを WebAuthn の
-  expectedOrigin に合流させる)。 `WEBAUTHN_RP_ID` はそれら全 origin の registrable suffix
+- **origin / RP ID**: サービス origin は管理者所有の project `composite_origins` に登録する。
+  expectedOrigin は challenge に束縛した対象サービスか hosted Cr の origin に限定する。
+  global/self、signup、credential 登録は Cr 自身の署名 origin だけを受け付ける。
+  service iframe の署名済 topOrigin も対象サービスと一致させる。`WEBAUTHN_RP_ID` は対象 origin の registrable suffix
   でなければならない。 別 eTLD+1 のサービスは埋め込みではなく `<CompositePasskeyPopup>`
   (Cernere origin で ceremony) を使う。
 - `auth_mode=passkey` (`passkeyOnly`) ではパスワード導線と fingerprint 収集を行わない。
