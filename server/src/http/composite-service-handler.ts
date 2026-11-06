@@ -17,7 +17,7 @@ const permits = new ActionProofStore({ redisClient: redis, ttlSeconds: 30 });
 export async function handleCompositeServiceRoute(action: string, body: string, authHeader: string): Promise<{ status: string; data: unknown }> {
   try { return await serviceAuthorityRoute(action, body, authHeader); }
   catch (error) {
-    logAuthEvent({ event: "service.operation.rejected", phase: ["bind", "check", "revoke", "authorize", "consume", "delegate", "consume-delegation"].includes(action) ? action : "unknown",
+    logAuthEvent({ event: "service.operation.rejected", phase: ["bind", "check", "revoke", "authorize", "consume", "delegate", "consume-delegation", "delegate-upload", "begin-upload", "finalize-upload", "cancel-upload"].includes(action) ? action : "unknown",
       reason: error instanceof AppError ? error.code ?? "denied" : "unavailable" });
     throw error;
   }
@@ -27,6 +27,10 @@ export async function handleCompositeServiceRoute(action: string, body: string, 
 async function serviceAuthorityRoute(action: string, body: string, authHeader: string): Promise<{ status: string; data: unknown }> {
   let raw: unknown;
   try { raw = JSON.parse(body); } catch { throw AppError.badRequest("Invalid JSON"); }
+  if (action === "delegate-upload" || action === "begin-upload" || action === "finalize-upload" || action === "cancel-upload") {
+    const { handleCompositeUploadRoute } = await import("./composite-upload-handler.js");
+    return handleCompositeUploadRoute(action, raw, authHeader);
+  }
   if (action === "delegate" || action === "consume-delegation") {
     const { handleCompositeDelegationRoute } = await import("./composite-delegation-handler.js");
     return handleCompositeDelegationRoute(action, raw, authHeader);

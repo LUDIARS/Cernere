@@ -2,12 +2,14 @@ import type { CompositeConfig, ExchangeResult } from "./types.js";
 import { CompositeServiceSessions, CompositeAuthorityError } from "./service-session.js";
 import { CompositeDelegations } from "./delegation.js";
 import { CompositeServiceIdentity } from "./service-identity.js";
+import { CompositeUploads } from "./upload.js";
 
 /** Service backend only. Browser verifiers are exchanged using this project's credential. */
 export class CernereComposite {
   readonly sessions: CompositeServiceSessions;
   readonly delegations: CompositeDelegations;
   readonly identity: CompositeServiceIdentity;
+  readonly uploads: CompositeUploads;
   private readonly lifetime = new AbortController();
   private projectCredential?: { token: string; expiresAt: number };
   private credentialRequest?: Promise<string>;
@@ -21,6 +23,7 @@ export class CernereComposite {
     this.sessions = new CompositeServiceSessions((action, body) => this.authority(action, body));
     this.delegations = new CompositeDelegations((action, body) => this.authority(action, body), config.projectKey);
     this.identity = new CompositeServiceIdentity((action, body) => this.authority(action, body));
+    this.uploads = new CompositeUploads((action, body) => this.authority(action, body), config.projectKey);
   }
   dispose(): void { this.lifetime.abort(); this.projectCredential = undefined; }
   private signal(timeout: number): AbortSignal { return AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(timeout)]); }

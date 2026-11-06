@@ -5,6 +5,12 @@
   "templateRules": [],
   "membership": [
     {
+      "pathPattern": "(^|/)spec/plan/2026-11-06-composite-consumer-cutover\\.md$"
+    },
+    {
+      "pathPattern": "(^|/)server/(src|tests)/(auth/composite-upload|http/composite-upload)"
+    },
+    {
       "pathPattern": "(^|/)server/(src|tests)/auth/composite-session-(store|redis)(\\.test)?\\.ts$"
     },
     {
@@ -43,6 +49,7 @@
   ],
   "cardTemplate": "Summarise the \"authorization\" domain: Permission model and the 4-layer destructive-operation defense: system roles (admin/general), org roles (owner/admin/member), token→TTL→user-state→resource-ownership checks.",
   "specRefs": [
+    "SPEC-COMPOSITE-UPLOAD-RESERVATION",
     "SPEC-COMPOSITE-DELEGATION",
     "SPEC-COMPOSITE-OPERATION-GUARD",
     "Step 5: 認可モデルの適用",

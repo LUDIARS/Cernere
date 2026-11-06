@@ -33,13 +33,16 @@ export function delegationHeadersDigest(headers: Headers, additional: readonly s
   }
   return createHash("sha256").update(JSON.stringify(names.map(name => [name, headers.get(name)])), "utf8").digest("base64url");
 }
-function envelope(operation: DelegatedHttpOperation, requestId: string) {
+/** @implements SPEC-COMPOSITE-DELEGATION SPEC-COMPOSITE-UPLOAD-RESERVATION */
+export function delegationMetadata(operation: Omit<DelegatedHttpOperation, "body">, requestId: string) {
   if (!operation.action || !operation.path || operation.resource !== operation.path) throw new Error("A classified canonical delegated HTTP resource is required");
   const parsed = new URL(operation.path, "https://delegation.invalid");
   if (parsed.origin !== "https://delegation.invalid" || parsed.pathname + parsed.search !== operation.path || parsed.hash) throw new Error("Invalid delegated request path");
   return { action: operation.action, method: operation.method, path: operation.path, resource: operation.resource, requestId,
-    headersDigest: delegationHeadersDigest(operation.headers, operation.additionalHeaders),
-    contentDigest: createHash("sha256").update(operation.body).digest("base64url") };
+    headersDigest: delegationHeadersDigest(operation.headers, operation.additionalHeaders) };
+}
+function envelope(operation: DelegatedHttpOperation, requestId: string) {
+  return { ...delegationMetadata(operation, requestId), contentDigest: createHash("sha256").update(operation.body).digest("base64url") };
 }
 function lifetime(expiresAt: unknown): string {
   if (typeof expiresAt !== "string" || !Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= Date.now()

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { CernereUser } from "./types.js";
+import { runCapturedServiceOperation, type CapturedServiceOperation, type CapturedResourceOperation } from "./captured-operation.js";
 
 export interface BoundServiceSession {
   projectToken: string;
@@ -63,6 +64,10 @@ export function readServiceMetadata(value: unknown): Pick<BoundServiceSession, "
 /** Shared live gate. It never caches authorization or retries an operation. @implements SPEC-COMPOSITE-OPERATION-GUARD */
 export class CompositeServiceSessions {
   constructor(private readonly call: AuthorityCall) {}
+  /** The host owns capture disposal. @implements SPEC-COMPOSITE-UPLOAD-RESERVATION */
+  runCaptured<T>(session: BoundServiceSession, operation: CapturedServiceOperation, resource: CapturedResourceOperation<T>): Promise<T> {
+    return runCapturedServiceOperation(this.call, session, operation, resource);
+  }
   async bind(projectToken: string, opaqueSessionId: string): Promise<BoundServiceSession> {
     if (!projectToken || opaqueSessionId.length < 32 || opaqueSessionId.length > 512) throw new Error("A random service session ID is required");
     const sessionBinding = createHash("sha256").update(opaqueSessionId, "utf8").digest("base64url");

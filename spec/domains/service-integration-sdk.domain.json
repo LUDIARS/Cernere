@@ -43,6 +43,7 @@
   ],
   "cardTemplate": "Summarise the \"service-integration-sdk\" domain: SDKs and adapters letting external services authenticate against Cernere: service-adapter WebSocket auth, id-service SDK, id-cache, and compatibility shims.",
   "specRefs": [
+    "SPEC-COMPOSITE-UPLOAD-RESERVATION",
     "SPEC-COMPOSITE-DELEGATION",
     "SPEC-COMPOSITE-OPERATION-GUARD",
     "SPEC-COMPOSITE-SCOPED-IDENTITY",
