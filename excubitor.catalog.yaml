@@ -21,6 +21,10 @@ services:
     command: node --run start:server
     allow_hot_reload: false
     autostart: false
+    # 本番は DB / Redis の一時断で落ちても自動で立ち直らせる (2026-10-29 に AWS で 8 日停止した)。
+    # 間隔は 1s から倍々で最大 30s、30 回で約 13 分ぶん待つ。
+    restart_policy: on-failure
+    max_restart: 30
     env:
       LISTEN_PORT: "8086"
       # 開発用の詳細エラー・詳細ログ・本人確認オフを本番で使わせない (config.ts の isProduction)。
@@ -65,6 +69,10 @@ services:
     allow_hot_reload: false
     depends_on: [cernere]
     autostart: false
+    # 本番は DB / Redis の一時断で落ちても自動で立ち直らせる (2026-10-29 に AWS で 8 日停止した)。
+    # 間隔は 1s から倍々で最大 30s、30 回で約 13 分ぶん待つ。
+    restart_policy: on-failure
+    max_restart: 30
     env:
       HOST: 127.0.0.1
       PORT: "5173"
