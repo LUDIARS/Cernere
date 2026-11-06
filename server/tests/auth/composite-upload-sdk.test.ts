@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { CompositeUploads, type IncomingUploadOperation, type UploadCapture, type UploadHttpOperation } from "../../../packages/composite/src/upload.js";
 import { CompositeServiceSessions, type AuthorityCall, type BoundServiceSession } from "../../../packages/composite/src/service-session.js";
+import { MAX_CAPTURED_UPLOAD_BYTES, requireUploadLimits } from "../../../packages/composite/src/upload-body.js";
 
 const token = "t".repeat(43), requestId = "22222222-2222-4222-8222-222222222222";
 const digest = (body: string) => createHash("sha256").update(body).digest("base64url");
@@ -33,6 +34,13 @@ function targetFixture(options: { denied?: boolean; authorityFailure?: boolean; 
 }
 
 describe("bounded upload SDK", () => {
+  it("accepts the actual 2 GiB profile-video ceiling without signed32-bit truncation, but no larger size or deadline", () => {
+    expect(MAX_CAPTURED_UPLOAD_BYTES).toBe(2 ** 31);
+    expect(requireUploadLimits({ maximumBytes: 2 ** 31, timeoutSeconds: 300 })).toEqual({ maximumBytes: 2 ** 31, timeoutSeconds: 300 });
+    expect(() => requireUploadLimits({ maximumBytes: 2 ** 31 + 1, timeoutSeconds: 300 })).toThrow();
+    expect(() => requireUploadLimits({ maximumBytes: 2 ** 31, timeoutSeconds: 301 })).toThrow();
+    expect(requireUploadLimits({ maximumBytes: 100 * 1024 * 1024, timeoutSeconds: 30 }).maximumBytes).toBe(100 * 1024 * 1024);
+  });
   it("hashes source Blob bytes without accepting an external digest or mutable envelope", async () => {
     const calls: Array<Record<string, unknown>> = [];
     let currentOperation: UploadHttpOperation;

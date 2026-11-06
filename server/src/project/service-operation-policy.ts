@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { AppError } from "../error.js";
 
-export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
+// GLAB profile videos use ProfileMediaStore (2 GiB), not spectator mediaPolicy.
+export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 export const MAX_UPLOAD_SECONDS = 300;
 export const uploadLimitsSchema = z.object({
   maximumBytes: z.number().int().min(1).max(MAX_UPLOAD_BYTES),

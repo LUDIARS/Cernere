@@ -5,9 +5,11 @@ import { createHash } from "node:crypto";
 
 export interface UploadOwner { isCurrent: () => boolean; signal?: AbortSignal }
 export interface UploadLimits { maximumBytes: number; timeoutSeconds: number }
+/** Protocol ceiling; hosts must independently declare their stricter route/quota. */
+export const MAX_CAPTURED_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 /** @implements SPEC-COMPOSITE-UPLOAD-RESERVATION */
 export function requireUploadLimits(value: UploadLimits): UploadLimits {
-  if (!value || !Number.isSafeInteger(value.maximumBytes) || value.maximumBytes < 1 || value.maximumBytes > 200 * 1024 * 1024
+  if (!value || !Number.isSafeInteger(value.maximumBytes) || value.maximumBytes < 1 || value.maximumBytes > MAX_CAPTURED_UPLOAD_BYTES
     || !Number.isSafeInteger(value.timeoutSeconds) || value.timeoutSeconds < 1 || value.timeoutSeconds > 300) throw new Error("Invalid route-owned upload limits");
   return { maximumBytes: value.maximumBytes, timeoutSeconds: value.timeoutSeconds };
 }
@@ -18,7 +20,7 @@ export function requireUploadOwner(owner: UploadOwner): void {
 /** @implements SPEC-COMPOSITE-UPLOAD-RESERVATION */
 export async function digestCapturedBody(body: Blob, maximumBytes: number, owner: UploadOwner): Promise<{ contentDigest: string; byteLength: number }> {
   requireUploadOwner(owner);
-  if (!(body instanceof Blob) || !Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > 200 * 1024 * 1024
+  if (!(body instanceof Blob) || !Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > MAX_CAPTURED_UPLOAD_BYTES
     || body.size < 1 || body.size > maximumBytes) throw new Error("Invalid captured upload body");
   const reader = body.stream().getReader(), hash = createHash("sha256");
   let ended = false, length = 0;

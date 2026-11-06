@@ -4,7 +4,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { delegationMetadata, type DelegatedHttpOperation, type DelegationTarget, type DelegationDecision } from "./delegation.js";
 import { readServiceMetadata, type AuthorityCall, type BoundServiceSession } from "./service-session.js";
-import { digestCapturedBody, requireUploadLimits, requireUploadOwner, type UploadLimits, type UploadOwner } from "./upload-body.js";
+import { MAX_CAPTURED_UPLOAD_BYTES, digestCapturedBody, requireUploadLimits, requireUploadOwner, type UploadLimits, type UploadOwner } from "./upload-body.js";
 
 export type UploadHttpOperation = Omit<DelegatedHttpOperation, "body"> & { body: Blob };
 export type IncomingUploadOperation = Omit<DelegatedHttpOperation, "body" | "requestId"> & { requestId: string };
@@ -45,7 +45,7 @@ export class CompositeUploads {
       targetProject: target.projectKey, targetAudience: target.audience };
     const expiresAt = Date.parse(session.expiresAt);
     const current = { signal: owner.signal, isCurrent: () => Number.isFinite(expiresAt) && Date.now() < expiresAt && owner.isCurrent() };
-    const digest = await digestCapturedBody(capturedBody, 200 * 1024 * 1024, current);
+    const digest = await digestCapturedBody(capturedBody, MAX_CAPTURED_UPLOAD_BYTES, current);
     requireUploadOwner(current);
     const result = response(await this.call("delegate-upload", { ...metadata, ...digest, ...credentials }));
     requireUploadOwner(current);

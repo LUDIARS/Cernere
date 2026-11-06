@@ -4,9 +4,11 @@
 
 Follow-up to merged Cr #3627 (`b2bc69cf2130c719fa4db3db9cdcf44f4c5f5836`).
 The ordinary 30-second one-operation delegation contract remains unchanged.
-Voluptas currently accepts videos up to 200 MiB and images up to 15 MiB. Reading
-the complete body before consuming a 30-second capability cannot preserve slow
-200 MiB uploads. Increasing a shared memory ceiling or extending that capability
+GLAB uses Voluptas profile evidence, whose actual `ProfileMediaStore.MEDIA_RULES`
+accepts `videos` up to2GiB and `game-logs` up to100MiB. The spectator/impression
+`mediaPolicy` (200MiB video/15MiB image) is a different API and is not this target.
+Reading the complete body before consuming a30second capability cannot preserve
+large uploads. Increasing a shared memory ceiling or extending that capability
 is not the solution. This separate opt-in contract reserves one bounded transfer,
 then authorizes its actual completed body against current authority and data ACLs.
 
@@ -14,7 +16,7 @@ then authorizes its actual completed body against current authority and data ACL
 
 The target's administrator-owned `service_operations` entry may declare
 `upload: { maximumBytes, timeoutSeconds }` only for `important` actions.
-Maximums are 200 MiB and 300 seconds; zero/negative/non-integer/unclassified values
+Maximums are2GiB and300seconds; zero/negative/non-integer/unclassified values
 are denied. The target's own route declaration independently bounds size/deadline;
 the effective limits are the stricter pair and never exceed the source grant's
 remaining lifetime. No browser/header selects the policy or raises these limits.
@@ -111,7 +113,16 @@ only the already configured project-authenticated Cr authority is contacted.
   revoked, authority unavailable: no commit even if all bytes arrived.
 - Source body changed after its digest, truncated/extra body, forged Content-Length,
   slow/disconnected reader, full spool budget: reject and free private resources.
-- Existing 15 MiB image/200 MiB video limits and normal small-body semantics: preserve.
+- Actual profile `videos`2GiB/`game-logs`100MiB limits and normal small-body semantics: preserve.
+- Size2^31 must remain a positive safe Number across SDK/schema/Redis;2^31+1 and timeout301 reject.
+
+The2GiB protocol ceiling is not permission to buffer a complete body in memory or
+to widen every route. Hosts explicitly declare route size/deadline and aggregate
+private disk/concurrency budgets. The required Co integration retains at most1MiB in memory per capture,
+spills larger bodies to exclusive private files, and owns a bounded4GiB aggregate
+reservation budget with at most8leases. Limits apply during capture and remain
+charged until cleanup; quota exhaustion rejects without acquiring more storage.
+The300second deadline, grant expiry and single-use/final ACL checks are unchanged.
 
 Contract tests must exercise these with controlled clocks/streams and atomic Redis
 boundaries. Runtime tests remain delegated through Revisor, not executed by the

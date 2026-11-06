@@ -31,7 +31,7 @@ function fixture() {
 }
 
 describe("bounded upload reservation storage", () => {
-  it("reserves a 200 MiB transfer before capability expiry and permits one bounded finalization after 30 seconds", async () => {
+  it("reserves a 2 GiB transfer before capability expiry and permits one bounded finalization after 30 seconds", async () => {
     const f = fixture(), token = await f.store.issue(f.arrival);
     const { receipt, reservation } = await f.store.begin(token, await f.store.readArrival(token), f.target, f.arrival.limits);
     expect(receipt).toMatch(/^[A-Za-z0-9_-]{43}$/);

@@ -20,7 +20,7 @@ describe("declared service operation authority", () => {
   it("makes bounded uploads opt-in for explicitly important operations", () => {
     const ordinary = { action: "media.write", risk: "important", permissions: ["service_operation.media.write"] };
     expect(serviceOperationsSchema.parse([ordinary])).toEqual([ordinary]);
-    const upload = { maximumBytes: 200 * 1024 * 1024, timeoutSeconds: 300 };
+    const upload = { maximumBytes: 2 * 1024 * 1024 * 1024, timeoutSeconds: 300 };
     expect(serviceOperationsSchema.safeParse([{ ...ordinary, upload }]).success).toBe(true);
     expect(serviceOperationsSchema.safeParse([{ ...ordinary, risk: "read", upload }]).success).toBe(false);
     expect(serviceOperationsSchema.safeParse([{ ...ordinary, upload: { ...upload, maximumBytes: upload.maximumBytes + 1 } }]).success).toBe(false);
