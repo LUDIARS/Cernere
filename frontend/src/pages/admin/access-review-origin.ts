@@ -14,7 +14,10 @@ export function registrationOriginLabel(item: OriginView): string | null {
   if (item.registrationOrigin === "venue") return "会場で登録 (自動許可)";
   if (item.registrationOrigin === "discord_vob") {
     const joined = item.vob?.guildJoinedAt ? ` / サーバー参加 ${new Date(item.vob.guildJoinedAt).toLocaleString()}` : "";
-    return `V.O.B (Discord) から登録 (自動許可)${item.vob ? ` / Discord ID ${item.vob.discordUserId}` : ""}${joined}`;
+    const kind = item.vob?.requiresApproval
+      ? `サーバー参加 ${item.vob.approvalWindowDays ?? "数"} 日以内のため許可待ち`
+      : "自動許可";
+    return `V.O.B (Discord) から登録 (${kind})${item.vob ? ` / Discord ID ${item.vob.discordUserId}` : ""}${joined}`;
   }
   return null;
 }

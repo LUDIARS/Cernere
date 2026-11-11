@@ -2,7 +2,7 @@
  * V.O.B の HTTP transport (spec/feature/vob-discord-registration.md §5)。
  *   POST /api/discord/vob/interactions  Discord interaction (Ed25519 署名必須)
  *   GET  /api/vob/shared-members        GLab 向けの一部共有 (project token + vob-roster:read)
- * 機能が無効 (設定が欠けている) なら 503。
+ * 設定は管理画面で保存した DB の 1 行 (loadVobConfig)。機能が無効 (設定が欠けている) なら 503。
  * @implements SPEC-VOB-DISCORD-REGISTRATION
  */
 import type uWS from "uWebSockets.js";
@@ -12,7 +12,10 @@ import * as schema from "../db/schema.js";
 import { AppError } from "../error.js";
 import { verifyDiscordSignature } from "../vob/discord-signature.js";
 import { fetchGuildMember } from "../vob/discord-guild.js";
-import { readVobConfig, type VobConfig } from "../vob/vob-config.js";
+import type { VobConfig } from "../vob/vob-config.js";
+import { loadVobConfig } from "../vob/discord-bot-settings-store.js";
+import { sendAdminNoticeInBackground } from "../vob/discord-admin-notice.js";
+import { devError } from "../logging/dev-logger.js";
 import { handleVobInteraction, type VobInteractionDeps } from "../vob/vob-interactions.js";
 import { listVobSharedMembers } from "../vob/vob-shared-members.js";
 import { issueVobToken } from "../vob/vob-token-store.js";
@@ -36,6 +39,8 @@ export function vobInteractionDeps(config: VobConfig): VobInteractionDeps {
     },
     fetchGuildMember: (discordUserId) => fetchGuildMember(config.botToken, config.guildId, discordUserId),
     issueToken: (input) => issueVobToken(input),
+    notifyAdmins: (notice) => sendAdminNoticeInBackground(config, notice,
+      (err) => devError("vob.admin_notice.failed", err, { result: notice.result })),
   };
 }
 
@@ -47,7 +52,7 @@ export function registerVobRoutes(app: uWS.TemplatedApp, http: HttpHelpers): voi
     try {
       const raw = await http.readBody(res, 16_384, () => { aborted = true; });
       if (aborted) return;
-      const config = readVobConfig();
+      const config = await loadVobConfig();
       if (!config) throw AppError.withCode(503, "vob_disabled", "V.O.B registration is not configured");
       if (!verifyDiscordSignature({ publicKeyHex: config.publicKeyHex, signatureHex: signature, timestamp, rawBody: raw })) {
         throw AppError.unauthorized("invalid request signature");
@@ -69,7 +74,7 @@ export function registerVobRoutes(app: uWS.TemplatedApp, http: HttpHelpers): voi
     res.onAborted(() => { aborted = true; });
     try {
       await requireExportAuth(authHeader, EXPORT_SCOPES.vobRoster);
-      const config = readVobConfig();
+      const config = await loadVobConfig();
       if (!config) throw AppError.withCode(503, "vob_disabled", "V.O.B registration is not configured");
       const members = await listVobSharedMembers(config.organizationId);
       if (!aborted) http.jsonResponse(res, "200 OK", { members }, [], NO_STORE);

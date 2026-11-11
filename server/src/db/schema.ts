@@ -5,7 +5,7 @@
  */
 
 import {
-  pgTable, text, uuid, timestamp, bigint, boolean, jsonb, integer, customType,
+  pgTable, text, uuid, timestamp, bigint, boolean, jsonb, integer, smallint, customType,
   primaryKey, uniqueIndex, index, check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -428,6 +428,21 @@ export const venueRegistrationChallenges = pgTable("venue_registration_challenge
   index("idx_venue_registration_challenges_expires").on(t.expiresAt),
 ]);
 
+/** Cernere の Discord Bot の設定 (migration 083、1 行だけ)。Bot トークンは secret-box で暗号化 */
+export const discordBotSettings = pgTable("discord_bot_settings", {
+  id: smallint("id").primaryKey().default(1),
+  enabled: boolean("enabled").notNull().default(false),
+  applicationId: text("application_id"),
+  publicKeyHex: text("public_key_hex"),
+  botTokenEnc: text("bot_token_enc"),
+  guildId: text("guild_id"),
+  organizationId: uuid("organization_id"),
+  adminChannelId: text("admin_channel_id"),
+  approvalWindowDays: integer("approval_window_days").notNull().default(7),
+  updatedByUserId: uuid("updated_by_user_id"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** V.O.B の Discord 発行登録トークン (migration 081、SPEC-VOB-DISCORD-REGISTRATION)。 */
 export const vobRegistrationTokens = pgTable("vob_registration_tokens", {
   id: uuid("id").primaryKey(),
@@ -440,6 +455,8 @@ export const vobRegistrationTokens = pgTable("vob_registration_tokens", {
   consumedAt: timestamp("consumed_at", { withTimezone: true }),
   consumedByUserId: uuid("consumed_by_user_id"),
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  /** 発行時にサーバー参加から日が浅かった (migration 083)。登録しても管理者の許可まで pending */
+  requiresApproval: boolean("requires_approval").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   index("idx_vob_registration_tokens_expires").on(t.expiresAt),

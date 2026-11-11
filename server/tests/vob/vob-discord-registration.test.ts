@@ -13,7 +13,7 @@ vi.mock("../../src/db/connection.js", () => ({ db: {} }));
 
 const schema = await import("../../src/db/schema.js");
 const { verifyDiscordSignature } = await import("../../src/vob/discord-signature.js");
-const { readVobConfig } = await import("../../src/vob/vob-config.js");
+const { parseVobConfig } = await import("../../src/vob/vob-config.js");
 const { vobTokenOutcome } = await import("../../src/vob/vob-token-state.js");
 const { handleVobInteraction, VOB_MESSAGES } = await import("../../src/vob/vob-interactions.js");
 const { applyVobSignup, precheckVobSignup, VOB_TOKEN_INVALID, VOB_REGISTRATION_REASON } = await import("../../src/vob/vob-registration-signup.js");
@@ -32,13 +32,17 @@ const FAKE_LINK_VALUE = "x".repeat(32);
 
 const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
 const PUBLIC_HEX = (publicKey.export({ format: "der", type: "spki" }) as Buffer).subarray(12).toString("hex");
-const ENV = {
-  CERNERE_VOB_DISCORD_PUBLIC_KEY: PUBLIC_HEX,
-  CERNERE_VOB_DISCORD_BOT_TOKEN: "bot-token",
-  CERNERE_VOB_DISCORD_GUILD_ID: GUILD,
-  CERNERE_VOB_ORGANIZATION_ID: ORG,
-  FRONTEND_URL: "https://cr.example/",
+const INPUT = {
+  enabled: true,
+  applicationId: "111111111111111111",
+  publicKeyHex: PUBLIC_HEX,
+  botToken: "bot-token",
+  guildId: GUILD,
+  organizationId: ORG,
+  adminChannelId: "222222222222222222",
+  approvalWindowDays: 7,
 };
+const FRONTEND = "https://cr.example/";
 
 afterEach(() => { vi.unstubAllEnvs(); store.consumed = true; });
 
@@ -64,16 +68,16 @@ describe("Discord interaction signature", () => {
 
 describe("V.O.B config", () => {
   it("is enabled only when every value is present and well-formed", () => {
-    const config = readVobConfig(ENV as NodeJS.ProcessEnv);
-    expect(config).toMatchObject({ guildId: GUILD, organizationId: ORG, frontendUrl: "https://cr.example" });
-    expect(readVobConfig({ ...ENV, CERNERE_VOB_ORGANIZATION_ID: "vob" } as NodeJS.ProcessEnv)).toBeNull();
-    expect(readVobConfig({ ...ENV, CERNERE_VOB_DISCORD_BOT_TOKEN: "" } as NodeJS.ProcessEnv)).toBeNull();
-    expect(readVobConfig({ ...ENV, CERNERE_VOB_DISCORD_PUBLIC_KEY: "abc" } as NodeJS.ProcessEnv)).toBeNull();
+    const config = parseVobConfig(INPUT, FRONTEND);
+    expect(config).toMatchObject({ guildId: GUILD, organizationId: ORG, frontendUrl: "https://cr.example", approvalWindowDays: 7 });
+    expect(parseVobConfig({ ...INPUT, organizationId: "vob" }, FRONTEND)).toBeNull();
+    expect(parseVobConfig({ ...INPUT, botToken: "" }, FRONTEND)).toBeNull();
+    expect(parseVobConfig({ ...INPUT, publicKeyHex: "abc" }, FRONTEND)).toBeNull();
   });
 });
 
 describe("V.O.B token state", () => {
-  const row = { id: "t1", discordUserId: DISCORD, discordUsername: "neko", organizationId: ORG, expiresAt: new Date(NOW.getTime() + 60_000), consumedAt: null, revokedAt: null };
+  const row = { id: "t1", discordUserId: DISCORD, discordUsername: "neko", organizationId: ORG, guildJoinedAt: null, expiresAt: new Date(NOW.getTime() + 60_000), consumedAt: null, revokedAt: null, requiresApproval: false };
   it("only an unexpired, unconsumed, unrevoked token is usable", () => {
     expect(vobTokenOutcome(row, NOW)).toMatchObject({ kind: "usable", discordUserId: DISCORD, organizationId: ORG });
     expect(vobTokenOutcome(null, NOW).kind).toBe("invalid");
@@ -84,13 +88,14 @@ describe("V.O.B token state", () => {
 });
 
 describe("/register interaction", () => {
-  const config = readVobConfig(ENV as NodeJS.ProcessEnv)!;
+  const config = parseVobConfig({ ...INPUT, approvalWindowDays: 0 }, FRONTEND)!;
   const command = (over: Record<string, unknown> = {}) => ({ type: 2, guild_id: GUILD, data: { name: "register" }, member: { user: { id: DISCORD, username: "neko" } }, ...over });
   const deps = (over: Partial<Parameters<typeof handleVobInteraction>[1]> = {}) => ({
     config,
     isDiscordLinked: vi.fn(async () => false),
     fetchGuildMember: vi.fn(async () => ({ discordUserId: DISCORD, username: "neko", joinedAt: NOW })),
     issueToken: vi.fn(async () => ({ token: FAKE_LINK_VALUE, expiresAt: new Date(Date.now() + 30 * 60_000) })),
+    notifyAdmins: vi.fn(),
     ...over,
   });
 
@@ -104,7 +109,7 @@ describe("/register interaction", () => {
     expect(reply.data?.flags).toBe(64);
     expect(reply.data?.allowed_mentions).toEqual({ parse: [] });
     expect(reply.data?.content).toContain(`https://cr.example/start?vob=${FAKE_LINK_VALUE}`);
-    expect(d.issueToken).toHaveBeenCalledWith({ discordUserId: DISCORD, discordUsername: "neko", guildJoinedAt: NOW, organizationId: ORG });
+    expect(d.issueToken).toHaveBeenCalledWith({ discordUserId: DISCORD, discordUsername: "neko", guildJoinedAt: NOW, organizationId: ORG, requiresApproval: false });
   });
 
   it("accepts the Japanese command name", async () => {
@@ -137,14 +142,10 @@ describe("/register interaction", () => {
 });
 
 describe("signup with vobToken", () => {
-  const usableRow = { id: "t1", discordUserId: DISCORD, discordUsername: "neko", organizationId: ORG, expiresAt: new Date(NOW.getTime() + 60_000), consumedAt: null, revokedAt: null };
-  const deps = (over = {}) => ({ read: async () => usableRow, stillMember: async () => true, linkedElsewhere: async () => false, ...over });
+  const usableRow = { id: "t1", discordUserId: DISCORD, discordUsername: "neko", organizationId: ORG, guildJoinedAt: null, expiresAt: new Date(NOW.getTime() + 60_000), consumedAt: null, revokedAt: null, requiresApproval: false };
+  const deps = (over = {}) => ({ loadConfig: async () => parseVobConfig(INPUT, FRONTEND), read: async () => usableRow, stillMember: async () => true, linkedElsewhere: async () => false, ...over });
 
   it("re-checks membership and linking at completion", async () => {
-    vi.stubEnv("CERNERE_VOB_DISCORD_PUBLIC_KEY", ENV.CERNERE_VOB_DISCORD_PUBLIC_KEY);
-    vi.stubEnv("CERNERE_VOB_DISCORD_BOT_TOKEN", ENV.CERNERE_VOB_DISCORD_BOT_TOKEN);
-    vi.stubEnv("CERNERE_VOB_DISCORD_GUILD_ID", GUILD);
-    vi.stubEnv("CERNERE_VOB_ORGANIZATION_ID", ORG);
     await expect(precheckVobSignup("tok", NOW, deps())).resolves.toMatchObject({ discordUserId: DISCORD, organizationId: ORG });
     await expect(precheckVobSignup("tok", NOW, deps({ stillMember: async () => false }))).rejects.toMatchObject({ statusCode: 422, code: VOB_TOKEN_INVALID });
     await expect(precheckVobSignup("tok", NOW, deps({ stillMember: async () => { throw new Error("down"); } }))).rejects.toMatchObject({ code: VOB_TOKEN_INVALID });
@@ -153,8 +154,7 @@ describe("signup with vobToken", () => {
   });
 
   it("is disabled when the configuration is missing", async () => {
-    vi.stubEnv("CERNERE_VOB_ORGANIZATION_ID", "");
-    await expect(precheckVobSignup("tok", NOW, deps())).rejects.toMatchObject({ code: VOB_TOKEN_INVALID });
+    await expect(precheckVobSignup("tok", NOW, deps({ loadConfig: async () => null }))).rejects.toMatchObject({ code: VOB_TOKEN_INVALID });
   });
 
   function recordingTx(updateError?: unknown) {
@@ -169,7 +169,7 @@ describe("signup with vobToken", () => {
     };
     return { tx: tx as never, updates, inserts };
   }
-  const plan = { tokenId: "t1", discordUserId: DISCORD, discordUsername: "neko", organizationId: ORG };
+  const plan = { tokenId: "t1", discordUserId: DISCORD, discordUsername: "neko", organizationId: ORG, guildJoinedAt: null, requiresApproval: false };
 
   it("activates the account, links Discord, joins V.O.B and records the automatic approval", async () => {
     const rec = recordingTx();

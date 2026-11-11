@@ -26,6 +26,7 @@ import { PasskeyRecoveryPage } from "./pages/PasskeyRecoveryPage";
 import { RecoveryQrPage } from "./pages/RecoveryQrPage";
 import { AccountRecoveryPage } from "./pages/admin/AccountRecoveryPage";
 import { OnsiteKiosksPage } from "./pages/admin/OnsiteKiosksPage";
+import { DiscordBotPage } from "./pages/admin/DiscordBotPage";
 import { WorkloadAuthorityPage } from "./pages/admin/WorkloadAuthorityPage";
 import { ContinueMenuPage } from "./pages/continue/ContinueMenuPage";
 import { JoinRequestPage } from "./pages/federate/JoinRequestPage";
@@ -108,6 +109,7 @@ function AppRoutes() {
         <Route path="/enterprise" element={<EnterpriseConnectionsPage />} />
         <Route path="/onsite-kiosks" element={<OnsiteKiosksPage />} />
         <Route path="/admin/workloads" element={<WorkloadAuthorityPage />} />
+        <Route path="/admin/discord-bot" element={<DiscordBotPage />} />
       </Route>
     </Routes>
   );

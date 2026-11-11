@@ -29,6 +29,7 @@ export const NAV_ADMIN: NavItem[] = [
   { path: "/enterprise", label: "Cloudflare" },
   { path: "/onsite-kiosks", label: "Kiosk" },
   { path: "/admin/workloads", label: "拠点認証" },
+  { path: "/admin/discord-bot", label: "Discord Bot" },
 ];
 
 /** server の ORG_MANAGER_ROLES (server/src/org/role-policy.ts) と揃える。 */

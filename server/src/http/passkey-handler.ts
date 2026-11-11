@@ -83,7 +83,7 @@ import { requireServiceAccess } from "../federation/subject.js";
 import { summarizeUserAgent } from "../lib/user-agent-summary.js";
 import { recordSecurityEvent } from "../notify/security-events.js";
 import { applyVenueSignup, precheckVenueSignup } from "../auth/venue-registration-signup.js";
-import { applyVobSignup, precheckVobSignup, type VobSignupPlan } from "../vob/vob-registration-signup.js";
+import { applyVobSignup, notifyVobPendingSignup, precheckVobSignup, type VobSignupPlan } from "../vob/vob-registration-signup.js";
 import { logAuthEvent } from "../logging/auth-logger.js";
 import { requireUserId } from "./bearer-user.js";
 import { RECOVERY_CODE_ACTIONS, handleRecoveryCodeRoute } from "./recovery-code-handler.js";
@@ -386,6 +386,7 @@ async function finalizePasskeySignup(
   const role = "general";
   const account: SignedUpAccount = { userId: pending.userId, role, registrationOrigin: null };
   let venuePlaceId: string | null = null;
+  let vobPending = false;
 
   await db.transaction(async (tx) => {
     await tx.insert(schema.users).values({
@@ -416,6 +417,7 @@ async function finalizePasskeySignup(
       const applied = await applyVobSignup(tx, pending.userId, vob, now);
       account.registrationOrigin = "discord_vob";
       venuePlaceId = applied.organizationId;
+      vobPending = applied.pending;
     }
     if (venue) {
       const applied = await applyVenueSignup(tx, pending.userId, venue, now);
@@ -426,7 +428,11 @@ async function finalizePasskeySignup(
   });
 
   logUserRegister(pending.userId, "(passkey-only)", "passkey", { ip: ctx.ip });
-  if (vob && venuePlaceId) logAuthEvent({ event: "user.vob_registration.joined", userId: pending.userId, placeId: venuePlaceId });
+  if (vob && venuePlaceId && vobPending) {
+    // サーバー参加から日が浅い: 組織には入れず許可待ち。確定後に管理者チャンネルへ知らせる (待たない)。
+    logAuthEvent({ event: "user.vob_registration.pending", userId: pending.userId, placeId: venuePlaceId });
+    notifyVobPendingSignup(vob);
+  } else if (vob && venuePlaceId) logAuthEvent({ event: "user.vob_registration.joined", userId: pending.userId, placeId: venuePlaceId });
   else if (venuePlaceId) logAuthEvent({ event: "user.venue_registration.joined", userId: pending.userId, placeId: venuePlaceId });
   return account;
 }

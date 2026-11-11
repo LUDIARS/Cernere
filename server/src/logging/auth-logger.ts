@@ -40,6 +40,7 @@ type AuthEventType =
   | "user.venue_registration.joined"
   // V.O.B の Discord 発行トークンによる登録。spec/feature/vob-discord-registration.md
   | "user.vob_registration.joined"
+  | "user.vob_registration.pending"
   | "admin.onsite_kiosk.registered"
   | "admin.onsite_kiosk.revoked"
   | "project.login"

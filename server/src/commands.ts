@@ -125,6 +125,11 @@ async function execute(
       const { enterpriseAdminCommand } = await import("./enterprise/admin-command.js");
       return enterpriseAdminCommand(action, payload);
     }
+    case "discord_bot": {
+      // system admin 専用。判定は requireSystemAdmin を渡してコマンド側の入口で行う。
+      const { discordBotSettingsCommand, defaultDiscordBotCommandDeps } = await import("./vob/discord-bot-settings-command.js");
+      return discordBotSettingsCommand(userId, action, payload, defaultDiscordBotCommandDeps(requireSystemAdmin));
+    }
     case "organization": return organizationCmd(userId, action, payload);
     case "member": return memberCmd(userId, action, payload);
     case "project_definition": return projectDefCmd(userId, action, payload);

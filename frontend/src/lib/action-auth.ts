@@ -45,7 +45,8 @@ export type ProtectedAction =
   | "federation.approve"
   | "federation.join"
   | "federation.set_primary"
-  | "federation.remove";
+  | "federation.remove"
+  | "discord_bot.update";
 
 interface ActionAuthBegin {
   ceremonyId: string;
@@ -122,6 +123,9 @@ export function resolveBrowserActionTarget(
     case "consent.decide":
     case "consent.revoke":
       return { action: name, resource: joinResource(p, "subjectKind", "subjectKey") };
+    // Discord Bot の設定は 1 行だけ。server の DISCORD_BOT_SETTINGS_RESOURCE と揃える。
+    case "discord_bot.update":
+      return { action: name, resource: "settings" };
     default:
       return null;
   }

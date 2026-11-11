@@ -18,6 +18,8 @@ import * as schema from "../db/schema.js";
 import { AppError } from "../error.js";
 import { recordSecurityEvent, type SecurityEventKind } from "../notify/security-events.js";
 import { accessReviewOrigin, type AccessReviewOrigin } from "./access-review-origin.js";
+import { joinVobOrganizationOnApproval } from "../vob/vob-organization-membership.js";
+import { readApprovalWindowDays } from "../vob/discord-bot-settings-store.js";
 
 export type AccessStatus = "pending" | "active" | "locked";
 
@@ -187,6 +189,8 @@ export async function decideAccess(actorUserId: string, input: DecisionInput): P
       updatedAt: now,
     }).where(eq(schema.users.id, target.id));
     if (transition.to === "locked") await revokeAccessArtifacts(tx, target.id, now);
+    // V.O.B (Discord) から許可待ちで登録した人は、許可と同時に V.O.B 組織へ入れる。
+    if (input.decision === "approve") await joinVobOrganizationOnApproval(tx, target, now);
 
     const request = (await tx.select({ id: schema.registrationRequests.id }).from(schema.registrationRequests).where(and(
       eq(schema.registrationRequests.userId, target.id),
@@ -222,8 +226,11 @@ export interface AccessReviewItem extends AccessReviewOrigin {
   createdAt: string;
   /** 会場登録で所属した組織 (organizations.id)。会場外・従来の登録は null */
   registrationPlaceId: string | null;
-  /** V.O.B の Discord 経由で登録した人の Discord ID とサーバー参加日時 (それ以外は null) */
-  vob: { discordUserId: string; guildJoinedAt: string | null } | null;
+  /**
+   * V.O.B の Discord 経由で登録した人の Discord ID とサーバー参加日時 (それ以外は null)。
+   * requiresApproval はサーバー参加から日が浅く自動許可しなかった印、approvalWindowDays はその日数 (現在の設定)。
+   */
+  vob: { discordUserId: string; guildJoinedAt: string | null; requiresApproval: boolean; approvalWindowDays: number } | null;
   request: { id: string; purpose: string; createdAt: string } | null;
 }
 
@@ -243,6 +250,7 @@ export async function listAccessReview(actorUserId: string, status: AccessStatus
     requestedAt: schema.registrationRequests.createdAt,
     vobDiscordUserId: schema.vobRegistrationTokens.discordUserId,
     vobGuildJoinedAt: schema.vobRegistrationTokens.guildJoinedAt,
+    vobRequiresApproval: schema.vobRegistrationTokens.requiresApproval,
   }).from(schema.users)
     .leftJoin(schema.vobRegistrationTokens, eq(schema.vobRegistrationTokens.consumedByUserId, schema.users.id))
     .leftJoin(schema.registrationRequests, and(
@@ -254,6 +262,7 @@ export async function listAccessReview(actorUserId: string, status: AccessStatus
       : eq(schema.users.accessStatus, status))
     .orderBy(asc(schema.users.createdAt))
     .limit(200);
+  const approvalWindowDays = rows.some((r) => r.vobRequiresApproval) ? await readApprovalWindowDays() : 0;
   return rows.map((r) => ({
     userId: r.userId,
     displayName: r.displayName,
@@ -262,7 +271,12 @@ export async function listAccessReview(actorUserId: string, status: AccessStatus
     createdAt: r.createdAt.toISOString(),
     ...accessReviewOrigin(r.registrationOrigin),
     registrationPlaceId: r.registrationPlaceId ?? null,
-    vob: r.vobDiscordUserId ? { discordUserId: r.vobDiscordUserId, guildJoinedAt: r.vobGuildJoinedAt?.toISOString() ?? null } : null,
+    vob: r.vobDiscordUserId ? {
+      discordUserId: r.vobDiscordUserId,
+      guildJoinedAt: r.vobGuildJoinedAt?.toISOString() ?? null,
+      requiresApproval: r.vobRequiresApproval ?? false,
+      approvalWindowDays,
+    } : null,
     request: r.requestId ? { id: r.requestId, purpose: r.purpose ?? "", createdAt: r.requestedAt!.toISOString() } : null,
   }));
 }

@@ -26,6 +26,8 @@ export interface IssueVobTokenInput {
   discordUsername: string | null;
   guildJoinedAt: Date | null;
   organizationId: string;
+  /** サーバー参加から日が浅い (approval-window.ts)。このトークンでの登録は許可待ちになる */
+  requiresApproval: boolean;
 }
 
 export interface IssuedVobToken { token: string; expiresAt: Date }
@@ -47,6 +49,7 @@ export async function issueVobToken(input: IssueVobTokenInput, now = new Date(),
       discordUsername: input.discordUsername,
       guildJoinedAt: input.guildJoinedAt,
       organizationId: input.organizationId,
+      requiresApproval: input.requiresApproval,
       expiresAt,
       createdAt: now,
     });
@@ -60,9 +63,11 @@ export async function readVobToken(token: string, database: Pick<Database, "sele
     discordUserId: vobRegistrationTokens.discordUserId,
     discordUsername: vobRegistrationTokens.discordUsername,
     organizationId: vobRegistrationTokens.organizationId,
+    guildJoinedAt: vobRegistrationTokens.guildJoinedAt,
     expiresAt: vobRegistrationTokens.expiresAt,
     consumedAt: vobRegistrationTokens.consumedAt,
     revokedAt: vobRegistrationTokens.revokedAt,
+    requiresApproval: vobRegistrationTokens.requiresApproval,
   }).from(vobRegistrationTokens).where(eq(vobRegistrationTokens.tokenHash, hashVobToken(token))).limit(1))[0];
   return row ?? null;
 }

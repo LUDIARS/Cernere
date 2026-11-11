@@ -23,8 +23,11 @@ export interface AccessReviewItem {
   createdAt: string;
   registrationOrigin: RegistrationOrigin;
   registrationPlaceId: string | null;
-  /** V.O.B の Discord 経由の登録 (Discord ID とサーバー参加日時) */
-  vob?: { discordUserId: string; guildJoinedAt: string | null } | null;
+  /**
+   * V.O.B の Discord 経由の登録 (Discord ID とサーバー参加日時)。
+   * requiresApproval: サーバー参加 approvalWindowDays 日以内だったため自動許可せず許可待ちにした
+   */
+  vob?: { discordUserId: string; guildJoinedAt: string | null; requiresApproval?: boolean; approvalWindowDays?: number } | null;
   /** 会場外からの登録 (例外) */
   exception: boolean;
   /** 既定にする操作。会場外からの登録は拒否 */

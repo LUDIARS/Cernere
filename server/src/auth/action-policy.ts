@@ -52,7 +52,12 @@ export const protectedActionSchema = z.enum([
   "federation.join",
   "federation.set_primary",
   "federation.remove",
+  // Cernere の Discord Bot の設定 (spec/feature/vob-discord-registration.md §4)。1 行だけなので resource は固定。
+  "discord_bot.update",
 ]);
+
+/** discord_bot.update の resource。設定は 1 行だけなので固定文字列に束ねる。 */
+export const DISCORD_BOT_SETTINGS_RESOURCE = "settings";
 
 export type ProtectedAction = z.infer<typeof protectedActionSchema>;
 
@@ -97,6 +102,7 @@ const protectedWsActions = new Set<ProtectedAction>([
   "consent.decide",
   "consent.revoke",
   "oidc_client.update_consent",
+  "discord_bot.update",
 ]);
 
 export function resolveWsActionTarget(
@@ -162,6 +168,8 @@ export function resolveWsActionTarget(
       return target(parsedAction.data, requiredString(p, "projectKey"));
     case "edge_idp.purge_user":
       return target(parsedAction.data, requiredString(p, "userId"));
+    case "discord_bot.update":
+      return target(parsedAction.data, DISCORD_BOT_SETTINGS_RESOURCE);
     default:
       return null;
   }
