@@ -25,7 +25,7 @@ interface SessionResponse {
   user: {
     id: string; displayName: string | null; role: string; needsProfile?: boolean;
     /** venue = 会場で登録 (許可済み) / outside_venue = 会場外 (例外、許可待ち) */
-    registrationOrigin?: "venue" | "outside_venue" | null;
+    registrationOrigin?: "venue" | "outside_venue" | "discord_vob" | null;
   };
   accessToken: string;
   refreshToken: string;
@@ -65,12 +65,14 @@ function storeSession(data: SessionResponse): void {
  * venueChallengeId は会場確認済みのときだけ付ける (spec/feature/venue-network-registration.md §6)。
  * 無効なら 422 (code venue_challenge_invalid) で、アカウントは作られない。
  */
-export async function signupWithPasskey(options: { venueChallengeId?: string } = {}): Promise<SessionResponse> {
+export async function signupWithPasskey(options: { venueChallengeId?: string; vobToken?: string } = {}): Promise<SessionResponse> {
   const begin = await post<{ signupId: string; options: PublicKeyCredentialCreationOptionsJSON }>("signup-begin", {});
   const response = await startRegistration({ optionsJSON: begin.options });
   const data = await post<SessionResponse>("signup-finish", {
     signupId: begin.signupId, response,
     ...(options.venueChallengeId ? { venueChallengeId: options.venueChallengeId } : {}),
+    // V.O.B の Discord 発行リンク (spec/feature/vob-discord-registration.md)。無効なら 422 vob_token_invalid。
+    ...(options.vobToken ? { vobToken: options.vobToken } : {}),
   });
   rememberRegisteredPasskeyCookie();
   storeSession(data);

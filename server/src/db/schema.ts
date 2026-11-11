@@ -428,6 +428,51 @@ export const venueRegistrationChallenges = pgTable("venue_registration_challenge
   index("idx_venue_registration_challenges_expires").on(t.expiresAt),
 ]);
 
+/** V.O.B の Discord 発行登録トークン (migration 081、SPEC-VOB-DISCORD-REGISTRATION)。 */
+export const vobRegistrationTokens = pgTable("vob_registration_tokens", {
+  id: uuid("id").primaryKey(),
+  tokenHash: text("token_hash").notNull().unique(),
+  discordUserId: text("discord_user_id").notNull(),
+  discordUsername: text("discord_username"),
+  guildJoinedAt: timestamp("guild_joined_at", { withTimezone: true }),
+  organizationId: uuid("organization_id").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  consumedByUserId: uuid("consumed_by_user_id"),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("idx_vob_registration_tokens_expires").on(t.expiresAt),
+  index("idx_vob_registration_tokens_discord").on(t.discordUserId),
+  index("idx_vob_registration_tokens_consumer").on(t.consumedByUserId),
+]);
+
+/** GLab の在籍区分と GitHub 反映 (migration 082、SPEC-GLAB-MEMBERSHIP-GITHUB)。 */
+export const glabMemberships = pgTable("glab_memberships", {
+  organizationId: uuid("organization_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  status: text("status").notNull(),
+  joinedAt: timestamp("joined_at", { withTimezone: true }).notNull(),
+  alumniAt: timestamp("alumni_at", { withTimezone: true }),
+  githubSyncedAt: timestamp("github_synced_at", { withTimezone: true }),
+  githubSyncError: text("github_sync_error"),
+  updatedBy: uuid("updated_by"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.organizationId, t.userId] }),
+  index("idx_glab_memberships_user").on(t.userId),
+]);
+
+/** webhook で受けた GLab のリポジトリと自動付与の記録 (migration 082)。 */
+export const glabGithubRepos = pgTable("glab_github_repos", {
+  repoFullName: text("repo_full_name").primaryKey(),
+  creatorGithubId: bigint("creator_github_id", { mode: "number" }),
+  creatorUserId: uuid("creator_user_id"),
+  creatorStatus: text("creator_status"),
+  grantedAt: timestamp("granted_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const organizationMembers = pgTable("organization_members", {
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),

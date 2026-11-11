@@ -11,6 +11,8 @@ import { handleAuthRoute } from "./http/auth-handler.js";
 import { registerMfaRoutes } from "./http/mfa-routes.js";
 import { registerOnsiteRoutes } from "./http/onsite-routes.js";
 import { registerVenueRegistrationRoutes } from "./http/venue-registration-routes.js";
+import { registerVobRoutes } from "./http/vob-routes.js";
+import { registerGlabGithubRoutes } from "./http/glab-github-routes.js";
 import { registerWorkloadRoutes } from './http/workload-routes.js';
 import { handlePasskeyRoute } from "./http/passkey-handler.js";
 import { handleDeviceRoute } from "./http/device-handler.js";
@@ -302,6 +304,8 @@ export function createApp() {
   registerMfaRoutes(app, { readBody, jsonResponse, getRemoteIp, classifyError });
   registerOnsiteRoutes(app, { readBody, jsonResponse, getRemoteIp, classifyError });
   registerVenueRegistrationRoutes(app, { readBody, jsonResponse, getRemoteIp, classifyError });
+  registerVobRoutes(app, { readBody, jsonResponse, classifyError });
+  registerGlabGithubRoutes(app, { readBody, jsonResponse, classifyError });
 
   // ── CORS preflight ──────────────────────────────────────
   app.options("/*", (res) => {

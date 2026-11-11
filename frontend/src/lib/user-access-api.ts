@@ -13,7 +13,7 @@ export interface MyAccess {
 }
 
 /** 登録経路 (会場ネットワーク限定の新規登録)。null は本機能以前の登録。 */
-export type RegistrationOrigin = "venue" | "outside_venue" | null;
+export type RegistrationOrigin = "venue" | "outside_venue" | "discord_vob" | null;
 
 export interface AccessReviewItem {
   userId: string;
@@ -23,6 +23,8 @@ export interface AccessReviewItem {
   createdAt: string;
   registrationOrigin: RegistrationOrigin;
   registrationPlaceId: string | null;
+  /** V.O.B の Discord 経由の登録 (Discord ID とサーバー参加日時) */
+  vob?: { discordUserId: string; guildJoinedAt: string | null } | null;
   /** 会場外からの登録 (例外) */
   exception: boolean;
   /** 既定にする操作。会場外からの登録は拒否 */

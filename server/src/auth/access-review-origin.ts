@@ -5,12 +5,13 @@ import augurContract_1e688a57 from './contracts/access-review-origin.contract.js
  *
  *   outside_venue  会場外からの登録 (例外)。拒否 (locked) を既定の操作にする
  *   venue          会場 LAN 経由で自動許可された。一覧から後で停止できる
+ *   discord_vob    V.O.B の Discord 発行トークンで自動許可された (SPEC-VOB-DISCORD-REGISTRATION)。後で停止できる
  *   null           本機能以前の登録 (従来どおり)
  * 未知の値は例外 (会場外) 側に倒す。
  * @implements SPEC-VENUE-REGISTRATION
  */
 
-export type RegistrationOrigin = "venue" | "outside_venue" | null;
+export type RegistrationOrigin = "venue" | "outside_venue" | "discord_vob" | null;
 
 export interface AccessReviewOrigin {
   registrationOrigin: RegistrationOrigin;
@@ -23,6 +24,7 @@ export interface AccessReviewOrigin {
 export function accessReviewOrigin(value: unknown): AccessReviewOrigin {
   if (value === null || value === undefined) return { registrationOrigin: null, exception: false, defaultDecision: null };
   if (value === "venue") return { registrationOrigin: "venue", exception: false, defaultDecision: null };
+  if (value === "discord_vob") return { registrationOrigin: "discord_vob", exception: false, defaultDecision: null };
   return { registrationOrigin: "outside_venue", exception: true, defaultDecision: "reject" };
 }
 // @ts-expect-error augur-inject

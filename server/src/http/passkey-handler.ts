@@ -83,6 +83,7 @@ import { requireServiceAccess } from "../federation/subject.js";
 import { summarizeUserAgent } from "../lib/user-agent-summary.js";
 import { recordSecurityEvent } from "../notify/security-events.js";
 import { applyVenueSignup, precheckVenueSignup } from "../auth/venue-registration-signup.js";
+import { applyVobSignup, precheckVobSignup, type VobSignupPlan } from "../vob/vob-registration-signup.js";
 import { logAuthEvent } from "../logging/auth-logger.js";
 import { requireUserId } from "./bearer-user.js";
 import { RECOVERY_CODE_ACTIONS, handleRecoveryCodeRoute } from "./recovery-code-handler.js";
@@ -138,6 +139,11 @@ const signupFinishSchema = z.object({
    * 指定なしは会場外 (例外、pending)。指定ありで無効なら 422 venue_challenge_invalid で何も作らない。
    */
   venueChallengeId: z.string().uuid().optional(),
+  /**
+   * V.O.B の Discord 発行トークン (spec/feature/vob-discord-registration.md §1)。
+   * 会場確認・引き継ぎとは同時に指定できない。無効なら 422 vob_token_invalid で何も作らない。
+   */
+  vobToken: z.string().min(20).max(200).regex(/^[A-Za-z0-9_-]+$/).optional(),
 }).strict();
 
 /** 連携で作ったアカウントの表示名の出所。名前は主のものを使うので名前入力へ送らない。 */
@@ -324,7 +330,7 @@ interface SignedUpAccount {
   userId: string;
   role: string;
   /** venue = 会場 LAN 経由 (active) / outside_venue = 会場外 (pending) / null = 引き継ぎで作った端末用アカウント */
-  registrationOrigin: "venue" | "outside_venue" | null;
+  registrationOrigin: "venue" | "outside_venue" | "discord_vob" | null;
 }
 
 /** ユーザ作成トランザクション内で追加処理 (refresh session の挿入等) を差し込む口。 */
@@ -349,8 +355,12 @@ async function finalizePasskeySignup(
   if (parsed.data.federation && parsed.data.venueChallengeId) {
     throw AppError.badRequest("A sign-in transfer does not take a venue check");
   }
-  // ceremony を消費する前に無効な会場確認を弾く (端末は指定を外して例外経路を選び直せる)。
-  const venue = parsed.data.federation ? null : await precheckVenueSignup(parsed.data.venueChallengeId);
+  if (parsed.data.vobToken && (parsed.data.federation || parsed.data.venueChallengeId)) {
+    throw AppError.badRequest("A V.O.B registration link does not take a venue check or a sign-in transfer");
+  }
+  // ceremony を消費する前に無効な V.O.B トークン・会場確認を弾く (端末は指定を外して選び直せる)。
+  const vob: VobSignupPlan | null = parsed.data.vobToken ? await precheckVobSignup(parsed.data.vobToken) : null;
+  const venue = parsed.data.federation || vob ? null : await precheckVenueSignup(parsed.data.venueChallengeId);
 
   // GETDEL により、成功・失敗を問わず ceremony は一度だけ検証できる。
   const rawPending = await redis.getdel(signupKey(parsed.data.signupId));
@@ -402,6 +412,11 @@ async function finalizePasskeySignup(
       aaguid: info.aaguid,
       createdAt: now,
     });
+    if (vob) {
+      const applied = await applyVobSignup(tx, pending.userId, vob, now);
+      account.registrationOrigin = "discord_vob";
+      venuePlaceId = applied.organizationId;
+    }
     if (venue) {
       const applied = await applyVenueSignup(tx, pending.userId, venue, now);
       account.registrationOrigin = applied.origin;
@@ -411,7 +426,8 @@ async function finalizePasskeySignup(
   });
 
   logUserRegister(pending.userId, "(passkey-only)", "passkey", { ip: ctx.ip });
-  if (venuePlaceId) logAuthEvent({ event: "user.venue_registration.joined", userId: pending.userId, placeId: venuePlaceId });
+  if (vob && venuePlaceId) logAuthEvent({ event: "user.vob_registration.joined", userId: pending.userId, placeId: venuePlaceId });
+  else if (venuePlaceId) logAuthEvent({ event: "user.venue_registration.joined", userId: pending.userId, placeId: venuePlaceId });
   return account;
 }
 

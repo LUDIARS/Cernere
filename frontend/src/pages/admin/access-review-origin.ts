@@ -7,11 +7,15 @@ import type { AccessDecision, AccessReviewItem } from "../../lib/user-access-api
 
 interface ReviewAction { decision: AccessDecision; label: string; reason: string }
 
-type OriginView = Pick<AccessReviewItem, "registrationOrigin" | "exception">;
+type OriginView = Pick<AccessReviewItem, "registrationOrigin" | "exception"> & Partial<Pick<AccessReviewItem, "vob">>;
 
 export function registrationOriginLabel(item: OriginView): string | null {
   if (item.exception || item.registrationOrigin === "outside_venue") return "会場外からの登録 (例外)";
   if (item.registrationOrigin === "venue") return "会場で登録 (自動許可)";
+  if (item.registrationOrigin === "discord_vob") {
+    const joined = item.vob?.guildJoinedAt ? ` / サーバー参加 ${new Date(item.vob.guildJoinedAt).toLocaleString()}` : "";
+    return `V.O.B (Discord) から登録 (自動許可)${item.vob ? ` / Discord ID ${item.vob.discordUserId}` : ""}${joined}`;
+  }
   return null;
 }
 

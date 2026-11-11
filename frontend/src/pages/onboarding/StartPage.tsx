@@ -7,6 +7,9 @@
  *
  * 画面を開くと会場のネットワークを確かめる (spec/feature/venue-network-registration.md §2)。確認できたら
  * 会場の組織のメンバー (許可済み) として作る。会場の外では Wi-Fi の案内を出し、例外として続けることもできる。
+ *
+ * V.O.B の Discord で発行したリンク (?vob=) から来たときは会場確認をせず、そのトークンで V.O.B のメンバーとして作る
+ * (spec/feature/vob-discord-registration.md)。
  */
 
 import { useState } from "react";
@@ -17,8 +20,10 @@ import { onboardingUrl, readReturnPath } from "./onboarding-return";
 import { venueChallengeForSignup } from "../../lib/venue-check";
 import { useVenueCheck } from "./useVenueCheck";
 import { VenueCheckPanel } from "./VenueCheckPanel";
+import { readVobToken } from "./vob-link";
 
 const VENUE_CHALLENGE_INVALID = "venue_challenge_invalid";
+const VOB_TOKEN_INVALID = "vob_token_invalid";
 
 export function StartPage() {
   const returnTo = readReturnPath(window.location.search);
@@ -26,10 +31,11 @@ export function StartPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [outsideVenue, setOutsideVenue] = useState(false);
-  const venue = useVenueCheck();
-  const venueChallengeId = venueChallengeForSignup(venue.state);
-  // 会場確認済みか、会場外 (例外) を選んだときだけ作れる。
-  const valid = normalizeDisplayName(name) !== null && (venueChallengeId !== undefined || outsideVenue);
+  const [vobToken] = useState(() => readVobToken(window.location.search));
+  const venue = useVenueCheck(vobToken === null);
+  const venueChallengeId = vobToken ? undefined : venueChallengeForSignup(venue.state);
+  // V.O.B のリンクから来たか、会場確認済みか、会場外 (例外) を選んだときだけ作れる。
+  const valid = normalizeDisplayName(name) !== null && (vobToken !== null || venueChallengeId !== undefined || outsideVenue);
 
   const start = async () => {
     const normalized = normalizeDisplayName(name);
@@ -38,12 +44,14 @@ export function StartPage() {
     setError("");
     savePendingDisplayName(normalized);
     try {
-      await signupWithPasskey({ venueChallengeId });
+      await signupWithPasskey(vobToken ? { vobToken } : { venueChallengeId });
       // AuthContext に新しいセッションを読ませるため、全体を読み直して遷移する。
       window.location.assign(onboardingUrl(returnTo));
     } catch (e) {
       const err = e as Error & { code?: string };
-      if (err.code === VENUE_CHALLENGE_INVALID) {
+      if (err.code === VOB_TOKEN_INVALID) {
+        setError("登録リンクが使えなくなりました (期限切れ・使用済み・サーバー未参加・連携済み)。アカウントは作られていません。V.O.B の Discord でもう一度 /登録 を実行してください。");
+      } else if (err.code === VENUE_CHALLENGE_INVALID) {
         // 確認の期限切れ・使用済み。アカウントは作られていないので、確かめ直すか例外で続ける。
         setError("会場の確認が使えなくなりました。アカウントは作られていません。もう一度確かめるか、会場の外から続けてください。");
         venue.retry();
@@ -63,8 +71,15 @@ export function StartPage() {
   return (
     <main style={pageStyle}>
       <h1 style={{ fontSize: "1.4rem", fontWeight: 700 }}>Cernere をはじめる</h1>
-      <VenueCheckPanel state={venue.state} outsideVenue={outsideVenue} busy={busy}
-        onRetry={venue.retry} onOutsideVenueChange={setOutsideVenue} />
+      {vobToken ? (
+        <div style={panelStyle}>
+          <h2 style={panelTitleStyle}>V.O.B からの登録</h2>
+          <p style={bodyTextStyle}>Discord で受け取ったリンクで登録します。V.O.B のメンバーとして作られます。</p>
+        </div>
+      ) : (
+        <VenueCheckPanel state={venue.state} outsideVenue={outsideVenue} busy={busy}
+          onRetry={venue.retry} onOutsideVenueChange={setOutsideVenue} />
+      )}
       <div style={panelStyle}>
         <h2 style={panelTitleStyle}>👤 名前</h2>
         <p style={bodyTextStyle}>Cernere とつながるサービスに表示される名前です。あとから変えられます。</p>

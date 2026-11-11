@@ -65,7 +65,7 @@ export function AccessPage() {
         <div style={panelStyle}>
           <h2 style={panelTitleStyle}>管理者の許可を待っています</h2>
           <p style={bodyTextStyle}>
-            許可されるまでは、自分の <Link to="/profile">プロフィール</Link>・<Link to="/security">パスキーとリカバリー QR・通知</Link>・
+            許可されるまでは、自分の <Link to="/profile">自分のデータ</Link>・<Link to="/devices">端末とログイン (パスキーとリカバリー QR・通知)</Link>・
             <Link to="/devices">端末</Link> だけが使えます。他のサービスへのログインや、他の人の情報の閲覧は、許可された後にできるようになります。
           </p>
           {openRequest ? (

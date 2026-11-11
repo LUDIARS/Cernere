@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { wsClient } from "../lib/ws-client";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { GlabMembershipPanel } from "./organizations/GlabMembershipPanel";
+import { ORG_ROLE_OPTIONS, assignableRoleValues, canEditMember, canManageMembers } from "./organizations/org-roles";
 
 interface Organization {
   id: string;
@@ -10,6 +12,8 @@ interface Organization {
   description: string;
   createdBy: string;
   createdAt: string;
+  /** organization list が添える自分のロール */
+  myRole?: string;
 }
 
 interface Member {
@@ -59,6 +63,11 @@ export function OrganizationsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Array<{ id: string; login: string; displayName: string; avatarUrl: string | null; email: string | null }>>([]);
   const [searching, setSearching] = useState(false);
+
+  // 選択中の組織での自分の立場 (system admin は全ロールを扱える)
+  const actor = isAdmin ? "system_admin" : selectedOrg?.myRole;
+  const assignable = assignableRoleValues(actor);
+  const roleOptions = ORG_ROLE_OPTIONS.filter((o) => assignable.includes(o.value));
 
   // Fetch orgs
   const fetchOrgs = useCallback(async () => {
@@ -309,10 +318,10 @@ export function OrganizationsPage() {
               {/* Members */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
                 <h3 style={{ fontSize: "1rem", fontWeight: 600, margin: 0 }}>Members ({members.length})</h3>
-                <button onClick={() => setShowAddMember(!showAddMember)} style={{
+                {canManageMembers(actor) && <button onClick={() => setShowAddMember(!showAddMember)} style={{
                   fontSize: "0.8rem", padding: "0.25rem 0.5rem", borderRadius: "4px",
                   border: "1px solid var(--border)", background: "transparent", color: "var(--text)", cursor: "pointer",
-                }}>{showAddMember ? "Cancel" : "+ Add Member"}</button>
+                }}>{showAddMember ? "Cancel" : "+ Add Member"}</button>}
               </div>
 
               {/* Add member form */}
@@ -361,9 +370,7 @@ export function OrganizationsPage() {
                     <div>
                       <label style={labelStyle}>Role</label>
                       <select value={addRole} onChange={(e) => setAddRole(e.target.value)} style={{ ...inputStyle, width: 130 }}>
-                        <option value="member">Member</option>
-                        <option value="maintainer">Maintainer</option>
-                        <option value="admin">Admin</option>
+                        {roleOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                       </select>
                     </div>
                     <button className="primary" onClick={handleAddMember} disabled={!addUserId} style={{ height: 34 }}>追加</button>
@@ -377,6 +384,7 @@ export function OrganizationsPage() {
                 {members.map((m) => {
                   const online = presence.get(m.userId) ?? false;
                   const isMe = m.userId === user?.id;
+                  const editable = canEditMember(actor, m.role, isMe);
                   return (
                     <div key={m.userId} style={{
                       display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -404,15 +412,13 @@ export function OrganizationsPage() {
                         <select
                           value={m.role}
                           onChange={(e) => handleRoleChange(m.userId, e.target.value)}
-                          disabled={isMe || m.role === "owner"}
+                          disabled={!editable}
                           style={{ fontSize: "0.75rem", padding: "0.15rem 0.4rem", borderRadius: "3px", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)" }}
                         >
-                          <option value="owner">Owner</option>
-                          <option value="admin">Admin</option>
-                          <option value="maintainer">Maintainer</option>
-                          <option value="member">Member</option>
+                          {ORG_ROLE_OPTIONS.filter((o) => o.value === m.role || (editable && assignable.includes(o.value)))
+                            .map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                         </select>
-                        {!isMe && m.role !== "owner" && (
+                        {editable && (
                           <button onClick={() => handleRemoveMember(m.userId)} style={{
                             fontSize: "0.7rem", padding: "0.15rem 0.4rem", borderRadius: "3px",
                             border: "1px solid var(--red)", background: "transparent", color: "var(--red)", cursor: "pointer",
@@ -423,6 +429,7 @@ export function OrganizationsPage() {
                   );
                 })}
               </div>
+              {canManageMembers(actor) && <GlabMembershipPanel organizationId={selectedOrg.id} />}
             </div>
           ) : (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text-muted)" }}>

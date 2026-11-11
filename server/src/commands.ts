@@ -30,6 +30,7 @@ import { loginAlertCommand } from "./notify/login-alert-command.js";
 import { securityEventCommand } from "./notify/security-event-command.js";
 import { recoveryCommand } from "./auth/recovery-command.js";
 import { hqTestAccountDeletionEnabled } from "./auth/hq-test-account-deletion.js";
+import { canManageOrg, decideAdd, decideRemove, decideRoleChange, type RoleDecision } from "./org/role-policy.js";
 
 /**
  * Layer 2-3 を要求しないコマンド (主に「現在ログイン中であることを必須としない」もの).
@@ -128,6 +129,25 @@ async function execute(
     case "member": return memberCmd(userId, action, payload);
     case "project_definition": return projectDefCmd(userId, action, payload);
     case "org_project": return orgProjectCmd(userId, action, payload);
+    case "glab_membership": {
+      // GLab の入会・OB 切り替えと GitHub チーム管理 (spec/feature/glab-membership-github.md)。
+      const { glabMembershipCommand } = await import("./glab/glab-membership-command.js");
+      const { glabRuntime } = await import("./glab/glab-github-runtime.js");
+      const store = await import("./glab/membership-store.js");
+      const { config: glabConfig, client } = glabRuntime();
+      return glabMembershipCommand({
+        config: glabConfig,
+        client,
+        actorRole: async (actorId, orgId) => {
+          if (await requireSystemAdmin(actorId).then(() => true, () => false)) return "system_admin";
+          return memberRole(orgId, actorId);
+        },
+        list: store.listGlabMembers,
+        save: store.saveGlabMembership,
+        recordSync: store.recordGithubSync,
+        now: () => new Date(),
+      }, userId, action, payload);
+    }
     case "user": return userCmd(userId, action, payload);
     case "profile": return profileCmd(userId, action, payload);
     case "managed_project": return managedProjectCmd(userId, action, payload);
@@ -157,13 +177,15 @@ async function execute(
 async function organizationCmd(userId: string, action: string, p?: Record<string, unknown>): Promise<unknown> {
   switch (action) {
     case "list": {
-      const memberships = await db.select({ orgId: schema.organizationMembers.organizationId })
+      const memberships = await db.select({ orgId: schema.organizationMembers.organizationId, role: schema.organizationMembers.role })
         .from(schema.organizationMembers).where(eq(schema.organizationMembers.userId, userId));
       const orgIds = memberships.map((m) => m.orgId);
       if (orgIds.length === 0) return [];
       const orgs = await db.select().from(schema.organizations)
         .where(inArray(schema.organizations.id, orgIds));
-      return orgs;
+      // 自分のロールを添える (UI がリーダー以上にだけ「組織」メニューを出すため)。
+      const roleByOrg = new Map(memberships.map((m) => [m.orgId, m.role]));
+      return orgs.map((org) => ({ ...org, myRole: roleByOrg.get(org.id) ?? "member" }));
     }
     case "get": {
       const orgId = requireStr(p, "organizationId");
@@ -223,7 +245,7 @@ async function memberCmd(userId: string, action: string, p?: Record<string, unkn
       const orgId = requireStr(p, "organizationId");
       const viewerRole = await requireOrgVisibility(userId, orgId);
       // メールアドレスはメンバー管理ができる人にだけ見せる (一般メンバーには出さない)。
-      const showEmail = viewerRole === "system_admin" || ORG_MANAGER_ROLES.includes(viewerRole);
+      const showEmail = canManageOrg(viewerRole);
       const members = await db.select({
         userId: schema.organizationMembers.userId,
         role: schema.organizationMembers.role,
@@ -241,7 +263,7 @@ async function memberCmd(userId: string, action: string, p?: Record<string, unkn
       const orgId = requireStr(p, "organizationId");
       const targetUserId = requireStr(p, "userId");
       const role = optStr(p, "role") ?? "member";
-      await requireOrgRole(userId, orgId, ["admin", "owner", "maintainer"]);
+      enforce(decideAdd(await orgActor(userId, orgId), role));
       await db.insert(schema.organizationMembers).values({
         organizationId: orgId, userId: targetUserId, role, joinedAt: new Date(),
       });
@@ -251,7 +273,10 @@ async function memberCmd(userId: string, action: string, p?: Record<string, unkn
       const orgId = requireStr(p, "organizationId");
       const targetUserId = requireStr(p, "userId");
       const role = requireStr(p, "role");
-      await requireOrgRole(userId, orgId, ["admin", "owner", "maintainer"]);
+      const actor = await orgActor(userId, orgId);
+      const current = await memberRole(orgId, targetUserId);
+      if (!current) throw AppError.notFound("Member not found");
+      enforce(decideRoleChange(actor, current, role));
       await db.update(schema.organizationMembers).set({ role })
         .where(and(
           eq(schema.organizationMembers.organizationId, orgId),
@@ -263,7 +288,9 @@ async function memberCmd(userId: string, action: string, p?: Record<string, unkn
       const orgId = requireStr(p, "organizationId");
       const targetUserId = requireStr(p, "userId");
       if (targetUserId !== userId) {
-        await requireOrgRole(userId, orgId, ["admin", "owner", "maintainer"]);
+        const current = await memberRole(orgId, targetUserId);
+        if (!current) throw AppError.notFound("Member not found");
+        enforce(decideRemove(await orgActor(userId, orgId), current));
       }
       await revokeFaceConsents(targetUserId, orgId, "left_facility");
       await db.delete(schema.organizationMembers)
@@ -341,7 +368,7 @@ async function orgProjectCmd(userId: string, action: string, p?: Record<string, 
     }
     case "enable": {
       const orgId = requireStr(p, "organizationId");
-      await requireOrgRole(userId, orgId, ["admin", "owner", "maintainer"]);
+      await requireOrgManager(userId, orgId);
       await db.insert(schema.organizationProjects).values({
         organizationId: orgId,
         projectDefinitionId: requireStr(p, "projectDefinitionId"),
@@ -350,7 +377,7 @@ async function orgProjectCmd(userId: string, action: string, p?: Record<string, 
     }
     case "disable": {
       const orgId = requireStr(p, "organizationId");
-      await requireOrgRole(userId, orgId, ["admin", "owner", "maintainer"]);
+      await requireOrgManager(userId, orgId);
       await db.delete(schema.organizationProjects).where(and(
         eq(schema.organizationProjects.organizationId, orgId),
         eq(schema.organizationProjects.projectDefinitionId, requireStr(p, "projectDefinitionId")),
@@ -739,7 +766,6 @@ async function requireSystemAdmin(userId: string): Promise<void> {
   if (rows[0]?.role !== "admin") throw AppError.forbidden("System admin required");
 }
 
-const ORG_MANAGER_ROLES = ["admin", "owner", "maintainer"];
 
 /**
  * 組織の中身 (詳細・在席・メンバー・有効プロジェクト) はメンバーか system admin にだけ見せる。
@@ -758,14 +784,28 @@ async function requireOrgVisibility(userId: string, orgId: string): Promise<stri
   return "system_admin";
 }
 
-async function requireOrgRole(userId: string, orgId: string, allowed: string[]): Promise<void> {
+async function memberRole(orgId: string, userId: string): Promise<string | null> {
   const rows = await db.select({ role: schema.organizationMembers.role })
     .from(schema.organizationMembers)
     .where(and(
       eq(schema.organizationMembers.organizationId, orgId),
       eq(schema.organizationMembers.userId, userId),
     )).limit(1);
-  if (rows.length === 0 || !allowed.includes(rows[0].role)) {
-    throw AppError.forbidden("Insufficient organization permissions");
-  }
+  return rows[0]?.role ?? null;
+}
+
+/** 組織に対する呼び出し元の立場。メンバーでも system admin でもなければ 403。 */
+async function orgActor(userId: string, orgId: string): Promise<string> {
+  const role = await memberRole(orgId, userId);
+  if (role) return role;
+  await requireSystemAdmin(userId).catch(() => { throw AppError.forbidden("Insufficient organization permissions"); });
+  return "system_admin";
+}
+
+async function requireOrgManager(userId: string, orgId: string): Promise<void> {
+  if (!canManageOrg(await orgActor(userId, orgId))) throw AppError.forbidden("Insufficient organization permissions");
+}
+
+function enforce(decision: RoleDecision): void {
+  if (!decision.ok) throw AppError.forbidden(decision.reason);
 }

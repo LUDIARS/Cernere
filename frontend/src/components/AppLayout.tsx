@@ -1,23 +1,9 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { useIsOrgManager } from "../hooks/useIsOrgManager";
+import { navRowsFor, type NavItem } from "./nav-items";
 
-const navItems = [
-  { path: "/", label: "Dashboard" },
-  { path: "/organizations", label: "Organizations" },
-  { path: "/profile", label: "Profile" },
-  { path: "/devices", label: "端末" },
-  { path: "/security", label: "セキュリティ" },
-  { path: "/settings/federation", label: "アカウントの連携" },
-  { path: "/access", label: "利用許可" },
-  { path: "/admin/access", label: "審査", adminOnly: true },
-  { path: "/account-recovery", label: "回復", adminOnly: true },
-  { path: "/data-optout", label: "サービスの権限" },
-  { path: "/oidc-clients", label: "OIDC", adminOnly: true },
-  { path: "/enterprise", label: "Cloudflare", adminOnly: true },
-  { path: "/onsite-kiosks", label: "Kiosk", adminOnly: true },
-  { path: "/admin/workloads", label: "拠点認証", adminOnly: true },
-];
 
 export function AppLayout() {
   const { user, wsConnected, logout } = useAuth();
@@ -25,7 +11,8 @@ export function AppLayout() {
   const isMobile = useIsMobile();
 
   const isAdmin = user?.role === "admin";
-  const visibleNavItems = navItems.filter((item) => !item.adminOnly || isAdmin);
+  const isOrgManager = useIsOrgManager(wsConnected && !isAdmin);
+  const rows = navRowsFor({ isAdmin, isOrgManager });
 
   const statusBadge = (
     <span style={{
@@ -50,14 +37,15 @@ export function AppLayout() {
     }}>Logout</button>
   );
 
-  const navMenu = (
-    <div style={{
+  const navRow = (items: NavItem[], label?: string) => (
+    <div aria-label={label} style={{
       display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.8rem",
       flexWrap: "wrap",
     }}>
-      {visibleNavItems.map((item) => (
+      {label && <span style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>{label}</span>}
+      {items.map((item) => (
         <Link
-          key={item.path}
+          key={item.path + item.label}
           to={item.path}
           style={{
             padding: "0.25rem 0.6rem",
@@ -71,6 +59,13 @@ export function AppLayout() {
           {item.label}
         </Link>
       ))}
+    </div>
+  );
+
+  const navMenu = (
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+      {navRow(rows.general)}
+      {rows.admin.length > 0 && navRow(rows.admin, "管理者")}
     </div>
   );
 

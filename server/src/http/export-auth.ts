@@ -29,6 +29,8 @@ export const EXPORT_SCOPES = {
   identityRoster: "identity-roster:read",
   projectSchema: "project-schema:read",
   kioskCodeExchange: "auth-code:kiosk-exchange",
+  /** V.O.B → GLab の一部共有 (SPEC-VOB-DISCORD-REGISTRATION) */
+  vobRoster: "vob-roster:read",
 } as const;
 export type ExportScope = typeof EXPORT_SCOPES[keyof typeof EXPORT_SCOPES];
 

@@ -222,6 +222,8 @@ export interface AccessReviewItem extends AccessReviewOrigin {
   createdAt: string;
   /** 会場登録で所属した組織 (organizations.id)。会場外・従来の登録は null */
   registrationPlaceId: string | null;
+  /** V.O.B の Discord 経由で登録した人の Discord ID とサーバー参加日時 (それ以外は null) */
+  vob: { discordUserId: string; guildJoinedAt: string | null } | null;
   request: { id: string; purpose: string; createdAt: string } | null;
 }
 
@@ -239,7 +241,10 @@ export async function listAccessReview(actorUserId: string, status: AccessStatus
     requestId: schema.registrationRequests.id,
     purpose: schema.registrationRequests.purpose,
     requestedAt: schema.registrationRequests.createdAt,
+    vobDiscordUserId: schema.vobRegistrationTokens.discordUserId,
+    vobGuildJoinedAt: schema.vobRegistrationTokens.guildJoinedAt,
   }).from(schema.users)
+    .leftJoin(schema.vobRegistrationTokens, eq(schema.vobRegistrationTokens.consumedByUserId, schema.users.id))
     .leftJoin(schema.registrationRequests, and(
       eq(schema.registrationRequests.userId, schema.users.id),
       eq(schema.registrationRequests.state, "open"),
@@ -257,6 +262,7 @@ export async function listAccessReview(actorUserId: string, status: AccessStatus
     createdAt: r.createdAt.toISOString(),
     ...accessReviewOrigin(r.registrationOrigin),
     registrationPlaceId: r.registrationPlaceId ?? null,
+    vob: r.vobDiscordUserId ? { discordUserId: r.vobDiscordUserId, guildJoinedAt: r.vobGuildJoinedAt?.toISOString() ?? null } : null,
     request: r.requestId ? { id: r.requestId, purpose: r.purpose ?? "", createdAt: r.requestedAt!.toISOString() } : null,
   }));
 }

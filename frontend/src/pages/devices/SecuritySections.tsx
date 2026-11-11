@@ -1,20 +1,17 @@
 /**
- * セキュリティ (SPEC-LOGIN-ALERT の「心当たりがない」入口)。
+ * 「端末とログイン」の安全まわりの部品 (SPEC-LOGIN-ALERT の「心当たりがない」入口)。
  *
- * 出来事の履歴、保留中のリカバリー QR 回復の取消、リカバリー QR の作り直し、別端末の追加、
- * 通知先をまとめて扱う。全端末ログアウトではパスキーは消えないので、心当たりの無い
- * パスキーはプロフィールのパスキー一覧から削除するよう案内する。
+ * - RecoveryPanels: 保留中のリカバリー QR 回復の取消と、リカバリー QR の作り直し。
+ * - SecurityEventsPanel: 最近の出来事。全端末ログアウトではパスキーは消えないので、
+ *   心当たりの無いパスキーは同じ画面のパスキー一覧から削除するよう案内する。
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { AlertTargetsPanel } from "../components/security/AlertTargetsPanel";
-import { PairingPanel } from "../components/security/PairingPanel";
-import { RecoveryCodePanel } from "../components/security/RecoveryCodePanel";
-import { bodyTextStyle, messageStyle, pageStyle, panelStyle, panelTitleStyle, primaryButton } from "../components/security/panel-styles";
-import { useAuth } from "../contexts/AuthContext";
-import { recoveryCode, type RecoveryStatus } from "../lib/passkey-account-api";
-import { wsClient } from "../lib/ws-client";
+import { RecoveryCodePanel } from "../../components/security/RecoveryCodePanel";
+import { bodyTextStyle, messageStyle, panelStyle, panelTitleStyle, primaryButton } from "../../components/security/panel-styles";
+import { useAuth } from "../../contexts/AuthContext";
+import { recoveryCode, type RecoveryStatus } from "../../lib/passkey-account-api";
+import { wsClient } from "../../lib/ws-client";
 
 interface SecurityEvent {
   id: string;
@@ -42,22 +39,14 @@ const EVENT_LABEL: Record<string, string> = {
   "federation.primary_changed": "連携の主の切り替え",
 };
 
-export function SecurityPage() {
-  const { wsConnected } = useAuth();
-  const [events, setEvents] = useState<SecurityEvent[]>([]);
+export function RecoveryPanels() {
   const [recovery, setRecovery] = useState<RecoveryStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
 
-  const loadEvents = useCallback(async () => {
-    const data = await wsClient.sendCommand<{ events: SecurityEvent[] }>("security_event", "list", {});
-    setEvents(data.events);
-  }, []);
   const loadRecovery = useCallback(async () => setRecovery(await recoveryCode.status()), []);
-
   useEffect(() => { void loadRecovery().catch((e) => setError((e as Error).message)); }, [loadRecovery]);
-  useEffect(() => { if (wsConnected) void loadEvents().catch((e) => setError((e as Error).message)); }, [wsConnected, loadEvents]);
 
   const cancelRecovery = async () => {
     if (!recovery?.pendingRecovery) return;
@@ -75,11 +64,9 @@ export function SecurityPage() {
   };
 
   return (
-    <main style={pageStyle}>
-      <h1 style={{ fontSize: "1.4rem", fontWeight: 700 }}>セキュリティ</h1>
+    <>
       {error && <div role="alert" style={messageStyle(true)}>{error}</div>}
       {info && <div style={messageStyle(false)}>{info}</div>}
-
       {recovery?.pendingRecovery && (
         <div style={{ ...panelStyle, borderColor: "var(--red)" }}>
           <h2 style={{ ...panelTitleStyle, color: "var(--red)" }}>⚠ リカバリー QR による回復が進行中です</h2>
@@ -92,33 +79,45 @@ export function SecurityPage() {
           <button type="button" onClick={() => { void cancelRecovery(); }} disabled={busy} style={primaryButton(busy)}>回復を取り消す</button>
         </div>
       )}
-
-      <div style={panelStyle}>
-        <h2 style={panelTitleStyle}>最近の出来事</h2>
-        <p style={bodyTextStyle}>
-          心当たりのないものがあれば、<Link to="/devices">端末の一覧</Link> から該当する端末を失効させ、
-          <Link to="/profile">プロフィール</Link> のパスキー一覧から覚えのないパスキーを削除してください (全端末ログアウトだけではパスキーは消えません)。
-        </p>
-        {events.length === 0 && <p style={bodyTextStyle}>まだありません。</p>}
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-          {events.map((event) => (
-            <li key={event.id} style={{ borderTop: "1px solid var(--border)", padding: "0.5rem 0", fontSize: "0.85rem" }}>
-              <span style={{ color: event.severity === "critical" ? "var(--red)" : "var(--text)" }}>
-                {EVENT_LABEL[event.kind] ?? event.kind}
-              </span>
-              <span style={{ color: "var(--text-muted)" }}>
-                {" "}— {new Date(event.createdAt).toLocaleString()}{event.detail.device ? ` / ${event.detail.device}` : ""}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
-
       {recovery && (
         <RecoveryCodePanel withoutProof={recovery.canIssueWithoutProof} hasActiveCode={recovery.hasActiveCode} onSaved={() => { void loadRecovery(); }} />
       )}
-      <PairingPanel />
-      <AlertTargetsPanel />
-    </main>
+    </>
+  );
+}
+
+export function SecurityEventsPanel() {
+  const { wsConnected } = useAuth();
+  const [events, setEvents] = useState<SecurityEvent[]>([]);
+  const [error, setError] = useState("");
+
+  const loadEvents = useCallback(async () => {
+    const data = await wsClient.sendCommand<{ events: SecurityEvent[] }>("security_event", "list", {});
+    setEvents(data.events);
+  }, []);
+  useEffect(() => { if (wsConnected) void loadEvents().catch((e) => setError((e as Error).message)); }, [wsConnected, loadEvents]);
+
+  return (
+    <div style={panelStyle}>
+      <h2 style={panelTitleStyle}>最近の出来事</h2>
+      <p style={bodyTextStyle}>
+        心当たりのないものがあれば、この画面の「ログイン中の端末」から該当する端末を失効させ、
+        パスキーの一覧から覚えのないパスキーを削除してください (全端末ログアウトだけではパスキーは消えません)。
+      </p>
+      {error && <div role="alert" style={messageStyle(true)}>{error}</div>}
+      {events.length === 0 && !error && <p style={bodyTextStyle}>まだありません。</p>}
+      <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+        {events.map((event) => (
+          <li key={event.id} style={{ borderTop: "1px solid var(--border)", padding: "0.5rem 0", fontSize: "0.85rem" }}>
+            <span style={{ color: event.severity === "critical" ? "var(--red)" : "var(--text)" }}>
+              {EVENT_LABEL[event.kind] ?? event.kind}
+            </span>
+            <span style={{ color: "var(--text-muted)" }}>
+              {" "}— {new Date(event.createdAt).toLocaleString()}{event.detail.device ? ` / ${event.detail.device}` : ""}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

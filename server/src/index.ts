@@ -13,6 +13,7 @@ import { initOidcKeys } from "./auth/oidc-keys.js";
 import { startOutboxWorker } from "./notify/outbox-worker.js";
 import { startAccessRequestDigest } from "./notify/access-request-digest.js";
 import { startVenueChallengeSweeper } from "./auth/venue-challenge-sweeper.js";
+import { startVobTokenSweeper } from "./vob/vob-token-sweeper.js";
 import { purgeExpiredFaceConsents } from "./identity/face-consent-store.js";
 import { purgeExpiredFaceRevocations } from "./identity/face-revocation-store.js";
 
@@ -66,6 +67,8 @@ async function main() {
   startAccessRequestDigest();
   // 期限切れの会場確認 challenge を 1 日で回収する (spec/feature/venue-network-registration.md §5)。
   startVenueChallengeSweeper();
+  // 期限切れの V.O.B 登録トークンを 1 日で回収する (spec/feature/vob-discord-registration.md §2)。
+  startVobTokenSweeper();
 }
 
 // 1 リクエストの取りこぼした reject でプロセスごと落とさない (Node の既定は unhandledRejection で終了)。

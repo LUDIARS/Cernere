@@ -97,7 +97,7 @@ export function PairingPanel({ title = "📱 別の端末を追加する", onAdd
     try {
       await pairing.reject(status.pairingId);
       setStatus({ ...status, state: "rejected" });
-      setInfo("拒否しました。心当たりがなければ /security で出来事を確認してください。");
+      setInfo("拒否しました。心当たりがなければ「端末とログイン」の最近の出来事を確認してください。");
     } catch (e) {
       setError((e as Error).message);
     } finally {

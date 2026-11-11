@@ -6,11 +6,13 @@ import { venueRegistrationApi } from "../../lib/venue-registration-api";
 
 const sleep = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
 
-export function useVenueCheck(): { state: VenueCheckState; retry: () => void } {
+/** enabled=false (V.O.B の Discord リンクから来たとき) は会場確認をしない。 */
+export function useVenueCheck(enabled = true): { state: VenueCheckState; retry: () => void } {
   const [state, setState] = useState<VenueCheckState>({ phase: "starting", challengeId: null });
   const [round, setRound] = useState(0);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     void runVenueCheck({
       start: () => venueRegistrationApi.start(),
@@ -20,7 +22,7 @@ export function useVenueCheck(): { state: VenueCheckState; retry: () => void } {
       now: () => Date.now(),
     }, setState, () => cancelled);
     return () => { cancelled = true; };
-  }, [round]);
+  }, [round, enabled]);
 
   const retry = useCallback(() => setRound((n) => n + 1), []);
   return { state, retry };

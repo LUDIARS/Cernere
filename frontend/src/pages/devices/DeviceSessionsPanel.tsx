@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { useAuth } from "../contexts/AuthContext";
-import { wsClient } from "../lib/ws-client";
+import { useAuth } from "../../contexts/AuthContext";
+import { wsClient } from "../../lib/ws-client";
+import { panelStyle, panelTitleStyle } from "../../components/security/panel-styles";
 
 interface Device { deviceId: string; clientKind: string; createdAt: string; lastUsedAt: string; expiresAt: string }
 
-export function DeviceSessionsPage() {
+/** ログイン中の端末 (「端末とログイン」の下段)。 */
+export function DeviceSessionsPanel() {
   const { wsConnected, logout } = useAuth();
   const [devices, setDevices] = useState<Device[]>([]);
   const [enabled, setEnabled] = useState(true);
@@ -29,8 +31,8 @@ export function DeviceSessionsPage() {
     } catch (e) { setError(e instanceof Error ? e.message : "端末の失効に失敗しました。"); }
     finally { setBusy(false); }
   }
-  return <section>
-    <h1>ログイン中の端末</h1>
+  return <section style={panelStyle}>
+    <h2 style={panelTitleStyle}>ログイン中の端末</h2>
     <p>パスキーでログインを保持しているブラウザです。端末を失効してもパスキーは削除されません。</p>
     {error && <p role="alert">{error}</p>}
     {!enabled && <p>端末のログイン保持は現在有効になっていません。通常のログインは引き続き利用できます。</p>}
