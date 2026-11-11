@@ -9,3 +9,10 @@ Existing consent evaluation is combined with current opt-out records; later refu
 Unconfirmed declarations and revoked service access never become an implicit grant.
 This operation is read-only. Changing consent continues to require the user's Cernere permission screen.
 The downstream application must derive userId from its authenticated request, never from browser input.
+
+Each permission also carries `state`: `granted` (allowed now), `denied` (the user opted out; re-login never asks again,
+only the user's Cernere permission screen `/data-optout` restores it) or `undecided` (not an explicit refusal:
+pending consent, unconfirmed declaration or revoked service access).
+`optedOutModules` lists every `user_data` module the user opted out of for this project, including modules that are
+not declared as consent permissions, so the service can explain why its columns read back empty.
+Both fields are additive; `allowed` keeps its meaning for existing callers.
