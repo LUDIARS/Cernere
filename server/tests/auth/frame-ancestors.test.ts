@@ -25,7 +25,10 @@ describe("Composite frame ancestors", () => {
   it("only emits exact configured origins", () => {
     expect(frameAncestorsPolicy(["https://glab.example", "https://glab.example"])).toBe("frame-ancestors 'self' https://glab.example");
   });
-  it.each([undefined, [], ["*"], ["null"], ["https://glab.example/path"], ["https://glab.example; script-src *"], ["data:text/html,x"]])("rejects malformed policy %j", value => {
+  it("allows only same-origin framing when no origin is registered", () => {
+    expect(frameAncestorsPolicy([])).toBe("frame-ancestors 'self'");
+  });
+  it.each([undefined, null, {}, ["*"], ["null"], ["https://glab.example/path"], ["https://glab.example; script-src *"], ["data:text/html,x"]])("rejects malformed policy %j", value => {
     expect(() => frameAncestorsPolicy(value)).toThrow();
   });
   it("installs the same boundary in development and preview", () => {

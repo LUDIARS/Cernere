@@ -8,7 +8,9 @@
  * @implements SPEC-EMBEDDED-COMPOSITE-001
  */
 export function frameAncestorsPolicy(origins) {
-  if (!Array.isArray(origins) || origins.length === 0) throw new Error("Missing embedding allowlist");
+  if (!Array.isArray(origins)) throw new Error("Missing embedding allowlist");
+  // 許可先が1件も無い環境でも Cernere 自身の画面 (/login など) は出す。他オリジンへの埋め込みは許さない。
+  if (origins.length === 0) return "frame-ancestors 'self'";
   const sources = origins.map((origin) => {
     if (typeof origin !== "string") throw new Error("Invalid embedding origin");
     const url = new URL(origin);
