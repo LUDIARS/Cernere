@@ -18,7 +18,7 @@ export function RevocationForm({ disabled, send }: WorkloadFormProps) {
     <p>登録時の結果に記載された ID を指定します。拠点自体を失効させると、その拠点の認証が停止します。</p>
     <form onSubmit={submit}><fieldset disabled={disabled}>
       <label>対象<select value={action} onChange={e => { setAction(e.target.value); setId(""); }}>
-        <option value="revoke_principal">拠点</option><option value="revoke_key">公開鍵</option><option value="revoke_grant">監視の許可</option>
+        <option value="revoke_principal">拠点</option><option value="revoke_key">公開鍵</option><option value="revoke_grant">許可（監視・操作・取得）</option>
       </select></label>
       <label>失効させる ID<input required maxLength={128} value={id} onChange={e => setId(e.target.value)} /></label>
       <button type="submit">内容を確認して失効</button>

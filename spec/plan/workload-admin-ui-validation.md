@@ -25,3 +25,11 @@ The existing lockfile declares install hooks for esbuild 0.28.2 and optional fse
 PR3527 initial leakage gate identified the static private-key framing in the rejection fixture, not deployed credentials. The fixture now uses Node's standard Ed25519 generator at test runtime and exports ephemeral PKCS8 solely as the rejected input. The no-transmission assertion is unchanged; no scanner exclusion was added. Function-level spec links were added for the enrollment/receipt/command boundaries. This follow-up has not executed tests locally; re-review is required.
 
 After review/merge, build and deploy the frontend through the production owner. Verify the admin navigation and ordinary-user denial. The UI alone does not configure workload TLS, per-site keys/Vault bindings, or establish Ex mesh connectivity. These remain separate formal-auth rollout requirements. A completed older authority task must not stand in for completion of this follow-up.
+
+## Follow-up 2026-11-16 — operation / hq-config / vault / bundle grants
+
+`/admin/workloads` gained a third form (`ServiceGrantForm`) for non-monitor grants (Actio `actio:2a8fab9d-51e1-4b31-a011-b14d2f3a751b`). Actions come from a fixed list; the resource prefix is fixed per action and only the service code / `owner/name` is typed. Vault keys are entered one per line and checked for env-name shape, duplicates and the 500-key limit; keys are sent only for vault. Input building lives in the pure module `grant-input.ts`; submission reuses `useWorkloadCommand` unchanged (confirmation, serialization, 30 s uncertain stop, no retry). Cc event grants (`ai-spawn` / `ai-inject`) stay out of the UI.
+
+Server `parseWorkloadGrant` already enforced the per-action resource shape and vault-only keys; the only change is the key limit (128 → 500) to match the Excubitor `GrantSchema` / mesh spec. Duplicate keys sent directly over WS are still deduplicated server-side.
+
+Tests added (`server/tests/frontend/workload-service-grant.test.ts`, `server/tests/workload/input.test.ts`, `server/tests/workload/admin.test.ts`) were not executed in this session (not requested). No grants were registered, no migration applied, no restart or deployment.

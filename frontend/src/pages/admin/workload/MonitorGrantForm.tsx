@@ -15,7 +15,7 @@ export function MonitorGrantForm({ disabled, send }: WorkloadFormProps) {
   };
   return <section>
     <h3>2. 監視を許可</h3>
-    <p>登録済みの拠点を指定します。許可は片方向です。サービス操作や秘密情報の取得は許可しません。</p>
+    <p>登録済みの拠点を指定します。許可は片方向です。サービス操作や秘密情報の取得は「3. 操作・取得を許可」で別に許可します。</p>
     <form onSubmit={submit}><fieldset disabled={disabled}>
       <label>監視する拠点 ID<input required maxLength={128} pattern="[a-z0-9][a-z0-9._\-]*/[a-z0-9][a-z0-9._\-]*" value={subject} onChange={e => setSubject(e.target.value)} /></label>
       <label>監視される拠点 ID<input required maxLength={128} pattern="[a-z0-9][a-z0-9._\-]*/[a-z0-9][a-z0-9._\-]*" value={audience} onChange={e => setAudience(e.target.value)} /></label>

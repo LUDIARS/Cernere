@@ -10,12 +10,18 @@
 ### 管理画面（workload-admin-ui）
 
 `/admin/workloads` は既存 AuthProvider / AppLayout 内の system admin 専用画面。
-登録、監視 grant、失効を別フォームとし、既存 `workload_authority` WS とサーバー側の live session/admin 検査を再利用する。
+登録、監視 grant、操作・取得 grant、失効を別フォームとし、既存 `workload_authority` WS とサーバー側の live session/admin 検査を再利用する。
 登録は拠点で生成した Ed25519 SPKI 公開鍵だけを入力し、秘密鍵生成・取得を行わない。
 登録 credentials は React の一時 state にだけ保持し、閉じる・離脱・ログアウトで破棄する。Query cache、Web Storage、URL、ログ、ファイルへ保存しない。
-登録済み ID と key/grant ID は運用者が記録する。monitor grant は subject/audience を明示し、resource を `node:<audience>` に固定する。操作実行/Vault への grant はこの画面では扱わない。
+登録済み ID と key/grant ID は運用者が記録する。monitor grant は subject/audience を明示し、resource を `node:<audience>` に固定する。
+操作・取得 grant も subject/audience を明示し、action は固定一覧から選ぶだけとする (自由入力なし)。resource は action ごとの形に固定し、運用者は code / owner/name だけを入力する。接頭辞は画面が付ける。
+`operation:<update|restart|deploy|reflect|start|stop|bootstrap|data-export|data-import>` は `service:<code>` (`service:excubitor` を含む)、`hq-config` は `service:concordia` 固定 (入力なし)、`vault` は `service:<code>` と keys、`bundle` は `repository:<owner/name>`。
+code は `^[A-Za-z0-9][A-Za-z0-9._-]*$`、owner/name は `^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$` に限り、wildcard・追加のセグメント・空白を拒否する。
+vault の keys は 1 行に 1 つ入力し、env 名 `^[A-Za-z_][A-Za-z0-9_]*$` (128 文字まで)・1〜500 個・重複なしを画面で検査する。keys は vault だけで送る。
+Cc の event grant (`ai-spawn` / `ai-inject`) はこの画面では扱わない。値の範囲は Excubitor `GrantSchema` (`src/federation/security/claims.ts`) の受け入れ範囲に収める。
+サーバーの `grant` は画面と独立に同じ組合せ (action ごとの resource 形式、vault 以外の keys 拒否、vault の keys 必須・500 個まで) を検査し、画面の検査に依存しない。
 送信前に内容を確認し、同時送信を排他する。通信エラー・30秒応答なしでは成否不明として画面を停止し、監査記録を照合するまで再送しない。遅延成功応答は表示できる。操作は自動再試行しない。
-受入は一般ユーザーの拒否、接続なしの送信拒否、monitor grant の固定範囲、秘密情報の破棄、重複送信抑止、成否不明の扱いを確認する。
+受入は一般ユーザーの拒否、接続なしの送信拒否、monitor grant の固定範囲、操作・取得 grant の action ごとの resource 固定と不正な code・keys の拒否、vault 以外の keys 拒否、秘密情報の破棄、重複送信抑止、成否不明の扱いを確認する。
 
 `workload_principals` は site/workload 形式の不変 ID と独立 client ID、bcrypt secret hash、失効時刻を持つ。`workload_keys` は主体につき一つの登録済み Ed25519 SPKI 公開鍵と失効時刻を持つ。秘密鍵は受け取らない。鍵交換は旧主体を失効して新しい ID を登録する方式とし、失効済み行は再有効化しない。
 

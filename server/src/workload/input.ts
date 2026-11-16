@@ -10,7 +10,7 @@ const registration = z.object({ id: workloadId, publicKeyPem: z.string().max(409
 const grant = z.object({
   subject: workloadId, audience: workloadId,
   action: z.string().min(1).max(128), resource: z.string().min(1).max(256),
-  keys: z.array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).max(128)).min(1).max(128).optional(),
+  keys: z.array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).max(128)).min(1).max(500).optional(),
 }).strict();
 export type WorkloadRegistration = z.infer<typeof registration>;
 export type WorkloadGrantInput = z.infer<typeof grant>;

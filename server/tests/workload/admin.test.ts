@@ -47,6 +47,18 @@ describe('workload administrator enrollment', () => {
     await expect(dispatch('admin', 'session', 'workload_authority', 'register', {})).rejects.toMatchObject({ statusCode: 403 });
     expect(fake.inserts.every(row => row.table === operationLogs)).toBe(true);
   });
+  it('rejects non-admin users for operation / vault grants', async () => {
+    for (const payload of [
+      { subject: 'site-a/excubitor', audience: 'site-b/excubitor', action: 'operation:restart', resource: 'service:excubitor' },
+      { subject: 'site-a/excubitor', audience: 'site-b/excubitor', action: 'vault', resource: 'service:concordia', keys: ['KEY_A'] },
+    ]) {
+      fake.inserts.length = 0;
+      fake.queueSelect([{ status: 'active' }]);
+      fake.queueSelect([{ role: 'general' }]);
+      await expect(dispatch('admin', 'session', 'workload_authority', 'grant', payload)).rejects.toMatchObject({ statusCode: 403 });
+      expect(fake.inserts.every(row => row.table === operationLogs)).toBe(true);
+    }
+  });
   it('stores only a hash and registered public key, redacts admin audit input', async () => {
     fake.queueSelect([{ status: 'active' }]);
     fake.queueSelect([{ role: 'admin' }]);
