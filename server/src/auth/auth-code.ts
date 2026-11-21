@@ -4,6 +4,7 @@ import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { redis } from "../redis.js";
 import { requireServiceAccess } from "../federation/subject.js";
+import { resolveEffectiveRole } from "../federation/effective-role.js";
 import { enforceServiceConsent, type ServiceConsentRequest } from "../consent/gate.js";
 import { assertUserSessionCurrent, currentUserSessionState, type UserSessionState } from "./user-session-state.js";
 import { AuthCodeStore, type AuthCodeBinding } from "./auth-code-store.js";
@@ -50,6 +51,7 @@ export async function issueAuthCodeForUserId(userId: string, service: ServiceCon
   if (source && source.sub !== userId) throw new Error("Auth code source mismatch");
   const user = (await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1))[0];
   if (!user) return null;
-  return issueAuthCode({ userId, displayName: user.displayName ?? "", email: user.email, role: user.role ?? "general",
+  const role = await resolveEffectiveRole(userId, user.role ?? "general");
+  return issueAuthCode({ userId, displayName: user.displayName ?? "", email: user.email, role,
     authentication: source?.authentication, authEpoch: source?.authEpoch, deviceId: source?.deviceId, service });
 }

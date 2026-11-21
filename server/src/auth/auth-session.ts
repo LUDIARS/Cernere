@@ -15,7 +15,8 @@
 
 import crypto from "node:crypto";
 import { redis } from "../redis.js";
-import { assertUserSessionCurrent, currentUserSessionState } from "./user-session-state.js";
+import { AppError } from "../error.js";
+import { assertUserSessionCurrent, currentUserSessionState, issuedRoleMatchesCurrent } from "./user-session-state.js";
 import type { AuthenticationEvidence } from "../lib/authentication-evidence.js";
 
 export type AuthSessionState =
@@ -69,12 +70,14 @@ export async function createAuthSession(
 ): Promise<AuthSession> {
   const ticket = crypto.randomUUID();
   const current = await currentUserSessionState(user.userId);
-  await assertUserSessionCurrent({ ...current, sub: user.userId, role: user.role,
+  // 呼び出し側は自分の users.role を渡すことがある。保存する role は有効な role (account-federation §3.1)。
+  if (!await issuedRoleMatchesCurrent(user.userId, user.role, current.role)) throw AppError.unauthorized("User session was revoked");
+  await assertUserSessionCurrent({ ...current, sub: user.userId,
     authEpoch: user.authEpoch ?? current.authEpoch, mfaRevision: user.mfaRevision ?? current.mfaRevision, authentication: user.authentication });
   const session: AuthSession = {
     ticket,
     state: "pending_device",
-    user: { ...user, authEpoch: current.authEpoch, mfaRevision: current.mfaRevision },
+    user: { ...user, role: current.role, authEpoch: current.authEpoch, mfaRevision: current.mfaRevision },
     ip: ctx.ip,
     userAgent: ctx.userAgent,
     projectKey: ctx.projectKey,

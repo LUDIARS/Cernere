@@ -10,10 +10,8 @@
  * @implements SPEC-MFA-ONSITE
  */
 
-import { eq } from "drizzle-orm";
-import { db } from "../db/connection.js";
-import { users } from "../db/schema.js";
 import { AppError } from "../error.js";
+import { isEffectiveAdmin } from "../federation/effective-role.js";
 import { logAuthEvent } from "../logging/auth-logger.js";
 import { lanIdSchema, parseOnsiteKioskInput } from "../auth/onsite-kiosk-input.js";
 import { listOnsiteKiosks, registerOnsiteKiosk, revokeOnsiteKiosk, type OnsiteKioskRow } from "../auth/onsite-kiosk-registry.js";
@@ -32,8 +30,7 @@ function view(row: OnsiteKioskRow): OnsiteKioskView {
 
 async function requireAdminUser(authHeader: string): Promise<string> {
   const userId = await currentUser(authHeader);
-  const rows = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
-  if (rows[0]?.role !== "admin") throw AppError.forbidden("Admin role is required");
+  if (!await isEffectiveAdmin(userId)) throw AppError.forbidden("Admin role is required");
   return userId;
 }
 

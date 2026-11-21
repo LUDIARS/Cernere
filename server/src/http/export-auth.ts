@@ -2,7 +2,7 @@
  * REST export エンドポイント共通の認可チェック。
  *
  * admin 限定 (CONTRACTS.md §2)。 2 経路を許す:
- *   1. user accessToken で `users.role === 'admin'` のユーザ (運用者の手動取得)
+ *   1. user accessToken で有効な role が admin のユーザ (運用者の手動取得。連携していれば主の role)
  *   2. project token (= service-to-service Bearer。 Ostiarius の CERNERE_SERVICE_TOKEN 等) で、
  *      呼出元 project が要求 scope を service_scopes に宣言しているもの (管理者所有、毎回 DB で判定)
  * どちらも満たさなければ 401/403。
@@ -20,6 +20,7 @@ import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { verifyToken, verifyProjectToken, extractBearerToken } from "../auth/jwt.js";
 import { AppError } from "../error.js";
+import { isEffectiveAdmin } from "../federation/effective-role.js";
 import { isCurrentProjectCredential } from "../project/project-credential-state.js";
 import { declaredServiceScopes } from "../project/service-scopes.js";
 
@@ -70,8 +71,7 @@ export async function requireExportAuth(authHeader: string, scope: ExportScope):
   // (1) user: accessToken を検証し、 DB の role が admin かを確認
   const payload = await verifyToken(token);
   if (typeof payload.sub !== "string") throw AppError.unauthorized("Unauthorized: invalid bearer token");
-  const rows = await db.select({ role: schema.users.role })
-    .from(schema.users).where(eq(schema.users.id, payload.sub)).limit(1);
-  if (rows[0]?.role !== "admin") throw AppError.forbidden("Forbidden: admin role is required");
+  // 連携していれば主の role で決める (account-federation §3.1)。
+  if (!await isEffectiveAdmin(payload.sub)) throw AppError.forbidden("Forbidden: admin role is required");
   return { kind: "admin", subject: payload.sub };
 }

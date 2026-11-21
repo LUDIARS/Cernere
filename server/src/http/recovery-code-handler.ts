@@ -180,7 +180,7 @@ async function confirmFinish(body: Record<string, unknown>, ctx: RecoveryCtx): P
 
   // 新しいキーの assertion で確定したので、そのままログインさせる (epoch は確定で進んでいる)。
   const authentication = completedAuthentication("passkey", user.mfaRevision, verifiedAt);
-  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(user.id, user.role, authentication, { authEpoch: user.authEpoch });
+  const { accessToken, refreshToken, authEpoch, role } = await generateTokenPair(user.id, user.role, authentication, { authEpoch: user.authEpoch });
   await db.insert(schema.refreshSessions).values({
     authEpoch,
     authentication,
@@ -197,7 +197,7 @@ async function confirmFinish(body: Record<string, unknown>, ctx: RecoveryCtx): P
         id: user.id,
         login: user.login,
         displayName: user.displayName || null,
-        role: user.role,
+        role,
         needsProfile: user.displayNameSource === "unset",
       },
       accessToken,

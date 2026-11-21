@@ -20,6 +20,7 @@ import {
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { AppError } from "../error.js";
+import { isEffectiveAdmin, resolveEffectiveRole } from "../federation/effective-role.js";
 import { redis } from "../redis.js";
 import { summarizeUserAgent } from "../lib/user-agent-summary.js";
 import { recordSecurityEvent } from "../notify/security-events.js";
@@ -74,7 +75,8 @@ export async function beginRecoveryWithCode(code: string): Promise<{
   const row = await findActiveRecoveryCode(code, key);
   if (!row) throw AppError.unauthorized(INVALID_CODE);
   const user = (await db.select().from(schema.users).where(eq(schema.users.id, row.userId)).limit(1))[0];
-  if (!user || user.role === "admin" || row.generation !== user.recoveryGeneration) {
+  // 連携して主が admin のアカウントも admin として扱い、QR での自己回復を許さない (account-federation §3.1)。
+  if (!user || await resolveEffectiveRole(user.id, user.role) === "admin" || row.generation !== user.recoveryGeneration) {
     throw AppError.unauthorized(INVALID_CODE);
   }
   if (await hasOpenRequest(user.id)) await resolveRecoveryConflict(user.id, row.id);
@@ -158,7 +160,7 @@ export async function finishRecoveryWithCode(input: {
     const user = (await tx.select().from(schema.users).where(eq(schema.users.id, ceremony.userId)).for("update"))[0];
     const code = (await tx.select().from(schema.userRecoveryCodes)
       .where(eq(schema.userRecoveryCodes.id, ceremony.recoveryCodeId)).for("update"))[0];
-    if (!user || !code || user.role === "admin" || code.userId !== user.id || code.usedAt || code.revokedAt
+    if (!user || !code || await resolveEffectiveRole(user.id, user.role, tx) === "admin" || code.userId !== user.id || code.usedAt || code.revokedAt
       || user.authEpoch !== ceremony.authEpoch || user.recoveryGeneration !== ceremony.recoveryGeneration
       || code.generation !== user.recoveryGeneration || await hasOpenRequest(user.id, tx)) {
       // 並行 finish は users の行ロックで直列化されるので、ここに来るのは期限・世代の変化か競合。
@@ -291,7 +293,7 @@ export async function confirmRecovery(confirmId: string, response: Authenticatio
     }
     const code = (await tx.select().from(schema.userRecoveryCodes)
       .where(eq(schema.userRecoveryCodes.id, request.recoveryCodeId)).for("update"))[0];
-    if (user.role === "admin" || user.authEpoch !== request.authEpoch || user.recoveryGeneration !== request.recoveryGeneration
+    if (await resolveEffectiveRole(user.id, user.role, tx) === "admin" || user.authEpoch !== request.authEpoch || user.recoveryGeneration !== request.recoveryGeneration
       || !code || code.usedAt || code.revokedAt) {
       throw AppError.unauthorized("Recovery authorization changed; start again");
     }
@@ -344,9 +346,7 @@ export async function completedRecoveryWithin(userId: string, withinMs: number):
  */
 export async function freezeRecoveryRequest(actorUserId: string, targetUserId: string): Promise<{ frozen: boolean }> {
   return db.transaction(async (tx) => {
-    const actor = (await tx.select({ role: schema.users.role }).from(schema.users)
-      .where(eq(schema.users.id, actorUserId)).limit(1))[0];
-    if (actor?.role !== "admin") throw AppError.forbidden("Administrator required");
+    if (!await isEffectiveAdmin(actorUserId, tx)) throw AppError.forbidden("Administrator required");
     await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, targetUserId)).for("update");
     const rows = await tx.update(schema.recoveryRequests).set({ frozenAt: new Date() }).where(and(
       eq(schema.recoveryRequests.userId, targetUserId),

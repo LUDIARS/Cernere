@@ -102,5 +102,6 @@ export async function issueMfaLogin(user: MfaUser, tx: MfaTransaction, authentic
   await tx.update(users).set({ lastLoginAt: now, updatedAt: now }).where(eq(users.id, user.id));
   await tx.insert(refreshSessions).values({ authEpoch: tokens.authEpoch, id: crypto.randomUUID(), userId: user.id,
     refreshToken: hashRefreshToken(tokens.refreshToken), authentication, expiresAt: new Date(now.getTime() + REFRESH_TOKEN_DAYS * 86400_000) });
-  return { ...tokens, userId: user.id, user: { id: user.id, displayName: user.displayName, email: user.email, role: user.role } };
+  const { role, ...issued } = tokens;
+  return { ...issued, userId: user.id, user: { id: user.id, displayName: user.displayName, email: user.email, role } };
 }

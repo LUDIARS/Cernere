@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
   const transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn({ select, update, delete: remove, insert }));
   return { rows, select, update, remove, insert, transaction };
 });
+vi.mock("../../src/federation/effective-role.js", async () => (await import("../federation/unfederated-role.js")).unfederatedRole);
 vi.mock("../../src/db/connection.js", () => ({
   db: { select: mocks.select, transaction: mocks.transaction },
 }));

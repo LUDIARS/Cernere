@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { AppError } from "../error.js";
+import { isEffectiveAdmin, resolveEffectiveRole } from "../federation/effective-role.js";
 import { recordSecurityEvent } from "../notify/security-events.js";
 import { invalidateSelfRecovery } from "./recovery-code.js";
 
@@ -47,7 +48,7 @@ export async function issueRecoveryGrant(opts: RecoveryGrantOptions): Promise<Is
     }
     const target = locked.get(opts.subjectUserId);
     const actor = locked.get(opts.createdByUserId);
-    if (!target || actor?.role !== "admin") throw AppError.forbidden("An active administrator and existing target user are required");
+    if (!target || !actor || await resolveEffectiveRole(actor.id, actor.role, tx) !== "admin") throw AppError.forbidden("An active administrator and existing target user are required");
     const passkeys = await tx.select({ id: schema.passkeys.id }).from(schema.passkeys)
       .where(and(eq(schema.passkeys.userId, target.id), isNull(schema.passkeys.revokedAt)));
     if (ids.some(id => !passkeys.some(key => key.id === id))) throw AppError.badRequest("Recovery scope contains an unavailable passkey");
@@ -89,7 +90,7 @@ export async function completeRecovery(params: {
     const grant = await requireGrant(params.token, tx, params.now ?? new Date());
     const actor = (await tx.select().from(schema.users).where(eq(schema.users.id, grant.createdByUserId as string)).limit(1))[0];
     if (!user || user.id !== grant.subjectUserId || user.id !== params.expectedSubjectUserId || user.authEpoch !== grant.targetAuthEpoch
-      || actor?.role !== "admin" || actor.authEpoch !== grant.issuerAuthEpoch || actor.mfaRevision !== grant.issuerMfaRevision) {
+      || !actor || await resolveEffectiveRole(actor.id, actor.role, tx) !== "admin" || actor.authEpoch !== grant.issuerAuthEpoch || actor.mfaRevision !== grant.issuerMfaRevision) {
       throw AppError.unauthorized("Recovery authorization changed");
     }
     const ids = z.array(z.string().uuid()).max(100).parse(grant.revokePasskeyIds);
@@ -114,8 +115,7 @@ export async function completeRecovery(params: {
 }
 
 export async function revokeGrant(grantId: string, actorUserId: string): Promise<boolean> {
-  const actor = (await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, actorUserId)).limit(1))[0];
-  if (actor?.role !== "admin") throw AppError.forbidden("Administrator required");
+  if (!await isEffectiveAdmin(actorUserId)) throw AppError.forbidden("Administrator required");
   // purpose を絞る。 この経路は account_recovery.revoke 専用なので、
   // bootstrap / create_user / email_enroll の grant まで取り消せてはいけない。
   //

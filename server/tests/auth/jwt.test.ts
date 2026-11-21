@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 vi.mock("../../src/auth/user-session-state.js", () => ({
   currentUserSessionState: async (sub: string) => ({ sub, role: "general", authEpoch: 0, mfaRevision: 0 }),
   assertUserSessionCurrent: vi.fn(async () => {}),
+  issuedRoleMatchesCurrent: async (_sub: string, role: string, effective: string) => role === effective,
 }));
 import {
   generateAccessToken,

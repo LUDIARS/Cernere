@@ -68,6 +68,37 @@ CREATE TABLE IF NOT EXISTS account_federation_events (   -- 監査 (追記のみ
 許可状態 (068): サービスへ入れるかは **主の access_status** で決める。どのアカウントも locked なら、そのアカウントでのログインは拒否。
 主が locked なら連携全体がサービスへ入れない。
 
+### 3.1 Cernere 内の権限 (有効な role) — 2026-11-21 追記
+
+neco の指示 (2026-11-21): 「権限は最初に登録したユーザと同じにしたい」。スマホ (admin) と同じ人が後から連携した PC が
+general のままだった (Cernere 自身のトークン・me 応答・管理画面の判定がアカウント自身の `users.role` を読んでいた)。
+
+- **有効な role** = 連携していれば主 (`account_federations.primary_user_id`) の role、していなければ自分の role。
+  規則は `server/src/federation/role-policy.ts` の `pickEffectiveRole` (純関数)、読み出しは `server/src/federation/effective-role.ts`
+  (`resolveEffectiveRole` / `loadEffectiveRole` / `isEffectiveAdmin`)。
+- 主が active でない (pending / locked)・主の行が無いときは主の role を引き継がず自分の role。主を止めたら連携した他のアカウントの
+  権限も止まる。
+- 自分の `users.role` 列は書き換えない。連携から外れれば自分の role に戻る。主を切り替えれば新しい主の role に従う。
+- 昇格の経路は増やさない。連携に入るのは既存どおり主側の承認 (`federation.approve` の action proof) を通ったものだけ。
+
+有効な role を使う口:
+
+| 口 | 場所 |
+|---|---|
+| Cernere のユーザトークンの `role` claim・セッション照合 | `auth/user-session-state.ts` `currentUserSessionState` (発行・照合・authCode・OIDC が全てここを通る) |
+| ログイン / refresh / 回復 / signup 応答の `user.role` | `generateTokenPair` が返す `role`、passkey の device セッションは `resolveEffectiveRole` |
+| `/api/auth/me`・`user.get` の `role` | `http/auth-handler.ts` / `commands.ts` |
+| system admin の判定 | `commands.ts` `isSystemAdmin` / `requireSystemAdmin`、`http/export-auth.ts`、`http/service-scope-auth.ts`、`http/onsite-kiosk-admin-handler.ts`、`auth/user-access.ts` `requireActiveAdmin`、`auth/registration-grant.ts`、`auth/recovery-request.ts` (凍結の actor) |
+| QR 自己回復を admin に許さない判定 | `auth/recovery-request.ts` (連携して主が admin のアカウントも対象外) |
+
+自分の `users.role` のままにする判定: 最初の管理者の bootstrap (`admin-bootstrap.ts`)、最後の admin を locked にしない保護と
+管理者宛て通知・起動資格情報の宛先 (`users.role = 'admin'` の集合)。
+
+トークンの扱い: `role` claim はセッション照合で今の有効な role と突き合わせるので、連携に入る・外れる・主の role が変わる・
+主を切り替えると既存のアクセストークンは食い違いで失効し、refresh で新しい role のトークンになる (再ログインは不要)。
+発行の呼び出し側はアカウント自身の `users.role` を渡すことがあるため、発行時の照合 (`issuedRoleMatchesCurrent`) は
+有効な role か自分の role のどちらかに一致すれば通す。発行されるトークンの role は常に有効な role。
+
 ## 4. 2 台目の端末のログイン (引き継ぎメニュー)
 
 「パスキーで続ける」(#3070) で利用者が押したログインが取消 / 候補なしで終わったとき、今は /start へ進む。
@@ -132,6 +163,7 @@ PC とスマホのどちらが A でも B でもよい。カメラがある側�
 - 引き継ぎ: トークン 1 回限り・期限切れ・4 桁不一致・承認者のパスキー必須・上限 10・既に連携済みのアカウントは不可
 - 4.2 の警告にサービス利用履歴が出ること
 - 主の切替の expected revision 競合
+- 有効な role (3.1): 主 admin + 後から連携した general → トークン・admin 判定で admin / 未連携は自分の role / 連携解除後は自分の role / 主切替後は新しい主の role / 主が active でなければ引き継がない
 
 ## 8. 実装メモ (2026-10-16)
 

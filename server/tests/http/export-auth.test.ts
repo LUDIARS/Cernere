@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   verifyToken: vi.fn(),
   isCurrentProjectCredential: vi.fn(),
   usersRows: vi.fn<() => Array<Record<string, unknown>>>(),
+  // 有効な role の解決で引く連携の主 (account_federation_members ⋈ account_federations)。
+  membershipRows: vi.fn<() => Array<Record<string, unknown>>>(),
 }));
 
 vi.mock("../../src/auth/jwt.js", () => ({
@@ -24,7 +26,10 @@ vi.mock("../../src/project/project-credential-state.js", () => ({
 vi.mock("../../src/db/connection.js", () => ({
   db: {
     select: () => ({
-      from: () => ({ where: () => ({ limit: (n: number) => Promise.resolve(mocks.usersRows().slice(0, n)) }) }),
+      from: () => ({
+        where: () => ({ limit: (n: number) => Promise.resolve(mocks.usersRows().slice(0, n)) }),
+        innerJoin: () => ({ where: () => ({ limit: (n: number) => Promise.resolve(mocks.membershipRows().slice(0, n)) }) }),
+      }),
     }),
   },
 }));
@@ -39,6 +44,8 @@ describe("requireExportAuth の project token 判定", () => {
     mocks.isCurrentProjectCredential.mockReset();
     mocks.usersRows.mockReset();
     mocks.usersRows.mockReturnValue([]);
+    mocks.membershipRows.mockReset();
+    mocks.membershipRows.mockReturnValue([]);
   });
 
   it("有効な世代で scope を宣言した project token は通る", async () => {
@@ -89,6 +96,24 @@ describe("requireExportAuth の project token 判定", () => {
 
     await expect(requireExportAuth("Bearer t", "passkey:export")).resolves.toEqual({ kind: "admin", subject: "user-1" });
     expect(mocks.isCurrentProjectCredential).not.toHaveBeenCalled();
+  });
+
+  it("連携した general のアカウントは主が admin なら admin として通る (account-federation §3.1)", async () => {
+    mocks.verifyProjectToken.mockImplementation(() => { throw new Error("not a project token"); });
+    mocks.verifyToken.mockResolvedValue({ sub: "pc-account" });
+    // 1 回目: 自分の行 (general)、2 回目: 主の行 (admin・active)。
+    mocks.usersRows.mockReturnValueOnce([{ role: "general" }]).mockReturnValueOnce([{ role: "admin", accessStatus: "active" }]);
+    mocks.membershipRows.mockReturnValue([{ primaryUserId: "phone-account" }]);
+
+    await expect(requireExportAuth("Bearer t", "passkey:export")).resolves.toEqual({ kind: "admin", subject: "pc-account" });
+  });
+
+  it("連携していない general のアカウントは admin 判定で 403", async () => {
+    mocks.verifyProjectToken.mockImplementation(() => { throw new Error("not a project token"); });
+    mocks.verifyToken.mockResolvedValue({ sub: "pc-account" });
+    mocks.usersRows.mockReturnValue([{ role: "general" }]);
+
+    await expect(requireExportAuth("Bearer t", "passkey:export")).rejects.toMatchObject({ statusCode: 403 });
   });
 
   it("scope を宣言していない project token は 403 (どのサービスの token でも台帳を引けないように)", async () => {

@@ -31,6 +31,7 @@ import { securityEventCommand } from "./notify/security-event-command.js";
 import { recoveryCommand } from "./auth/recovery-command.js";
 import { hqTestAccountDeletionEnabled } from "./auth/hq-test-account-deletion.js";
 import { canManageOrg, decideAdd, decideRemove, decideRoleChange, type RoleDecision } from "./org/role-policy.js";
+import { isEffectiveAdmin, resolveEffectiveRole } from "./federation/effective-role.js";
 
 /**
  * Layer 2-3 を要求しないコマンド (主に「現在ログイン中であることを必須としない」もの).
@@ -408,7 +409,7 @@ async function userCmd(userId: string, action: string, p?: Record<string, unknow
       // メールと role は本人と system admin にだけ返す (誰でも作れるアカウントから全員の連絡先を集めさせない)。
       const privileged = targetId === userId || await isSystemAdmin(userId);
       return privileged
-        ? { id: u.id, login: u.login, displayName: u.displayName, avatarUrl: u.avatarUrl, email: u.email, role: u.role }
+        ? { id: u.id, login: u.login, displayName: u.displayName, avatarUrl: u.avatarUrl, email: u.email, role: await resolveEffectiveRole(u.id, u.role) }
         : { id: u.id, login: u.login, displayName: u.displayName, avatarUrl: u.avatarUrl };
     }
     case "search": {
@@ -759,16 +760,13 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/** system admin か。連携していれば主の role で決める (account-federation §3.1)。 */
 async function isSystemAdmin(userId: string): Promise<boolean> {
-  const rows = await db.select({ role: schema.users.role })
-    .from(schema.users).where(eq(schema.users.id, userId)).limit(1);
-  return rows[0]?.role === "admin";
+  return isEffectiveAdmin(userId);
 }
 
 async function requireSystemAdmin(userId: string): Promise<void> {
-  const rows = await db.select({ role: schema.users.role })
-    .from(schema.users).where(eq(schema.users.id, userId)).limit(1);
-  if (rows[0]?.role !== "admin") throw AppError.forbidden("System admin required");
+  if (!await isEffectiveAdmin(userId)) throw AppError.forbidden("System admin required");
 }
 
 

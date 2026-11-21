@@ -16,6 +16,7 @@ import { z } from "zod";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { AppError } from "../error.js";
+import { resolveEffectiveRole } from "../federation/effective-role.js";
 import { recordSecurityEvent, type SecurityEventKind } from "../notify/security-events.js";
 import { accessReviewOrigin, type AccessReviewOrigin } from "./access-review-origin.js";
 import { joinVobOrganizationOnApproval } from "../vob/vob-organization-membership.js";
@@ -125,7 +126,8 @@ export type DecisionInput = z.infer<typeof decisionSchema>;
 async function requireActiveAdmin(actorUserId: string, reader: Reader): Promise<void> {
   const actor = (await reader.select({ role: schema.users.role, status: schema.users.accessStatus }).from(schema.users)
     .where(eq(schema.users.id, actorUserId)).limit(1))[0];
-  if (actor?.role !== "admin" || parseAccessStatus(actor.status) !== "active") {
+  // role は有効な role (連携していれば主の role、account-federation §3.1)。許可状態は自分のもの。
+  if (!actor || await resolveEffectiveRole(actorUserId, actor.role, reader) !== "admin" || parseAccessStatus(actor.status) !== "active") {
     throw AppError.forbidden("An active administrator is required");
   }
 }

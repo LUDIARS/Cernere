@@ -18,6 +18,7 @@ vi.mock("../../src/redis.js", async () => {
   hoisted.redis = new FakeMfaRedis();
   return { redis: new Proxy({}, { get: (_t, key) => (hoisted.redis as unknown as Record<string | symbol, unknown>)[key] }) };
 });
+vi.mock("../../src/federation/effective-role.js", async () => (await import("../federation/unfederated-role.js")).unfederatedRole);
 vi.mock("../../src/db/connection.js", () => ({
   db: {
     select: () => ({ from: () => ({ where: () => ({ limit: async () => [{ mfaRevision: hoisted.user.mfaRevision }] }) }) }),

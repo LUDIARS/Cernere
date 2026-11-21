@@ -7,7 +7,7 @@ import { config } from "../config.js";
 import { AppError } from "../error.js";
 import { devLog } from "../logging/dev-logger.js";
 import { readAuthenticationEvidence, type AuthenticationEvidence } from "../lib/authentication-evidence.js";
-import { assertUserSessionCurrent, currentUserSessionState, type UserSessionState, type SessionReader } from "./user-session-state.js";
+import { assertUserSessionCurrent, currentUserSessionState, issuedRoleMatchesCurrent, type UserSessionState, type SessionReader } from "./user-session-state.js";
 
 // User JWTs have a short lifetime and also check current user/device revocation state.
 // Device refresh retains the original authentication time and absolute expiry.
@@ -47,7 +47,8 @@ export interface ProjectJwtClaims {
 export async function generateAccessToken(userId: string, role: string, authentication?: AuthenticationEvidence,
   context: { deviceId?: string; authEpoch?: number; database?: SessionReader } = {}): Promise<string> {
   const current = await currentUserSessionState(userId, context.database);
-  if (role !== current.role || (context.authEpoch !== undefined && context.authEpoch !== current.authEpoch)) {
+  if ((context.authEpoch !== undefined && context.authEpoch !== current.authEpoch)
+    || !await issuedRoleMatchesCurrent(userId, role, current.role, context.database)) {
     throw AppError.unauthorized("Authentication changed before session issuance");
   }
   const claims = { ...current, deviceId: context.deviceId, authentication: readAuthenticationEvidence(authentication), tokenType: "user_access" };
@@ -60,12 +61,13 @@ export async function generateAccessToken(userId: string, role: string, authenti
 }
 
 export async function generateTokenPair(userId: string, role: string, authentication?: AuthenticationEvidence,
-  context: { authEpoch?: number; deviceId?: string; database?: SessionReader } = {}): Promise<{ accessToken: string; refreshToken: string; authEpoch: number }> {
+  context: { authEpoch?: number; deviceId?: string; database?: SessionReader } = {}): Promise<{ accessToken: string; refreshToken: string; authEpoch: number; role: string }> {
   const current = await currentUserSessionState(userId, context.database);
   const authEpoch = context.authEpoch ?? current.authEpoch;
   const accessToken = await generateAccessToken(userId, role, authentication, { authEpoch, deviceId: context.deviceId, database: context.database });
   const refreshToken = crypto.randomUUID();
-  return { accessToken, refreshToken, authEpoch };
+  // role はトークンに入れた有効な role (連携していれば主の role)。応答の user.role にはこれを使う。
+  return { accessToken, refreshToken, authEpoch, role: current.role };
 }
 
 export function generateToolToken(toolClientId: string, ownerUserId: string, scopes: string[]): string {

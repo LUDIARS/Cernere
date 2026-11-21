@@ -7,6 +7,7 @@ import { config } from "../config.js";
 import { readAuthenticationEvidence, type AuthenticationEvidence } from "../lib/authentication-evidence.js";
 import { loadSessionKeyMaterial } from "./session-keys.js";
 import { parseAccessStatus } from "./user-access.js";
+import { resolveEffectiveRole } from "../federation/effective-role.js";
 
 export interface UserSessionState {
   sub: string;
@@ -26,7 +27,21 @@ export async function currentUserSessionState(userId: string, reader: SessionRea
   if (!user) throw AppError.unauthorized("User session is no longer valid");
   // 停止したアカウントはどの経路のセッションも通さない (許可制 案 A)。pending は本人用操作のため通す。
   if (parseAccessStatus(user.accessStatus) === "locked") throw AppError.unauthorized("This account is locked");
-  return { sub: user.sub, role: user.role, authEpoch: user.authEpoch, mfaRevision: user.mfaRevision };
+  // role は有効な role (連携していれば主の role、account-federation §3.1)。主の role が変わる・
+  // 連携に入る / 外れると既存トークンの role と食い違い、再発行 (refresh) を求める。
+  const role = await resolveEffectiveRole(user.sub, user.role, reader);
+  return { sub: user.sub, role, authEpoch: user.authEpoch, mfaRevision: user.mfaRevision };
+}
+
+/**
+ * トークン発行の呼び出し側が渡した role が今の状態と合っているか。
+ * 呼び出し側はアカウント自身の users.role を読んで渡すことが多いので、有効な role か
+ * アカウント自身の role のどちらかに一致すれば合っているとみなす (発行される role は常に有効な role)。
+ */
+export async function issuedRoleMatchesCurrent(userId: string, role: string, effectiveRole: string, reader: SessionReader = db): Promise<boolean> {
+  if (role === effectiveRole) return true;
+  const own = (await reader.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1))[0];
+  return own !== undefined && own.role === role;
 }
 
 export async function assertUserSessionCurrent(claims: UserSessionState, reader: SessionReader = db): Promise<void> {

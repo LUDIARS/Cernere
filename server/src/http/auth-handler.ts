@@ -29,6 +29,7 @@ import { AppError } from "../error.js";
 import { rateLimitSubject } from "./rate-limit-subject.js";
 import { beforeCredentialCheck, recordCredentialFailure } from "../auth/credential-rate-limit.js";
 import { loadServiceIdentity, requireServiceAccess } from "../federation/subject.js";
+import { resolveEffectiveRole } from "../federation/effective-role.js";
 import { retiredLoginResult } from "../auth/retired-login.js";
 import { removeAlertTarget } from "../notify/alert-targets.js";
 import { actionProofStore, httpActionBinding } from "../auth/action-proof.js";
@@ -263,7 +264,8 @@ async function me(authHeader: string): Promise<RouteResult> {
   return {
     status: "200 OK",
     data: {
-      id: u.id, name: u.displayName, email: u.email, role: u.role,
+      // role は有効な role (連携していれば主の role、account-federation §3.1)。
+      id: u.id, name: u.displayName, email: u.email, role: await resolveEffectiveRole(u.id, u.role),
       hasGoogleAuth: !!u.googleId, hasGitHubAuth: !!u.githubId,
       hasDiscordAuth: !!u.discordId, discordUsername: u.discordUsername ?? null,
       hasPassword: !!u.passwordHash,

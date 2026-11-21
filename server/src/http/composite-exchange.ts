@@ -56,10 +56,10 @@ export async function exchangeSelfCode(input: Record<string, unknown>, origin?: 
   await assertUserSessionCurrent(record.subject);
   const user = (await db.select().from(schema.users).where(eq(schema.users.id, record.subject.sub)).limit(1))[0];
   if (!user) throw invalidCode();
-  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(user.id, user.role ?? "general", record.subject.authentication,
+  const { accessToken, refreshToken, authEpoch, role } = await generateTokenPair(user.id, user.role ?? "general", record.subject.authentication,
     { authEpoch: record.subject.authEpoch, deviceId: record.subject.deviceId });
   await db.insert(schema.refreshSessions).values({ id: crypto.randomUUID(), userId: user.id, authEpoch,
     refreshToken: hashRefreshToken(refreshToken), authentication: record.subject.authentication, deviceId: record.subject.deviceId,
     expiresAt: new Date(Date.now() + REFRESH_TOKEN_DAYS * 86_400_000) });
-  return { status: "200 OK", data: { accessToken, refreshToken, user: { id: user.id, displayName: user.displayName, email: user.email, role: user.role } } };
+  return { status: "200 OK", data: { accessToken, refreshToken, user: { id: user.id, displayName: user.displayName, email: user.email, role } } };
 }

@@ -7,7 +7,7 @@
  *
  * 受理するのは次のいずれか:
  *   1. tool_clients で active かつ要求 scope を持つ tool token
- *   2. users.role === 'admin' の user access token (運用者の手動確認)
+ *   2. 有効な role が admin の user access token (運用者の手動確認。連携していれば主の role)
  *
  * project token は tool_client の owner / scope を持たないため **拒否する**。
  * 写真は個人データそのもので、既存の service token に暗黙で権限が付くのを避ける。
@@ -18,6 +18,7 @@ import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
 import { extractBearerToken, verifyToken, verifyToolToken, verifyProjectToken, type ToolJwtClaims } from "../auth/jwt.js";
 import { AppError } from "../error.js";
+import { isEffectiveAdmin } from "../federation/effective-role.js";
 
 export interface ServiceScopePrincipal {
   kind: "tool" | "admin";
@@ -56,9 +57,8 @@ export async function requireServiceScope(authHeader: string, scope: string): Pr
     throw AppError.forbidden(`Scope ${scope} is required`);
   }
 
-  const rows = await db.select({ role: schema.users.role })
-    .from(schema.users).where(eq(schema.users.id, claims.sub)).limit(1);
-  if (rows[0]?.role === "admin") {
+  // 連携していれば主の role で決める (account-federation §3.1)。
+  if (await isEffectiveAdmin(claims.sub)) {
     return { kind: "admin", subject: claims.sub, actorUserId: claims.sub };
   }
 

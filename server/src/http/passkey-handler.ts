@@ -80,6 +80,7 @@ import { rateLimitSubject, wideRateLimitSubject } from "./rate-limit-subject.js"
 import { publicPasskeyCompositeError } from "../auth/passkey-public-error.js";
 import { AppError } from "../error.js";
 import { requireServiceAccess } from "../federation/subject.js";
+import { resolveEffectiveRole } from "../federation/effective-role.js";
 import { summarizeUserAgent } from "../lib/user-agent-summary.js";
 import { recordSecurityEvent } from "../notify/security-events.js";
 import { applyVenueSignup, precheckVenueSignup } from "../auth/venue-registration-signup.js";
@@ -499,7 +500,7 @@ async function signupFinish(p: Record<string, unknown>, ctx: RequestCtx): Promis
 
 function signupResponse(
   account: SignedUpAccount,
-  tokens: { accessToken: string; refreshToken: string } | null,
+  tokens: { accessToken: string; refreshToken: string; role: string } | null,
   /** 引き継ぎで作ったときの名前 (主の名前)。通常の signup は null */
   federatedName: string | null,
 ): RouteResult {
@@ -513,7 +514,8 @@ function signupResponse(
         id: account.userId,
         displayName: federatedName || null,
         email: null,
-        role: account.role,
+        // 引き継ぎで連携に入ったアカウントは主の role (account-federation §3.1)。
+        role: tokens.role,
         // 引き継ぎで作ったアカウントは主の名前を使うので名前入力へ送らない (§4.1-5)。
         needsProfile: !federated,
         federated,
@@ -800,12 +802,13 @@ async function loginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise
     assertDeviceOrigin(ctx.origin ?? "");
     const issued = await issueDeviceCredential({ userId: user.id, rootPasskeyId: passkeyId, clientKind: "browser", authentication, authEpoch: user.authEpoch });
     const accessToken = await generateAccessToken(user.id, user.role, authentication, { deviceId: issued.deviceId, authEpoch: user.authEpoch });
+    const role = await resolveEffectiveRole(user.id, user.role);
     return { status: "200 OK", cookies: [buildDeviceCookie(issued.token, ctx.hostname, issued.expiresAt)], data: {
-      user: { id: user.id, login: user.login, displayName: user.displayName, email: user.email, role: user.role, avatarUrl: user.avatarUrl },
+      user: { id: user.id, login: user.login, displayName: user.displayName, email: user.email, role, avatarUrl: user.avatarUrl },
       accessToken, refreshToken: "", deviceSession: true,
     } };
   }
-  const { accessToken, refreshToken, authEpoch } = await generateTokenPair(user.id, user.role, authentication, { authEpoch: user.authEpoch });
+  const { accessToken, refreshToken, authEpoch, role } = await generateTokenPair(user.id, user.role, authentication, { authEpoch: user.authEpoch });
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(schema.refreshSessions).values({
     authEpoch, id: crypto.randomUUID(), userId: user.id, refreshToken: hashRefreshToken(refreshToken), expiresAt, authentication,
@@ -820,7 +823,7 @@ async function loginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise
         login: user.login,
         displayName: user.displayName,
         email: user.email,
-        role: user.role,
+        role,
         avatarUrl: user.avatarUrl,
       },
       accessToken,

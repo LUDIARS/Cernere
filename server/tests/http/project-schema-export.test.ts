@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 vi.mock("../../src/auth/user-session-state.js", () => ({
   currentUserSessionState: async (sub: string) => ({ sub, role: sub === "admin-1" ? "admin" : "general", authEpoch: 0, mfaRevision: 0 }),
   assertUserSessionCurrent: async () => {},
+  issuedRoleMatchesCurrent: async (_sub: string, role: string, effective: string) => role === effective,
 }));
 import type { ProjectDefinition } from "../../src/project/schema.js";
 
@@ -45,6 +46,8 @@ vi.mock("../../src/db/connection.js", async () => {
           }
           return {
             where: () => ({ limit: (_n: number) => Promise.resolve(mockUsersRows().slice(0, _n)) }),
+            // 有効な role の解決 (連携の主を引く join)。ここでは誰も連携していない。
+            innerJoin: () => ({ where: () => ({ limit: () => Promise.resolve([]) }) }),
           };
         },
       }),
