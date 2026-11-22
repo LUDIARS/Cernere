@@ -320,6 +320,9 @@ binding はサービスでは `client_id, target, targetMode, state, code_challe
 - 経路A の未認証 ceremony は、認証済み project WS に bind された `projectKey` 単位で
   レート制限する。サービスが payload で申告する接続元 IP は詐称可能なので受け付けない。
 - **origin / RP ID**: サービス origin は管理者所有の project `composite_origins` に登録する。
+  登録は管理画面 `/admin/services` のサービス詳細「ログインの戻り先」欄 (composite_origins と hub_url) で行う。
+  同じ画面の「サービスの鍵」欄で client_secret を作り直せる (新しい鍵は 1 回だけ表示し、Excubitor の Vault に
+  `<KEY>_CERNERE_CLIENT_ID` / `<KEY>_CERNERE_CLIENT_SECRET` として貼る)。
   expectedOrigin は challenge に束縛した対象サービスか hosted Cr の origin に限定する。
   global/self、signup、credential 登録は Cr 自身の署名 origin だけを受け付ける。
   service iframe の署名済 topOrigin も対象サービスと一致させる。`WEBAUTHN_RP_ID` は対象 origin の registrable suffix

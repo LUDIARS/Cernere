@@ -6,6 +6,8 @@ import {
   ManagedSchemaSharingEditor,
   type ManagedSchemaDefinition,
 } from "../components/ManagedSchemaSharingEditor";
+import { ProjectLoginSettingsPanel } from "./services/ProjectLoginSettingsPanel";
+import { ProjectSecretRotationPanel } from "./services/ProjectSecretRotationPanel";
 
 interface ManagedProject {
   key: string;
@@ -500,6 +502,22 @@ export function DashboardPage() {
                   isMobile={isMobile}
                   projects={projects}
                   onSave={handleSharingUpdate}
+                />
+              )}
+
+              {isAdmin && selected.isActive && (
+                <ProjectLoginSettingsPanel
+                  definition={selected.schemaDefinition as unknown as Record<string, unknown>}
+                  onSave={(definition) => handleSharingUpdate(definition as unknown as ManagedSchemaDefinition)}
+                />
+              )}
+
+              {isAdmin && selected.isActive && (
+                <ProjectSecretRotationPanel
+                  projectKey={selected.key}
+                  onRotate={() => wsClient.sendCommand<{ clientId: string; clientSecret: string }>(
+                    "managed_project", "rotate_secret", { key: selected.key },
+                  )}
                 />
               )}
 
