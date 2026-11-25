@@ -507,3 +507,13 @@ rejected because they cannot prove the provider-specific action target.
 rejected with HTTP 409 when it would remove the last password, passkey, or other
 OAuth login method. Discord can always be unlinked because it is not a login
 method.
+
+### 登録したブラウザーからの Composite ログイン
+
+`CERNERE_DEVICE_SESSIONS_ENABLED` が有効で、Cernere が利用者の接続元 IP を判断できる配備で利用できる。信頼済みプロキシからの要求は、有効な転送元 IP が必要。migration 084 の適用後に有効化する。
+
+利用者が端末登録を選ぶと、Cernere origin で ECDSA P-256 鍵を生成する。ブラウザーは取り出し不可の秘密鍵を IndexedDB に保存する。サービス向けパスキー認証の開始と完了で同じ公開鍵と PKCE 要求を照合し、本人確認とサービスへの同意が済んだ後、サーバーは device_credentials に端末 ID・公開鍵・プロジェクト・接続元 IP の鍵付きハッシュを保存する。サービスには端末の秘密鍵を渡さない。初回同意画面に遷移した場合は、同意後のログインで端末登録を行う。
+
+登録端末でのログインは、同じプロジェクト・接続元 IP について、60 秒有効のランダムチャレンジを一回だけ消費し、登録鍵の署名を確認する。認可先、state、PKCE もこの要求に束縛する。認証時刻と MFA の根拠は元のパスキー本人確認から引き継ぐ。端末・元のパスキーの失効、資格変更、利用停止は通常の端末セッションと同じ検証を通る。端末の期限は既存の30日で、管理画面の端末セッションから失効できる。
+
+識別単位は登録したブラウザープロファイル。Windows のハードウェア構成や TPM をリモート認証する方式ではない。保存領域を消した場合や、接続元 IP が変わった場合は、パスキーでログインして再登録する。

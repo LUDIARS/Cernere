@@ -38,8 +38,9 @@ export function resolveClientIp(
   peer: string | undefined,
   cfConnectingIp: string | undefined,
   trustedProxies: ReadonlySet<string>,
+  requireForwardedIp = false,
 ): string | undefined {
   const peerIp = normalizeIp(peer);
   if (!peerIp || !trustedProxies.has(peerIp)) return peerIp;
-  return normalizeIp(cfConnectingIp) ?? peerIp;
+  return normalizeIp(cfConnectingIp) ?? (requireForwardedIp ? undefined : peerIp);
 }

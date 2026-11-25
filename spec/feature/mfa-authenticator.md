@@ -119,6 +119,18 @@ Ostiarius からの自己登録はしない。運用者が Ostiarius の `GET /g
 
 ### challenge と受け渡し
 
+GLab-Client の Composite ログインでは、Windows に有効な Cernere セッションがあり、
+対象プロジェクト `glab` の管理者が `onsite_mfa.required=true` を設定したときに、
+会場の Os で現在のアカウントの本人確認を行える。利用者が会場端末を選ぶと、
+Cernere の画面から登録済み HTTPS LAN URL に nonce だけを送る。kiosk は本人を
+確認して `purpose=mfa` の証明を Cernere に提出する。GLab には既存の同意画面と
+PKCE 交換を通じて認可コードを渡す。コードの発行前にユーザー、セッション、client、
+送信先・送信方法、state、PKCE challenge、管理者が定めた保証水準と会場制限を照合する。
+
+この経路は既存セッションの本人を確認する。未知の端末が Os だけを使って最初の
+ログインを行うには、kiosk で依頼元端末・GLab ログインの目的を本人に示し、
+その要求への承認を署名で確認できる追加契約が必要となる。
+
 challenge は SPEC-MFA-CHALLENGE の ticket (`mfaToken`) をそのまま使う。ticket に onsite 要求と
 発行時の `mfa_revision` を記録する。QR は使わず、利用者端末と kiosk の LAN 内通信で nonce を渡す。
 

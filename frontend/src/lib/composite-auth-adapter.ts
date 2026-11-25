@@ -14,6 +14,7 @@ import type {
   PasskeyLoginBeginResult,
 } from "@ludiars/cernere-composite/ui";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/browser";
+import { createDeviceCandidate, deviceRegistration, signDeviceChallenge, type DeviceCandidate } from "./composite-device-key";
 import { auth } from "./api";
 import { isMobileDevice } from "./device-kind";
 import { passkeyEnrollmentUrl, shouldOfferPcEnrollment } from "./passkey-enrollment";
@@ -41,6 +42,7 @@ export class CernereCompositeAuthAdapter implements CompositeAuthApi {
   private selfPkce: Promise<PkceRequest> | undefined;
   private pendingLogin: { owner: string; request: Record<string, unknown> } | undefined;
   private beginning = false;
+  private candidate?: DeviceCandidate;
   private readonly lifetime = new AbortController();
   private selfRequest(): Promise<PkceRequest> { return this.selfPkce ??= createPkceRequest(); }
 
@@ -60,6 +62,7 @@ export class CernereCompositeAuthAdapter implements CompositeAuthApi {
     private readonly crossDevice: boolean = false,
     /** Original local destination, resumed through the normal consent/target checks after enrollment. */
     private readonly enrollmentReturnTo: string | null = null,
+    private readonly rememberDevice = false,
   ) {}
 
   async passkeyLoginBegin(): Promise<PasskeyLoginBeginResult> {
@@ -70,8 +73,11 @@ export class CernereCompositeAuthAdapter implements CompositeAuthApi {
     try {
       const serviceRequest = readCompositeLoginRequest(window.location.search);
       if (this.target && !serviceRequest) throw new Error("client_id, S256 code_challenge and state are required");
+      this.candidate = this.rememberDevice && this.target && !serviceRequest?.code_audience
+        ? await createDeviceCandidate() : undefined;
       const request = this.target
-        ? { ...serviceRequest, target: this.target, targetMode: this.targetMode }
+        ? { ...serviceRequest, target: this.target, targetMode: this.targetMode,
+          ...(this.candidate ? { devicePublicKey: this.candidate.publicKey } : {}) }
         : { code_challenge: (await this.selfRequest()).codeChallenge };
       const begin = await postJson<PasskeyLoginBeginResult>(`${this.apiBase}/api/auth/passkey/composite-login-begin`, request, "Passkey login start failed", this.lifetime.signal);
       this.lifetime.signal.throwIfAborted();
@@ -94,9 +100,14 @@ export class CernereCompositeAuthAdapter implements CompositeAuthApi {
       window.location.assign(`/login?${new URLSearchParams({ redirect: passkeyEnrollmentUrl(this.enrollmentReturnTo) })}`);
       return new Promise<CompositeAuthResponse>(() => { /* Navigation starts a separate self ceremony. */ });
     }
-    const data = await postJson<{ authCode?: string }>(
+    const data = await postJson<{ authCode?: string; deviceId?: string }>(
       `${this.apiBase}/api/auth/passkey/composite-login-finish`,
       { ...pending.request, ...params }, "Passkey login failed", this.lifetime.signal);
+    if (this.candidate && typeof pending.request.client_id === "string") {
+      if (!data.deviceId) throw new Error("端末を登録できませんでした");
+      await deviceRegistration(pending.request.client_id, { deviceId: data.deviceId, key: this.candidate.key });
+      this.candidate = undefined;
+    }
     if (!data.authCode) throw new Error("Passkey login failed");
     if (offerEnrollment && this.enrollmentReturnTo !== null) {
       // Obtain only a Cernere session here. Service consent and authorization still run on return.
@@ -105,6 +116,20 @@ export class CernereCompositeAuthAdapter implements CompositeAuthApi {
       return new Promise<CompositeAuthResponse>(() => { /* Navigation replaces this page; do not deliver a consumed code. */ });
     }
     return { authCode: data.authCode };
+  }
+
+  async registeredDeviceCode(): Promise<string> {
+    const service = readCompositeLoginRequest(window.location.search);
+    if (!service || service.code_audience || !this.target) throw new Error("サービスのログイン要求が必要です");
+    const registered = await deviceRegistration(service.client_id);
+    if (!registered) throw new Error("このブラウザーはまだ登録されていません。パスキーで登録してください。");
+    const request = { ...service, deviceId: registered.deviceId, target: this.target, targetMode: this.targetMode };
+    const base = this.apiBase + "/api/auth/passkey/device-proof-";
+    const { challenge } = await postJson<{ challenge: string }>(base + "begin", request, "端末を確認できません", this.lifetime.signal);
+    const signature = await signDeviceChallenge(registered, challenge);
+    const result = await postJson<{ authCode: string }>(base + "finish", { ...request, challenge, signature },
+      "端末を確認できません。パスキーでログインしてください。", this.lifetime.signal);
+    return result.authCode;
   }
 
   dispose(): void { this.pendingLogin = undefined; this.lifetime.abort(); }

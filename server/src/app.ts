@@ -88,14 +88,14 @@ export interface WsUserData {
 
 /** 接続元 IP。 信頼するプロキシ経由のときだけ CF-Connecting-IP を採る (http/client-ip.ts)。
  *  uWS の req は await の前にしか読めないので、 ハンドラの先頭で呼ぶこと。 */
-function getRemoteIp(res: uWS.HttpResponse, req: uWS.HttpRequest): string | undefined {
+function getRemoteIp(res: uWS.HttpResponse, req: uWS.HttpRequest, requireForwardedIp = false): string | undefined {
   let peer: string | undefined;
   try {
     peer = Buffer.from(res.getRemoteAddressAsText()).toString() || undefined;
   } catch {
     peer = undefined;
   }
-  return resolveClientIp(peer, req.getHeader("cf-connecting-ip") || undefined, config.trustedProxies);
+  return resolveClientIp(peer, req.getHeader("cf-connecting-ip") || undefined, config.trustedProxies, requireForwardedIp);
 }
 
 /**
@@ -660,6 +660,7 @@ export function createApp() {
     const origin = req.getHeader("origin") ?? "";
     const host = req.getHeader("host") ?? "";
     const ip = getRemoteIp(res, req);
+    const deviceIp = getRemoteIp(res, req, true);
     let aborted = false;
 
     devLog("http.passkey.begin", { action, ip, userAgent });
@@ -667,7 +668,7 @@ export function createApp() {
       const body = await readBody(res, DEFAULT_MAX_BODY_BYTES, () => { aborted = true; });
       if (aborted) return;
       const hostname = requestHostname(host);
-      const result = await handlePasskeyRoute(action, body, authHeader, { ip, userAgent, hostname, origin }, "", actionProof);
+      const result = await handlePasskeyRoute(action, body, authHeader, { ip, userAgent, hostname, origin, deviceIp }, "", actionProof);
       devLog("http.passkey.ok", { action, status: result.status });
       // 端末追加の QR URL やリカバリーコードなど、一度きりの秘密を返す応答がある。
       jsonResponse(res, result.status, result.data, result.cookies, NO_STORE_HEADERS);
@@ -874,12 +875,14 @@ export function createApp() {
   // フロント (CompositeLoginPage / CompositeCallbackPage) が authCode の送信先
   // (postMessage origin / redirect_uri) を forward 前に検証するための許可リスト。
   // 権威はサーバ側 config。 許可リストは秘密ではないため認証不要・キャッシュ可。
-  app.get("/api/auth/composite/allowed-origins", async (res) => {
+  app.get("/api/auth/composite/allowed-origins", async (res, req) => {
+    const deviceIp = getRemoteIp(res, req, true);
+    const deviceProof = config.deviceSessionsEnabled && !!deviceIp && deviceIp !== "::1" && !deviceIp.startsWith("127.");
     let aborted = false;
     res.onAborted(() => { aborted = true; });
     try {
       const origins = await compositeAllowedOrigins();
-      if (!aborted) jsonResponse(res, "200 OK", { origins }, [], NO_STORE_HEADERS);
+      if (!aborted) jsonResponse(res, "200 OK", { origins, deviceProof }, [], NO_STORE_HEADERS);
     } catch {
       if (!aborted) jsonResponse(res, "503 Service Unavailable", { error: "Composite policy unavailable" }, [], NO_STORE_HEADERS);
     }

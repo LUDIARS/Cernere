@@ -9,6 +9,7 @@ import { AppError } from "../error.js";
 import { limitMfa } from "../auth/mfa-records.js";
 import { handleOnsiteKioskAdmin } from "./onsite-kiosk-admin-handler.js";
 import { handleOnsiteAttestation } from "./onsite-attestation-handler.js";
+import { compositeOnsite } from "./composite-onsite.js";
 
 interface HttpHelpers {
   readBody(res: uWS.HttpResponse, maxBytes: number, onAborted: () => void): Promise<string>;
@@ -58,4 +59,7 @@ export function registerOnsiteRoutes(app: uWS.TemplatedApp, http: HttpHelpers): 
   app.post("/api/admin/onsite-kiosks/:lanId/revoke",
     endpoint((auth, _body, lanId) => handleOnsiteKioskAdmin("revoke", auth, {}, decodeParameter(lanId)), true, 1024));
   app.post("/api/mfa/onsite/attestations", endpoint((auth, body) => handleOnsiteAttestation(auth, body), true, 8192));
+  for (const action of ["available", "begin", "finish"] as const) {
+    app.post(`/api/auth/composite-onsite/${action}`, endpoint((auth, body) => compositeOnsite(action, auth, body), true, 4096));
+  }
 }

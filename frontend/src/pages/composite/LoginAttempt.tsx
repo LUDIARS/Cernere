@@ -10,6 +10,7 @@ export function LoginAttempt({ self, choice, onBusy }: { self: boolean; choice: 
   const [delivering, setDelivering] = useState(false);
   const session = useCompositeLoginSession({ self, origin: self ? null : params.get("origin"),
     redirectUri: self ? null : params.get("redirect_uri"), redirectParam: params.get("redirect"), apiBase: "",
+    rememberDevice: choice.rememberDevice, registeredDevice: choice.registeredDevice,
     crossDevice: choice.crossDevice, enrollAfterLogin: params.get("device_add_skipped") !== "1" });
   const passkey = usePasskeyLogin({ api: session.adapter, autoStartReady: session.passkeyAutoReady,
     onResponse: response => {

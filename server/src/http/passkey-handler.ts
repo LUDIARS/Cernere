@@ -44,6 +44,7 @@ import { z } from "zod";
 import { config } from "../config.js";
 import { db } from "../db/connection.js";
 import * as schema from "../db/schema.js";
+import { compositeDeviceProof, readDevicePublicKey, trustedDeviceContext } from "../auth/composite-device-proof.js";
 import { redis, checkRateLimit } from "../redis.js";
 import { generateAccessToken, generateTokenPair, verifyToken, REFRESH_TOKEN_DAYS } from "../auth/jwt.js";
 import { completedAuthentication } from "../lib/authentication-evidence.js";
@@ -101,6 +102,7 @@ import {
 
 interface RouteResult { status: string; data: unknown; cookies?: string[] }
 export interface RequestCtx {
+  deviceIp?: string;
   ip?: string;
   userAgent?: string;
   hostname?: string;
@@ -180,6 +182,19 @@ export async function handlePasskeyRoute(
      * JWT を直接返さず authCode (= Redis 1-shot ticket) を発行する。 親サービスは
      * postMessage で受け取り、 自分の backend 経由で /api/auth/exchange して
      * service_token を得る。 */
+    case "device-proof-begin":
+    case "device-proof-finish": {
+      const p = parseBody(body);
+      const binding = await resolveAuthCodeBinding(p, ctx);
+      if (binding.audience !== "service") throw AppError.badRequest("Service request required");
+      try {
+        const data = await compositeDeviceProof(action === "device-proof-begin" ? "begin" : "finish", p, ctx, binding);
+        return { status: "200 OK", data };
+      } catch (error) {
+        if (error instanceof ConsentRequiredError) return { status: "403 Forbidden", data: consentRequiredBody(error) };
+        throw error;
+      }
+    }
     case "composite-login-finish": return compositeLoginFinish(parseBody(body), ctx);
     /* 埋め込み SDK からのパスキー新規登録。 signup-finish と同じ検証・作成を行うが
      * JWT ではなく authCode を返し、 呼び出し元サービスが exchange で受け取る。 */
@@ -667,6 +682,7 @@ async function compositeLoginIntent(p: Record<string, unknown>, ctx: RequestCtx,
     : assertionOrigins(destination.audience, { origin: new URL(target).origin, ceremonyOrigin: ctx.origin });
   return {
     binding: destination, expectedOrigins,
+    ...(p.devicePublicKey !== undefined ? { devicePublicKey: readDevicePublicKey(p.devicePublicKey) } : {}),
     embeddingOrigins: destination.audience === "cernere" ? null : [new URL(target).origin],
     request: { target, targetMode: p.targetMode === "redirect" ? "redirect" : "post_message",
       state: typeof p.state === "string" ? p.state : "", codeChallenge: String(p.code_challenge) },
@@ -674,7 +690,9 @@ async function compositeLoginIntent(p: Record<string, unknown>, ctx: RequestCtx,
 }
 
 async function compositeLoginBegin(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
-  return loginBegin(p, ctx, await compositeLoginIntent(p, ctx));
+  const intent = await compositeLoginIntent(p, ctx);
+  if (intent.devicePublicKey && intent.binding) trustedDeviceContext(ctx, intent.binding);
+  return loginBegin(p, ctx, intent);
 }
 
 async function loginBegin(p: Record<string, unknown>, ctx: RequestCtx, intent: PasskeyLoginIntent = selfLoginIntent()): Promise<RouteResult> {
@@ -837,7 +855,10 @@ async function loginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise
  *  経由で実トークンに交換する。 */
 async function compositeLoginFinish(p: Record<string, unknown>, ctx: RequestCtx): Promise<RouteResult> {
   const binding = await resolveAuthCodeBinding(p, ctx);
-  const { user, verifiedAt } = await verifyPasskeyAssertion(p, ctx, await compositeLoginIntent(p, ctx, binding));
+  const intent = await compositeLoginIntent(p, ctx, binding);
+  const registration = intent.devicePublicKey
+    ? { ...trustedDeviceContext(ctx, binding), publicKey: intent.devicePublicKey } : null;
+  const { user, verifiedAt, passkeyId } = await verifyPasskeyAssertion(p, ctx, intent);
   // 送り先 (popup / redirect の target) があるか、サービス経由 (project WS) なら、authCode はサービスへ渡る。
   // 送り先の無い REST は Cernere 自身の /login (許可待ちでも入れる。交換は Cernere の画面からだけ)。
   const audience = binding.audience;
@@ -865,8 +886,12 @@ async function compositeLoginFinish(p: Record<string, unknown>, ctx: RequestCtx)
     throw error;
   }
   await ensureProjectRowForComposite(user.id, ctx);
+  const device = registration ? await issueDeviceCredential({
+    userId: user.id, rootPasskeyId: passkeyId, clientKind: "browser", authEpoch: user.authEpoch,
+    authentication: completedAuthentication("passkey", user.mfaRevision, verifiedAt), proof: registration,
+  }) : null;
   logUserLogin(user.id, user.email ?? user.login, "passkey-composite", { ip: ctx.ip });
-  return { status: "200 OK", data: { authCode } };
+  return { status: "200 OK", data: { authCode, ...(device ? { deviceId: device.deviceId } : {}) } };
 }
 
 /**

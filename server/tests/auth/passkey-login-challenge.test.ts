@@ -14,6 +14,14 @@ const serviceBinding = { audience: "service" as const, projectKey: "a", origin: 
 const serviceRequest = { target: "https://a.example", targetMode: "post_message", state: "state", codeChallenge: "c".repeat(43) };
 const service: PasskeyLoginIntent = { binding: serviceBinding, expectedOrigins: ["https://a.example"], embeddingOrigins: ["https://a.example"], request: serviceRequest };
 describe("one-use challenge purpose and destination binding", () => {
+  it("binds device enrollment and the exact public key to the signed ceremony", async () => {
+    const { store } = fixture();
+    const enrollment = { ...service, devicePublicKey: "registered-key" };
+    for (const changed of [service, { ...enrollment, devicePublicKey: "another-key" }]) {
+      await store.issue("owner", "challenge", enrollment);
+      await expect(store.consume("owner", changed)).rejects.toThrow("purpose or destination");
+    }
+  });
   it("keeps ordinary global login and matching Composite completion", async () => {
     const { store } = fixture();
     for (const intent of [global, service]) {

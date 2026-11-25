@@ -298,6 +298,9 @@ export const accessDecisions = pgTable("access_decisions", {
 });
 
 export const deviceCredentials = pgTable("device_credentials", {
+  proofPublicKey: text("proof_public_key"),
+  proofProject: text("proof_project"),
+  proofIpTag: text("proof_ip_tag"),
   /** この id が stable な device_id になる。 */
   id: uuid("id").primaryKey(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),

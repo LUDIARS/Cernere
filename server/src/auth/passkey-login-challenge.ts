@@ -5,6 +5,7 @@ import type { AuthCodeBinding } from "./auth-code-store.js";
 
 export interface PasskeyLoginIntent {
   binding: AuthCodeBinding | null;
+  devicePublicKey?: string;
   expectedOrigins: string[];
   /** Service frames must be embedded by the same destination, never another project. */
   embeddingOrigins: string[] | null;

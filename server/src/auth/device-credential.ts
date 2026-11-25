@@ -100,6 +100,7 @@ export async function issueDeviceCredential(params: {
   authentication: AuthenticationEvidence;
   authEpoch: number;
   clientKind: DeviceClientKind;
+  proof?: { publicKey: string; project: string; ipTag: string };
   now?: Date;
 }): Promise<IssuedDeviceCredential> {
   const { material, rotation } = keys();
@@ -118,6 +119,9 @@ export async function issueDeviceCredential(params: {
     userId: params.userId,
     rootPasskeyId: params.rootPasskeyId,
     clientKind: params.clientKind,
+    proofPublicKey: params.proof?.publicKey,
+    proofProject: params.proof?.project,
+    proofIpTag: params.proof?.ipTag,
     tokenKeyId: material.keyId,
     authentication,
     authEpoch: user.authEpoch,

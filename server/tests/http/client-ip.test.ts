@@ -32,3 +32,11 @@ describe('client IP', () => {
     expect(() => readTrustedProxies({ CERNERE_TRUSTED_PROXIES: '127.0.0.1,' })).toThrow(/CERNERE_TRUSTED_PROXIES/);
   });
 });
+
+it("requires a real forwarded client IP for a registered-device decision behind a trusted proxy", () => {
+  const trusted = new Set(["127.0.0.1"]);
+  expect(resolveClientIp("127.0.0.1", undefined, trusted, true)).toBeUndefined();
+  expect(resolveClientIp("127.0.0.1", "invalid", trusted, true)).toBeUndefined();
+  expect(resolveClientIp("127.0.0.1", "192.0.2.12", trusted, true)).toBe("192.0.2.12");
+  expect(resolveClientIp("192.0.2.13", "192.0.2.12", trusted, true)).toBe("192.0.2.13");
+});
